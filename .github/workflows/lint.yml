@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout papimela
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # rawpaco は公開リポジトリなのでトークン不要。
       #
@@ -21,7 +21,7 @@ jobs:
       # papimela にも即座に効かせたいため。逆に「rawpaco の更新で突然 CI が
       # 赤くなる」のを避けたい場合は、ref をコミット SHA に差し替える。
       - name: Checkout rawpaco
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: tankoha/rawpaco
           ref: main
