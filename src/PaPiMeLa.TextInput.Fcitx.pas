@@ -45,6 +45,8 @@ uses
   PaPiMeLa.Types,
   PaPiMeLa.Errors,
   PaPiMeLa.Unicode,
+  PaPiMeLa.Core.Base,
+  PaPiMeLa.Events,
   PaPiMeLa.Platform.DBus,
   PaPiMeLa.TextInput,
   PaPiMeLa.TextInput.Backend;
@@ -80,7 +82,7 @@ type
     procedure ResetComposition; override;
     procedure UpdateSurroundingText(const AText: String; ACursorByte, AAnchorByte: Integer); override;
     procedure UpdateCursorRect(const ARect: TPMLRect; AScale: Double); override;
-    function  FilterKey(const AKey: TPMLKeyEventData): TPMLKeyFilterResult; override;
+    function  FilterKey(const AKey: TPMLKeyEventData; AIsRelease: Boolean): TPMLKeyFilterResult; override;
     procedure Pump(ATimeoutMs: Integer); override;
   end;
 
@@ -360,7 +362,7 @@ begin
   if TPMLKeyModifier.Super    in AMods then Result := Result or X_SUPER;
 end;
 
-function TPMLFcitxTextInputBackend.FilterKey(const AKey: TPMLKeyEventData): TPMLKeyFilterResult;
+function TPMLFcitxTextInputBackend.FilterKey(const AKey: TPMLKeyEventData; AIsRelease: Boolean): TPMLKeyFilterResult;
 var
   Msg, Reply: PDBusMessage;
   W: TPMLDBusWriter;
@@ -378,7 +380,7 @@ begin
     W.AddUInt32(AKey.Keysym);
     W.AddUInt32(AKey.Keycode);
     W.AddUInt32(ModifiersToState(AKey.Modifiers));
-    W.AddBoolean(AKey.IsRelease);
+    W.AddBoolean(AIsRelease);
     W.AddUInt32(0);   // time。0 は「不明」として扱われる
     Reply := FConn.Send(Msg);
     R := FConn.Reader(Reply);
@@ -519,7 +521,7 @@ begin
   end;
 
   Comp.SegmentsReliable := True;
-  PMLFinalizeComposition(Comp);
+  Comp.Finalize;
   if Assigned(FSink) then
     FSink.CompositionChanged(Comp);
 end;

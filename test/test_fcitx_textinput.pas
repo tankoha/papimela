@@ -4,12 +4,13 @@
   Origin : original work (clean-room design; not derived from SDL sources)
 
   WHAT:
-    papimela の公開 API（TPMLTextInputSystem / IPMLTextInputClient）だけを使い、
-    spikes/spike2_fcitx.pas が生の D-Bus で得たのと同じ結果になるかを確認する。
+    TPMLContext とイベントキューだけを使い、IME の文節情報がイベントとして
+    アプリに届くかを確認する。メソッドポインタのコールバックは使わない。
 
   WHY:
-    スパイクは「プラットフォームができるか」を示した。このテストは「papimela の
-    抽象化を通しても同じ情報が失われずに届くか」を示す。
+    spikes/spike2_fcitx.pas は「プラットフォームができるか」を示した。
+    このテストは「papimela の抽象化とイベントキューを通しても情報が失われないか」
+    を示す。設計 §7.9 のアプリ側実装パターンをそのまま書いてある。
 
   実行前提:
     Wayland セッション、fcitx5 稼働、日本語エンジン（mozc）が利用可能。
@@ -18,15 +19,18 @@ program test_fcitx_textinput;
 
 {$mode objfpc}{$H+}
 {$scopedenums on}
+{$interfaces corba}
 
 uses
   SysUtils,
   PaPiMeLa.Types,
   PaPiMeLa.Errors,
-  PaPiMeLa.TextInput;
+  PaPiMeLa.Events,
+  PaPiMeLa.TextInput,
+  PaPiMeLa.Core;
 
 type
-  { アプリ役。テキストバッファを持ち、周辺テキストを供給する。 }
+  { アプリ役。テキストバッファを持ち、周辺テキストを供給する（§7.9）。 }
   TFakeEditor = class(TObject, IPMLTextInputClient)
   strict private
     FBuffer    : String;
@@ -39,26 +43,6 @@ type
     procedure InsertAtCursor(const AText: String);
     procedure DeleteAround(ABeforeBytes, AAfterBytes: Integer);
     property Buffer: String read FBuffer;
-  end;
-
-  TTestRun = class
-  strict private
-    FSystem   : TPMLTextInputSystem;
-    FEditor   : TFakeEditor;
-    FSession  : TPMLTextInputSession;
-    FUpdates  : Integer;
-    FMaxSegs  : Integer;
-    FSawFocus : Boolean;
-    FFailures : Integer;
-    procedure OnComposition(ASession: TPMLTextInputSession;
-      const AComposition: TPMLComposition);
-    procedure OnCommit(ASession: TPMLTextInputSession; const AText: String);
-    procedure OnDeleteSurrounding(ASession: TPMLTextInputSession;
-      const AData: TPMLDeleteSurroundingData);
-    procedure Check(ACondition: Boolean; const ALabel: String);
-    procedure SendKey(AKeysym, AKeycode: LongWord);
-  public
-    function Run: Integer;
   end;
 
 constructor TFakeEditor.Create(const AInitial: String);
@@ -99,172 +83,207 @@ begin
     Delete(FBuffer, FCursorByte + 1, AAfterBytes);
 end;
 
-procedure TTestRun.Check(ACondition: Boolean; const ALabel: String);
+var
+  Ctx      : TPMLContext;
+  Editor   : TFakeEditor;
+  Session  : TPMLTextInputSession;
+  Failures : Integer = 0;
+  Updates  : Integer = 0;
+  MaxSegs  : Integer = 0;
+  SawFocus : Boolean = False;
+  Verbose  : Boolean = True;
+
+procedure Check(ACondition: Boolean; const ALabel: String);
 begin
   if ACondition then
     WriteLn('  [PASS] ', ALabel)
   else
   begin
     WriteLn('  [FAIL] ', ALabel);
-    Inc(FFailures);
+    Inc(Failures);
   end;
 end;
 
-procedure TTestRun.OnComposition(ASession: TPMLTextInputSession;
-  const AComposition: TPMLComposition);
+procedure ReportComposition(const AEv: TPMLEvent);
 var
   I: Integer;
   StateName: String;
 begin
-  Inc(FUpdates);
-  if Length(AComposition.Segments) > FMaxSegs then
-    FMaxSegs := Length(AComposition.Segments);
-  if AComposition.FocusedSegment >= 0 then
-    FSawFocus := True;
+  Inc(Updates);
+  if Length(AEv.Segments) > MaxSegs then
+    MaxSegs := Length(AEv.Segments);
+  if AEv.Edit.FocusedSegment >= 0 then
+    SawFocus := True;
+  if not Verbose then
+    Exit;
 
-  WriteLn(Format('    変換中="%s" 文節数=%d cursor=(byte %d / char %d) focused=%d',
-    [AComposition.Text, Length(AComposition.Segments),
-     AComposition.CursorByte, AComposition.CursorChar,
-     AComposition.FocusedSegment]));
-  for I := 0 to High(AComposition.Segments) do
+  WriteLn(Format('    TextEditing "%s" 文節数=%d cursor=(byte %d/char %d) focused=%d 単一範囲=[%d,+%d)',
+    [AEv.Text, Length(AEv.Segments), AEv.Edit.CursorByte, AEv.Edit.CursorChar,
+     AEv.Edit.FocusedSegment, AEv.Edit.SelectionStartChar,
+     AEv.Edit.SelectionLengthChars]));
+  for I := 0 to High(AEv.Segments) do
   begin
-    case AComposition.Segments[I].State of
+    case AEv.Segments[I].State of
       TPMLSegmentState.Unconverted: StateName := '未変換';
       TPMLSegmentState.Converted  : StateName := '変換済';
       TPMLSegmentState.Focused    : StateName := '注目';
     end;
     WriteLn(Format('      [%d] "%s" %s  byte[%d,%d) char[%d,%d)',
-      [I, AComposition.Segments[I].TextOf(AComposition.Text), StateName,
-       AComposition.Segments[I].StartByte, AComposition.Segments[I].EndByte,
-       AComposition.Segments[I].StartChar, AComposition.Segments[I].EndChar]));
+      [I, AEv.Segments[I].TextOf(AEv.Text), StateName,
+       AEv.Segments[I].StartByte, AEv.Segments[I].EndByte,
+       AEv.Segments[I].StartChar, AEv.Segments[I].EndChar]));
   end;
 end;
 
-procedure TTestRun.OnCommit(ASession: TPMLTextInputSession; const AText: String);
+// §7.9 のイベントループ。
+procedure DrainEvents;
+var
+  Ev: TPMLEvent;
 begin
-  FEditor.InsertAtCursor(AText);
-  WriteLn(Format('    確定="%s" → バッファ="%s"', [AText, FEditor.Buffer]));
+  while Ctx.Events.Poll(Ev) do
+    case Ev.Kind of
+      TPMLEventKind.TextEditing:
+        ReportComposition(Ev);
+      TPMLEventKind.TextInput:
+        begin
+          Editor.InsertAtCursor(Ev.Text);
+          WriteLn(Format('    TextInput "%s" → バッファ="%s"', [Ev.Text, Editor.Buffer]));
+        end;
+      TPMLEventKind.TextInputDeleteSurrounding:
+        begin
+          WriteLn(Format('    周辺削除 前%dバイト(%d文字) 後%dバイト(%d文字)',
+            [Ev.DeleteSurrounding.BeforeBytes, Ev.DeleteSurrounding.BeforeChars,
+             Ev.DeleteSurrounding.AfterBytes, Ev.DeleteSurrounding.AfterChars]));
+          Editor.DeleteAround(Ev.DeleteSurrounding.BeforeBytes,
+            Ev.DeleteSurrounding.AfterBytes);
+        end;
+      TPMLEventKind.BackendLost:
+        WriteLn('    [WARN] BackendLost');
+    end;
 end;
 
-procedure TTestRun.OnDeleteSurrounding(ASession: TPMLTextInputSession;
-  const AData: TPMLDeleteSurroundingData);
-begin
-  WriteLn(Format('    周辺削除 前%dバイト(%d文字) 後%dバイト(%d文字)',
-    [AData.BeforeBytes, AData.BeforeChars, AData.AfterBytes, AData.AfterChars]));
-  FEditor.DeleteAround(AData.BeforeBytes, AData.AfterBytes);
-end;
-
-procedure TTestRun.SendKey(AKeysym, AKeycode: LongWord);
+procedure SendKey(AKeysym, AKeycode: LongWord);
 var
   K: TPMLKeyEventData;
 begin
+  FillChar(K, SizeOf(K), 0);
   K.Keysym := AKeysym;
   K.Keycode := AKeycode;
   K.Modifiers := [];
-  K.IsRelease := False;
-  FSystem.FilterKey(K);
-  K.IsRelease := True;
-  FSystem.FilterKey(K);
-  FSystem.Pump(30);
+  // IME が消費したキーは KeyDown / KeyUp を積まない（§7.9）。
+  Ctx.TextInput.FilterKey(K, False);
+  Ctx.TextInput.FilterKey(K, True);
+  DrainEvents;
 end;
 
-function TTestRun.Run: Integer;
 const
   // "わたしのなまえ" のローマ字。keycode は evdev+8。
   Keys: array[0..13] of array[0..1] of LongWord = (
     ($77, 25), ($61, 38), ($74, 28), ($61, 38), ($73, 39), ($68, 43), ($69, 31),
     ($6E, 57), ($6F, 32), ($6E, 57), ($61, 38), ($6D, 58), ($61, 38), ($65, 26)
   );
-  SPACE_SYM = $20;
+  SPACE_SYM  = $20;
   SPACE_CODE = 65;
+
 var
   I: Integer;
+  Ev: TPMLEvent;
 begin
-  FFailures := 0;
-  WriteLn('test_fcitx_textinput — papimela の公開 API 経由で文節が届くか');
+  WriteLn('test_fcitx_textinput — TPMLContext とイベントキュー経由で文節が届くか');
   WriteLn;
 
-  FEditor := TFakeEditor.Create('これは周辺テキストです');
+  Editor := TFakeEditor.Create('これは周辺テキストです');
   try
-    WriteLn('1. バックエンド選択');
+    WriteLn('1. Context 生成（TextInput サブシステムのみ）');
     try
-      FSystem := TPMLTextInputSystem.Create;
+      Ctx := TPMLContext.Create([TPMLSubsystem.TextInput]);
     except
       on E: EPMLError do
       begin
         WriteLn('  [FAIL] ', E.Message);
-        Exit(1);
+        Halt(1);
       end;
     end;
     try
-      Check(FSystem.BackendName = 'fcitx',
-        Format('選ばれたバックエンド = "%s"', [FSystem.BackendName]));
-      WriteLn(Format('  [INFO] 能力集合: Segments=%s SurroundingText=%s DeleteSurrounding=%s',
-        [BoolToStr(TPMLTextInputCapability.Segments in FSystem.Backend.Capabilities, True),
-         BoolToStr(TPMLTextInputCapability.SurroundingText in FSystem.Backend.Capabilities, True),
-         BoolToStr(TPMLTextInputCapability.DeleteSurrounding in FSystem.Backend.Capabilities, True)]));
-
-      FSystem.OnComposition := @OnComposition;
-      FSystem.OnCommit := @OnCommit;
-      FSystem.OnDeleteSurrounding := @OnDeleteSurrounding;
+      Check(Ctx.Events <> nil, 'Context.Events が存在する');
+      Check(Ctx.Timer <> nil, 'Context.Timer が存在する');
+      Check(Ctx.TextInput <> nil, 'Context.TextInput が存在する');
+      Check(Ctx.TextInput.BackendName = 'fcitx',
+        Format('選ばれたバックエンド = "%s"', [Ctx.TextInput.BackendName]));
+      Check(Ctx.Timer.TicksNS > 0, 'Timer.TicksNS が単調時刻を返す');
+      // 設計 §10 項目 9 が求めていた実測値。
+      WriteLn(Format('  [INFO] SizeOf(TPMLEvent) = %d バイト（管理型 3 個を含む）',
+        [SizeOf(TPMLEvent)]));
 
       WriteLn;
       WriteLn('2. セッション開始（周辺テキストの供給を含む）');
-      FSession := FSystem.Start(nil, FEditor as IPMLTextInputClient);
-      Check(FSession <> nil, 'Start がセッションを返した');
-      FSession.NotifyCursorRectChanged;
-      FSystem.Pump(100);
+      Session := Ctx.TextInput.Start(nil, Editor as IPMLTextInputClient);
+      Check(Session <> nil, 'Start がセッションを返した');
+      Session.NotifyCursorRectChanged;
+      DrainEvents;
 
       WriteLn;
       WriteLn('3. ローマ字で「わたしのなまえ」を入力');
+      Verbose := False;   // 14 回分は要約する
       for I := Low(Keys) to High(Keys) do
         SendKey(Keys[I][0], Keys[I][1]);
-      Check(FUpdates > 0, Format('変換中テキストが %d 回届いた', [FUpdates]));
+      Verbose := True;
+      Check(Updates = 14, Format('TextEditing が %d 回届いた（キー数と一致）', [Updates]));
+      Check(MaxSegs = 1, '変換前は 1 文節');
+      Check(not SawFocus, '変換前は注目文節なし（全て未変換）');
 
       WriteLn;
       WriteLn('4. スペースで変換');
       SendKey(SPACE_SYM, SPACE_CODE);
-      FSystem.Pump(400);
+      Ctx.Events.Pump(400);
+      DrainEvents;
 
       WriteLn;
       WriteLn('5. 検証');
-      Check(FMaxSegs >= 2, Format('文節が %d 個に分かれた（2 以上なら成功）', [FMaxSegs]));
-      Check(FSawFocus, '注目文節が FocusedSegment で判別できた');
-      Check(FSession.Composing, 'Session.Composing が変換中を示している');
+      Check(MaxSegs >= 2, Format('文節が %d 個に分かれた', [MaxSegs]));
+      Check(SawFocus, '注目文節が Edit.FocusedSegment で判別できた');
+      Check(Session.Composing, 'Session.Composing が変換中を示している');
+      Check(Ctx.Events.DroppedCount = 0, 'イベントの取りこぼしなし');
 
       WriteLn;
-      WriteLn('6. 後始末');
-      FSession.ResetComposition;
-      FSystem.Pump(100);
-      FSystem.Stop;
-      WriteLn('  [PASS] セッション停止');
+      WriteLn('6. キューの操作');
+      Ctx.Events.PushSimple(TPMLEventKind.Quit);
+      Check(Ctx.Events.Peek(TPMLEventKind.Quit), 'Peek が Quit を見つけた');
+      Ctx.Events.Flush([TPMLEventKind.Quit]);
+      Check(not Ctx.Events.Peek(TPMLEventKind.Quit), 'Flush が Quit を捨てた');
+      Ctx.Events.Enabled[TPMLEventKind.Quit] := False;
+      Ctx.Events.PushSimple(TPMLEventKind.Quit);
+      Check(not Ctx.Events.Peek(TPMLEventKind.Quit), 'Enabled=False で Push が無効化された');
+      Ctx.Events.Enabled[TPMLEventKind.Quit] := True;
+
+      WriteLn;
+      WriteLn('7. WaitTimeout');
+      Ctx.Events.FlushAll;
+      Check(not Ctx.Events.WaitTimeout(Ev, 120),
+        'イベントが無いとき WaitTimeout が False を返す');
+
+      WriteLn;
+      WriteLn('8. 後始末');
+      Session.ResetComposition;
+      Ctx.Events.Pump(100);
+      DrainEvents;
     finally
-      FreeAndNil(FSystem);
+      FreeAndNil(Ctx);   // §2.4 の逆順破棄
     end;
+    WriteLn('  [PASS] Context 破棄');
   finally
-    FreeAndNil(FEditor);
+    FreeAndNil(Editor);
   end;
 
   WriteLn;
-  if FFailures = 0 then
+  if Failures = 0 then
   begin
-    WriteLn('=== 結論: papimela の抽象化を通しても文節情報が失われない ===');
-    Result := 0;
+    WriteLn('=== 結論: イベントキュー経由でも文節情報が失われない ===');
+    ExitCode := 0;
   end
   else
   begin
-    WriteLn(Format('=== 失敗 %d 件 ===', [FFailures]));
-    Result := 1;
-  end;
-end;
-
-var
-  Run: TTestRun;
-begin
-  Run := TTestRun.Create;
-  try
-    ExitCode := Run.Run;
-  finally
-    Run.Free;
+    WriteLn(Format('=== 失敗 %d 件 ===', [Failures]));
+    ExitCode := 1;
   end;
 end.

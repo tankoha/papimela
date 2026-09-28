@@ -2,15 +2,20 @@
   PaPiMeLa.Types — 基本的な値型
 
   Origin : original work (clean-room design; not derived from SDL sources)
-  Design : docs/DESIGN.md §8.3（幾何・色型）、§5.2（TPMLSubsystemTag）
+  Design : docs/DESIGN.md §8.3（幾何型）、§7.3（IME の値型）、§5.2（TPMLSubsystemTag）
 
   WHAT:
-    サブシステムの識別タグと、IME 経路が必要とする最小の幾何型。
+    サブシステムの識別タグ、幾何型、および IME の変換中テキストを表す値型。
+
+  WHY:
+    IME の値型をここに置くのは、イベントレコード（PaPiMeLa.Events）と公開モデル
+    （PaPiMeLa.TextInput）の両方が参照するため。Events が TextInput を参照すると
+    循環するので、共有される値型だけを下層に降ろしてある。
 
   NOT RESOLVED:
-    本ユニットは第 11 章 #3 の一部にすぎない。色型（TPMLColor / TPMLFColor）、
-    TPMLPoint / TPMLFPoint、演算子オーバーロード、レイアウト静的アサートは
-    Video / Render 着手時に追加する。
+    本ユニットは第 11 章 #3 の一部。色型（TPMLColor / TPMLFColor）、TPMLPoint、
+    演算子オーバーロード、レイアウト静的アサートは Video / Render 着手時に追加する。
+    文節の色情報（IBus の foreground / background）も IBus 着手時に追加する。
 
   Copyright (C) 2026 papimela contributors
   （zlib ライセンス本文は papimela.inc を参照）
@@ -21,20 +26,18 @@ unit PaPiMeLa.Types;
 
 interface
 
+uses
+  PaPiMeLa.Unicode;
+
 type
-  // 例外がどの層で発生したかを示す。EPMLError の派生クラスが自分のタグを返す。
   TPMLSubsystemTag = (
-    Core,
-    Platform,
-    Video,
-    Render,
-    Audio,
-    Input,
-    TextInput,
-    IO,
-    Threading,
-    Events
+    Core, Platform, Video, Render, Audio, Input, TextInput, IO, Threading, Events
   );
+
+  TPMLWindowID = LongWord;
+
+  // 公開 API に specialize 構文を出さないための名前付き動的配列（§8.5）。
+  TPMLStringArray = array of String;
 
   TPMLRect = record
     X, Y, W, H: Integer;
@@ -45,18 +48,47 @@ type
   TPMLKeyModifier = (Shift, Ctrl, Alt, Super, CapsLock, NumLock);
   TPMLKeyModifiers = set of TPMLKeyModifier;
 
-  { IME にキーを渡すために必要な最小の情報。
+  // ---- IME（§7.3）
 
-    NOT RESOLVED:
-      第 11 章 #13 / #14（Events）が TPMLKeyEventData の正式な定義を持つ。
-      そこでは Scancode / Keycode / Repeat / Timestamp を含む完全な形になる。
-      本レコードは IME 経路が先行実装されたための暫定版で、Events 着手時に
-      Events 側へ移し、本ユニットからは取り除く。 }
-  TPMLKeyEventData = record
-    Keysym    : LongWord;        // X11 / XKB キーシム（Fcitx5 / IBus がこれで話す）
-    Keycode   : LongWord;        // evdev + 8（X11 慣習）
-    Modifiers : TPMLKeyModifiers;
-    IsRelease : Boolean;
+  // 文節の状態。かな漢字変換の下線表示を描き分けるために使う。
+  TPMLSegmentState = (Unconverted, Converted, Focused);
+
+  // バックエンドが報告した生の下線種別。State の根拠として保持する。
+  TPMLUnderlineStyle = (None, Single, Double, Low, Error);
+
+  TPMLCompositionSegment = record
+    StartByte, EndByte: Integer;   // 変換中テキスト内の UTF-8 バイト範囲 [Start, End)
+    StartChar, EndChar: Integer;   // 同じ範囲をコードポイント単位で
+    State             : TPMLSegmentState;
+    Underline         : TPMLUnderlineStyle;
+    function TextOf(const AWhole: String): String;
+  end;
+  TPMLCompositionSegments = array of TPMLCompositionSegment;
+
+  TPMLComposition = record
+    Text                  : String;
+    Segments              : TPMLCompositionSegments;
+    CursorByte, CursorChar: Integer;   // -1 = 非表示
+    FocusedSegment        : Integer;   // Segments の添字。-1 = なし
+    SegmentsReliable      : Boolean;   // False = バックエンドが文節を提供しない
+    function IsEmpty: Boolean;
+    procedure Clear;
+    // 文節のバイト範囲と State から、コードポイント位置と FocusedSegment を埋める。
+    procedure Finalize;
+  end;
+
+  // TPMLEvent の固定部に載る変換中テキストの付随情報。
+  TPMLTextEditingData = record
+    CursorByte, CursorChar          : Integer;
+    SelectionStartChar              : Integer;   // SDL 互換の単一範囲
+    SelectionLengthChars            : Integer;
+    FocusedSegment                  : Integer;
+    SegmentsReliable                : Boolean;
+  end;
+
+  TPMLDeleteSurroundingData = record
+    BeforeBytes, AfterBytes: Integer;
+    BeforeChars, AfterChars: Integer;
   end;
 
   TPMLSubsystemTagHelper = type helper for TPMLSubsystemTag
@@ -67,15 +99,52 @@ implementation
 
 class function TPMLRect.Make(AX, AY, AW, AH: Integer): TPMLRect;
 begin
-  Result.X := AX;
-  Result.Y := AY;
-  Result.W := AW;
-  Result.H := AH;
+  Result.X := AX; Result.Y := AY; Result.W := AW; Result.H := AH;
 end;
 
 function TPMLRect.IsEmpty: Boolean;
 begin
   Result := (W <= 0) or (H <= 0);
+end;
+
+function TPMLCompositionSegment.TextOf(const AWhole: String): String;
+begin
+  if (EndByte <= StartByte) or (StartByte < 0) or (EndByte > Length(AWhole)) then
+    Exit('');
+  Result := Copy(AWhole, StartByte + 1, EndByte - StartByte);
+end;
+
+function TPMLComposition.IsEmpty: Boolean;
+begin
+  Result := Text = '';
+end;
+
+procedure TPMLComposition.Clear;
+begin
+  Text := '';
+  Segments := nil;
+  CursorByte := -1;
+  CursorChar := -1;
+  FocusedSegment := -1;
+  SegmentsReliable := False;
+end;
+
+procedure TPMLComposition.Finalize;
+var
+  I: Integer;
+begin
+  FocusedSegment := -1;
+  for I := 0 to High(Segments) do
+  begin
+    Segments[I].StartChar := UTF8ByteToCharOffset(Text, Segments[I].StartByte);
+    Segments[I].EndChar   := UTF8ByteToCharOffset(Text, Segments[I].EndByte);
+    if (FocusedSegment < 0) and (Segments[I].State = TPMLSegmentState.Focused) then
+      FocusedSegment := I;
+  end;
+  if CursorByte >= 0 then
+    CursorChar := UTF8ByteToCharOffset(Text, CursorByte)
+  else
+    CursorChar := -1;
 end;
 
 function TPMLSubsystemTagHelper.ToString: String;

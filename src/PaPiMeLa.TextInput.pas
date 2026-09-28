@@ -5,9 +5,9 @@
   Design : docs/DESIGN.md §7.3（公開モデル）、§7.6（バックエンド選択）
 
   WHAT:
-    変換中テキストを「文節の配列」として表すモデルと、アプリが実装する契約
-    （周辺テキストの供給）、バックエンドから通知を受ける Sink、セッション、
-    バックエンド選択を行う TPMLTextInputSystem。
+    アプリが実装する契約（周辺テキストの供給）、バックエンドから通知を受ける
+    Sink、ウィンドウごとのセッション、バックエンド選択。通知はイベントキューへ
+    TextEditing / TextInput / TextInputDeleteSurrounding として積む。
 
   WHY:
     SDL の SDL_TextEditingEvent は start / length の 1 組しか持たず、注目文節
@@ -16,16 +16,13 @@
 
   RESOLVED:
     - 位置はバイトとコードポイントの両方を常に埋める（§7.3）
-    - 周辺削除は確定より先に通知し、間に他の通知を挟まない
-    - バックエンドが文節を提供しない場合は SegmentsReliable = False で
-      全体を 1 文節として表す
+    - 周辺削除は確定より先にキューへ入れ、間に他のイベントを挟まない。
+      バックエンドの Pump が到着順に Sink を呼ぶので順序はそのまま保たれる
+    - 文節を提供しないバックエンドは SegmentsReliable = False で全体を 1 文節にする
 
   NOT RESOLVED:
-    - 通知はイベントキュー（第 11 章 #13 / #14）へ入れる設計だが、Events が
-      未実装のため暫定でメソッドポインタのイベントを公開している。Events
-      着手時に TPMLEventKind.TextEditing 等へ置き換える
     - Session.Window は TPMLWindow（#10 Video）が未実装のため TObject
-    - 文節の色情報（IBus の foreground / background）は IBus 着手時に追加する
+    - 埋め込み候補（TextEditingCandidates）はバックエンド側が未実装
 
   Copyright (C) 2026 papimela contributors
   （zlib ライセンス本文は papimela.inc を参照）
@@ -40,40 +37,11 @@ uses
   SysUtils, Classes,
   PaPiMeLa.Types,
   PaPiMeLa.Errors,
-  PaPiMeLa.Unicode;
+  PaPiMeLa.Unicode,
+  PaPiMeLa.Core.Base,
+  PaPiMeLa.Events;
 
 type
-  // 文節の状態。かな漢字変換の下線表示を描き分けるために使う。
-  TPMLSegmentState = (Unconverted, Converted, Focused);
-
-  // バックエンドが報告した生の下線種別。State の根拠として保持する。
-  TPMLUnderlineStyle = (None, Single, Double, Low, Error);
-
-  TPMLCompositionSegment = record
-    StartByte, EndByte: Integer;   // Composition.Text 内の UTF-8 バイト範囲 [Start, End)
-    StartChar, EndChar: Integer;   // 同じ範囲をコードポイント単位で
-    State             : TPMLSegmentState;
-    Underline         : TPMLUnderlineStyle;
-    function TextOf(const AWhole: String): String;
-  end;
-  TPMLCompositionSegments = array of TPMLCompositionSegment;
-
-  TPMLComposition = record
-    Text                    : String;                  // 変換中テキスト全体
-    Segments                : TPMLCompositionSegments;
-    CursorByte, CursorChar  : Integer;                 // -1 = 非表示
-    FocusedSegment          : Integer;                 // Segments の添字。-1 = なし
-    SegmentsReliable        : Boolean;                  // False = バックエンドが文節を提供しない
-    function IsEmpty: Boolean;
-    // SDL 互換の単一範囲。Focused 文節から導出する。
-    procedure GetLegacyRange(out AStartChar, ALengthChars: Integer);
-  end;
-
-  TPMLDeleteSurroundingData = record
-    BeforeBytes, AfterBytes: Integer;
-    BeforeChars, AfterChars: Integer;
-  end;
-
   TPMLTextInputCapability = (
     Segments,           // 文節境界を提供できる
     Candidates,         // 候補一覧をアプリに渡せる
@@ -108,7 +76,7 @@ type
     procedure CompositionChanged(const AComposition: TPMLComposition);
     procedure TextCommitted(const AText: String);
     procedure DeleteSurroundingRequested(const AData: TPMLDeleteSurroundingData);
-    procedure CandidatesChanged(const ACandidates: array of String;
+    procedure CandidatesChanged(const ACandidates: TPMLStringArray;
       ASelected: Integer; AHorizontal: Boolean);
     procedure BackendLost(const AReason: String);
   end;
@@ -128,31 +96,29 @@ type
     procedure ResetComposition;
     procedure UpdateSurroundingText(const AText: String; ACursorByte, AAnchorByte: Integer);
     procedure UpdateCursorRect(const ARect: TPMLRect; AScale: Double);
-    function  FilterKey(const AKey: TPMLKeyEventData): TPMLKeyFilterResult;
+    function  FilterKey(const AKey: TPMLKeyEventData; AIsRelease: Boolean): TPMLKeyFilterResult;
     procedure Pump(ATimeoutMs: Integer);
   end;
 
   TPMLTextInputSystem = class;
 
-  { ウィンドウごとの入力セッション。System.Start が返す。 }
-  TPMLTextInputSession = class
+  { ウィンドウごとの入力セッション。System.Start が返す。所有は System。 }
+  TPMLTextInputSession = class sealed(TPMLSystemObject)
   strict private
-    FSystem     : TPMLTextInputSystem;
-    FWindow     : TObject;
-    FClient     : IPMLTextInputClient;
-    FInputType  : TPMLTextInputType;
-    FHints      : TPMLTextInputHints;
-    FActive     : Boolean;
+    FSystem   : TPMLTextInputSystem;
+    FWindow   : TObject;
+    FClient   : IPMLTextInputClient;
+    FInputType: TPMLTextInputType;
+    FHints    : TPMLTextInputHints;
     function GetCapabilities: TPMLTextInputCapabilities;
     function GetComposing: Boolean;
   private
-    // TPMLTextInputSystem が Sink 経由で更新する。ユニット内限定。
+    // System が Sink 経由で更新する。ユニット内限定。
     FComposition: TPMLComposition;
   public
     constructor Create(ASystem: TPMLTextInputSystem; AWindow: TObject;
       AClient: IPMLTextInputClient; AType: TPMLTextInputType;
       AHints: TPMLTextInputHints);
-    destructor Destroy; override;
 
     procedure Stop;
     // アプリが IME 以外の要因でバッファを変えた（クリック、Undo）。周辺テキストを再送する。
@@ -169,60 +135,48 @@ type
     property Capabilities: TPMLTextInputCapabilities read GetCapabilities;
   end;
 
-  // 暫定の通知経路。Events 着手時にイベントキューへ置き換える。
-  TPMLCompositionEvent  = procedure(ASession: TPMLTextInputSession;
-    const AComposition: TPMLComposition) of object;
-  TPMLCommitEvent       = procedure(ASession: TPMLTextInputSession;
-    const AText: String) of object;
-  TPMLDeleteSurroundEvent = procedure(ASession: TPMLTextInputSession;
-    const AData: TPMLDeleteSurroundingData) of object;
-
-  { バックエンドを選び、セッションを管理する。
+  { バックエンドを選び、セッションを管理し、通知をイベントキューへ積む。
 
     CORBA インターフェースは参照カウントしないので、バックエンドの実体を
     FBackendObject で保持して破棄する責任を持つ。 }
-  TPMLTextInputSystem = class(TObject, IPMLTextInputSink)
+  TPMLTextInputSystem = class sealed(TPMLSystemObject,
+    IPMLTextInputSink, IPMLEventPumpSource)
   strict private
+    FQueue        : TPMLEventQueue;
     FBackend      : IPMLTextInputBackend;
     FBackendObject: TObject;
     FSession      : TPMLTextInputSession;
-    FOnComposition      : TPMLCompositionEvent;
-    FOnCommit           : TPMLCommitEvent;
-    FOnDeleteSurrounding: TPMLDeleteSurroundEvent;
-    FLastLog            : String;
+    FSelectedName : String;
     procedure PushSurroundingText;
+    procedure PushComposition(const AComposition: TPMLComposition);
   public
-    constructor Create(const APreferred: String = '');
+    constructor Create(AContextRef: TObject; AOwner: TPMLObject;
+      AQueue: TPMLEventQueue; const APreferred: String = '');
     destructor Destroy; override;
 
     function  Start(AWindow: TObject; AClient: IPMLTextInputClient;
       AType: TPMLTextInputType = TPMLTextInputType.Text;
       AHints: TPMLTextInputHints = []): TPMLTextInputSession;
     procedure Stop;
-    function  FilterKey(const AKey: TPMLKeyEventData): TPMLKeyFilterResult;
-    procedure Pump(ATimeoutMs: Integer = 0);
+    // キーを IME に通す。Consumed なら KeyDown / KeyUp を積んではならない。
+    function  FilterKey(const AKey: TPMLKeyEventData; AIsRelease: Boolean): TPMLKeyFilterResult;
+
+    // IPMLEventPumpSource
+    function  PumpSourceName: String;
+    procedure PumpEvents(ATimeoutMs: Integer);
 
     // IPMLTextInputSink
     procedure CompositionChanged(const AComposition: TPMLComposition);
     procedure TextCommitted(const AText: String);
     procedure DeleteSurroundingRequested(const AData: TPMLDeleteSurroundingData);
-    procedure CandidatesChanged(const ACandidates: array of String;
+    procedure CandidatesChanged(const ACandidates: TPMLStringArray;
       ASelected: Integer; AHorizontal: Boolean);
     procedure BackendLost(const AReason: String);
 
-    property BackendName: String read FLastLog;
+    property BackendName: String read FSelectedName;
     property Backend    : IPMLTextInputBackend read FBackend;
     property Session    : TPMLTextInputSession read FSession;
-
-    property OnComposition      : TPMLCompositionEvent read FOnComposition write FOnComposition;
-    property OnCommit           : TPMLCommitEvent read FOnCommit write FOnCommit;
-    property OnDeleteSurrounding: TPMLDeleteSurroundEvent read FOnDeleteSurrounding
-      write FOnDeleteSurrounding;
   end;
-
-// 文節配列から派生情報（コードポイント位置、FocusedSegment）を埋める。
-// バックエンドはバイト範囲と State だけ埋めてこれを呼べばよい。
-procedure PMLFinalizeComposition(var AComposition: TPMLComposition);
 
 implementation
 
@@ -230,80 +184,19 @@ uses
   PaPiMeLa.TextInput.Backend,
   PaPiMeLa.TextInput.Fcitx;
 
-{ TPMLCompositionSegment }
-
-function TPMLCompositionSegment.TextOf(const AWhole: String): String;
-begin
-  if (EndByte <= StartByte) or (StartByte < 0) or (EndByte > Length(AWhole)) then
-    Exit('');
-  Result := Copy(AWhole, StartByte + 1, EndByte - StartByte);
-end;
-
-{ TPMLComposition }
-
-function TPMLComposition.IsEmpty: Boolean;
-begin
-  Result := Text = '';
-end;
-
-procedure TPMLComposition.GetLegacyRange(out AStartChar, ALengthChars: Integer);
-begin
-  if (FocusedSegment >= 0) and (FocusedSegment <= High(Segments)) then
-  begin
-    AStartChar := Segments[FocusedSegment].StartChar;
-    ALengthChars := Segments[FocusedSegment].EndChar - Segments[FocusedSegment].StartChar;
-  end
-  else
-  begin
-    AStartChar := CursorChar;
-    ALengthChars := 0;
-  end;
-end;
-
-procedure PMLFinalizeComposition(var AComposition: TPMLComposition);
-var
-  I: Integer;
-begin
-  AComposition.FocusedSegment := -1;
-  for I := 0 to High(AComposition.Segments) do
-  begin
-    AComposition.Segments[I].StartChar :=
-      UTF8ByteToCharOffset(AComposition.Text, AComposition.Segments[I].StartByte);
-    AComposition.Segments[I].EndChar :=
-      UTF8ByteToCharOffset(AComposition.Text, AComposition.Segments[I].EndByte);
-    if (AComposition.FocusedSegment < 0)
-      and (AComposition.Segments[I].State = TPMLSegmentState.Focused) then
-      AComposition.FocusedSegment := I;
-  end;
-  if AComposition.CursorByte >= 0 then
-    AComposition.CursorChar :=
-      UTF8ByteToCharOffset(AComposition.Text, AComposition.CursorByte)
-  else
-    AComposition.CursorChar := -1;
-end;
-
 { TPMLTextInputSession }
 
 constructor TPMLTextInputSession.Create(ASystem: TPMLTextInputSystem;
   AWindow: TObject; AClient: IPMLTextInputClient; AType: TPMLTextInputType;
   AHints: TPMLTextInputHints);
 begin
-  inherited Create;
+  inherited Create(ASystem.ContextRef, ASystem);
   FSystem := ASystem;
   FWindow := AWindow;
   FClient := AClient;
   FInputType := AType;
   FHints := AHints;
-  FComposition.CursorByte := -1;
-  FComposition.CursorChar := -1;
-  FComposition.FocusedSegment := -1;
-  FActive := True;
-end;
-
-destructor TPMLTextInputSession.Destroy;
-begin
-  FClient := nil;
-  inherited Destroy;
+  FComposition.Clear;
 end;
 
 function TPMLTextInputSession.GetCapabilities: TPMLTextInputCapabilities;
@@ -321,11 +214,8 @@ end;
 
 procedure TPMLTextInputSession.Stop;
 begin
-  if FActive and Assigned(FSystem) then
-  begin
-    FActive := False;
+  if Assigned(FSystem) then
     FSystem.Stop;
-  end;
 end;
 
 procedure TPMLTextInputSession.NotifyTextChanged;
@@ -361,47 +251,48 @@ end;
 
 { TPMLTextInputSystem }
 
-constructor TPMLTextInputSystem.Create(const APreferred: String);
+constructor TPMLTextInputSystem.Create(AContextRef: TObject; AOwner: TPMLObject;
+  AQueue: TPMLEventQueue; const APreferred: String);
 var
   Wanted: String;
 
   // 候補を試し、繋がらなければその実体を破棄する。
   function TryBackend(ACandidate: TPMLTextInputBackend): Boolean;
-  var
-    Iface: IPMLTextInputBackend;
   begin
     Result := False;
     if ACandidate = nil then
       Exit;
-    Iface := ACandidate as IPMLTextInputBackend;
     if ((Wanted <> '') and (LowerCase(ACandidate.BackendName) <> Wanted))
       or (not ACandidate.Connect(Self as IPMLTextInputSink)) then
     begin
       ACandidate.Free;
       Exit;
     end;
-    FBackend := Iface;
+    FBackend := ACandidate as IPMLTextInputBackend;
     FBackendObject := ACandidate;
-    FLastLog := ACandidate.BackendName;
+    FSelectedName := ACandidate.BackendName;
     Result := True;
   end;
 
 begin
-  inherited Create;
+  inherited Create(AContextRef, AOwner);
+  FQueue := AQueue;
   Wanted := LowerCase(Trim(APreferred));
   if Wanted = '' then
     Wanted := LowerCase(Trim(GetEnvironmentVariable('PAPIMELA_IME')));
 
   // §7.6 の順序。IBus は未実装なので Fcitx から試す（spikes/RESULTS.md の判断）。
-  if TryBackend(TPMLFcitxTextInputBackend.Create) then
-    Exit;
-  if TryBackend(TPMLNullTextInputBackend.Create) then
-    Exit;
-  raise EPMLTextInputError.Create('no text input backend could be selected');
+  if not TryBackend(TPMLFcitxTextInputBackend.Create) then
+    if not TryBackend(TPMLNullTextInputBackend.Create) then
+      raise EPMLTextInputError.Create('no text input backend could be selected');
+
+  FQueue.RegisterPumpSource(Self as IPMLEventPumpSource);
 end;
 
 destructor TPMLTextInputSystem.Destroy;
 begin
+  if Assigned(FQueue) then
+    FQueue.UnregisterPumpSource(Self as IPMLEventPumpSource);
   FreeAndNil(FSession);
   if Assigned(FBackend) then
   begin
@@ -412,9 +303,21 @@ begin
   inherited Destroy;
 end;
 
+function TPMLTextInputSystem.PumpSourceName: String;
+begin
+  Result := 'textinput:' + FSelectedName;
+end;
+
+procedure TPMLTextInputSystem.PumpEvents(ATimeoutMs: Integer);
+begin
+  if Assigned(FBackend) then
+    FBackend.Pump(ATimeoutMs);
+end;
+
 function TPMLTextInputSystem.Start(AWindow: TObject; AClient: IPMLTextInputClient;
   AType: TPMLTextInputType; AHints: TPMLTextInputHints): TPMLTextInputSession;
 begin
+  CheckMainThread;
   if Assigned(FSession) then
     Stop;
   FSession := TPMLTextInputSession.Create(Self, AWindow, AClient, AType, AHints);
@@ -437,59 +340,116 @@ begin
     FSession.NotifyTextChanged;
 end;
 
-function TPMLTextInputSystem.FilterKey(const AKey: TPMLKeyEventData): TPMLKeyFilterResult;
+function TPMLTextInputSystem.FilterKey(const AKey: TPMLKeyEventData;
+  AIsRelease: Boolean): TPMLKeyFilterResult;
 begin
   if not Assigned(FSession) or not Assigned(FBackend) then
     Exit(TPMLKeyFilterResult.PassThrough);
   if not (TPMLTextInputCapability.KeyFilter in FBackend.Capabilities) then
     Exit(TPMLKeyFilterResult.PassThrough);
-  Result := FBackend.FilterKey(AKey);
+  Result := FBackend.FilterKey(AKey, AIsRelease);
 end;
 
-procedure TPMLTextInputSystem.Pump(ATimeoutMs: Integer);
+procedure TPMLTextInputSystem.PushComposition(const AComposition: TPMLComposition);
+var
+  Ev: TPMLEvent;
+  StartChar, LengthChars: Integer;
 begin
-  if Assigned(FBackend) then
-    FBackend.Pump(ATimeoutMs);
+  FillChar(Ev.Edit, SizeOf(Ev.Edit), 0);
+  Ev.Kind := TPMLEventKind.TextEditing;
+  Ev.Timestamp := PMLNowNS;
+  Ev.WindowID := 0;
+  Ev.Text := AComposition.Text;
+  Ev.Segments := AComposition.Segments;
+  Ev.Strings := nil;
+
+  Ev.Edit.CursorByte := AComposition.CursorByte;
+  Ev.Edit.CursorChar := AComposition.CursorChar;
+  Ev.Edit.FocusedSegment := AComposition.FocusedSegment;
+  Ev.Edit.SegmentsReliable := AComposition.SegmentsReliable;
+  // SDL 互換の単一範囲は注目文節から導出する。
+  if (AComposition.FocusedSegment >= 0)
+    and (AComposition.FocusedSegment <= High(AComposition.Segments)) then
+  begin
+    StartChar := AComposition.Segments[AComposition.FocusedSegment].StartChar;
+    LengthChars := AComposition.Segments[AComposition.FocusedSegment].EndChar - StartChar;
+  end
+  else
+  begin
+    StartChar := AComposition.CursorChar;
+    LengthChars := 0;
+  end;
+  Ev.Edit.SelectionStartChar := StartChar;
+  Ev.Edit.SelectionLengthChars := LengthChars;
+
+  FQueue.Push(Ev);
 end;
 
 procedure TPMLTextInputSystem.CompositionChanged(const AComposition: TPMLComposition);
 begin
   if Assigned(FSession) then
     FSession.FComposition := AComposition;
-  if Assigned(FOnComposition) then
-    FOnComposition(FSession, AComposition);
+  PushComposition(AComposition);
 end;
 
 procedure TPMLTextInputSystem.TextCommitted(const AText: String);
+var
+  Ev: TPMLEvent;
 begin
   if Assigned(FSession) then
-  begin
-    FSession.FComposition.Text := '';
-    FSession.FComposition.Segments := nil;
-  end;
-  if Assigned(FOnCommit) then
-    FOnCommit(FSession, AText);
+    FSession.FComposition.Clear;
+
+  FillChar(Ev.Key, SizeOf(Ev.Key), 0);
+  Ev.Kind := TPMLEventKind.TextInput;
+  Ev.Timestamp := PMLNowNS;
+  Ev.WindowID := 0;
+  Ev.Text := AText;
+  Ev.Segments := nil;
+  Ev.Strings := nil;
+  FQueue.Push(Ev);
   // 確定後はアプリのバッファが変わっているので周辺テキストを送り直す（§7.3）。
+  // アプリは同じ Pump 内で TextInput を処理するので、ここでの再送は
+  // 次の Pump 以降に効く。
   PushSurroundingText;
 end;
 
 procedure TPMLTextInputSystem.DeleteSurroundingRequested(const AData: TPMLDeleteSurroundingData);
+var
+  Ev: TPMLEvent;
 begin
-  if Assigned(FOnDeleteSurrounding) then
-    FOnDeleteSurrounding(FSession, AData);
-  PushSurroundingText;
+  FillChar(Ev.DeleteSurrounding, SizeOf(Ev.DeleteSurrounding), 0);
+  Ev.Kind := TPMLEventKind.TextInputDeleteSurrounding;
+  Ev.Timestamp := PMLNowNS;
+  Ev.WindowID := 0;
+  Ev.Text := '';
+  Ev.Segments := nil;
+  Ev.Strings := nil;
+  Ev.DeleteSurrounding := AData;
+  FQueue.Push(Ev);
 end;
 
-procedure TPMLTextInputSystem.CandidatesChanged(const ACandidates: array of String;
+procedure TPMLTextInputSystem.CandidatesChanged(const ACandidates: TPMLStringArray;
   ASelected: Integer; AHorizontal: Boolean);
+var
+  Ev: TPMLEvent;
 begin
-  // 埋め込み候補描画は EmbedCandidates 指定時のみ。Events 着手時にイベント化する。
+  FillChar(Ev.Edit, SizeOf(Ev.Edit), 0);
+  Ev.Kind := TPMLEventKind.TextEditingCandidates;
+  Ev.Timestamp := PMLNowNS;
+  Ev.WindowID := 0;
+  Ev.Text := '';
+  Ev.Segments := nil;
+  Ev.Strings := ACandidates;
+  Ev.Edit.FocusedSegment := ASelected;
+  FQueue.Push(Ev);
 end;
 
 procedure TPMLTextInputSystem.BackendLost(const AReason: String);
 begin
+  // §5.2: まずイベントで穏やかに知らせ、次に例外で強制的に知らせる。
+  FQueue.PushSimple(TPMLEventKind.BackendLost);
   raise EPMLBackendLost.CreateNative('text input backend lost', 0,
-    FLastLog, AReason);
+    FSelectedName, AReason);
 end;
 
 end.

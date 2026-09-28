@@ -25,6 +25,7 @@ interface
 
 uses
   PaPiMeLa.Types,
+  PaPiMeLa.Events,
   PaPiMeLa.TextInput;
 
 type
@@ -41,7 +42,7 @@ type
     procedure ResetComposition; virtual;
     procedure UpdateSurroundingText(const AText: String; ACursorByte, AAnchorByte: Integer); virtual;
     procedure UpdateCursorRect(const ARect: TPMLRect; AScale: Double); virtual;
-    function  FilterKey(const AKey: TPMLKeyEventData): TPMLKeyFilterResult; virtual;
+    function  FilterKey(const AKey: TPMLKeyEventData; AIsRelease: Boolean): TPMLKeyFilterResult; virtual;
     procedure Pump(ATimeoutMs: Integer); virtual;
   end;
 
@@ -85,7 +86,7 @@ procedure TPMLTextInputBackend.UpdateCursorRect(const ARect: TPMLRect; AScale: D
 begin
 end;
 
-function TPMLTextInputBackend.FilterKey(const AKey: TPMLKeyEventData): TPMLKeyFilterResult;
+function TPMLTextInputBackend.FilterKey(const AKey: TPMLKeyEventData; AIsRelease: Boolean): TPMLKeyFilterResult;
 begin
   Result := TPMLKeyFilterResult.PassThrough;
 end;

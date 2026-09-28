@@ -1179,7 +1179,7 @@ wayland-scanner の Pascal 版。C の `wayland-scanner` が生成する `*-clie
 6. **Wayland 読み取りスレッド**（`SDL_waylandeventthread.c` 相当）の要否。メインスレッドがブロックしているときにコンポジタからのイベントを取りこぼしてキーリピートや `ping` の応答が遅れる問題への対処。初回は無し。`Wait` ベースのアプリなら問題にならない。
 7. **`spa_pod_builder` の Pascal 再実装**（9.4）。PipeWire のヘッダ内インライン関数を再実装するのはライセンス（MIT）上問題ないが、バイナリレイアウトの正確性検証が必要。難しければ初回は PulseAudio バックエンドを既定にし、PipeWire は pipewire-pulse 経由で使う（機能は同等、レイテンシは劣る）。
 8. **ブリッタ生成器**（9.5）。`sdlgenblit.pl` を FPC に移植するか、Perl のまま `tools/` に置くか。ビルド時依存を FPC だけにしたいので移植を仮採用。生成された 11k 行のコンパイル時間も確認する。
-9. **`TPMLEvent` のサイズと管理型フィールドのコスト**（6.2）。3 つの管理型フィールド（`Text`、`Segments`、`Strings`）を持つレコードのリングバッファ上書きで、`nil` の管理型に対する `Finalize` のコストが無視できることを測定する。問題があれば管理型フィールドを 1 つの `TPMLEventPayload` クラス参照（nil が普通）にまとめる。
+9. **`TPMLEvent` のサイズと管理型フィールドのコスト**（6.2）。**サイズは実測で 72 バイト**（x86_64、管理型 3 個を含む。6.2 の予想 64〜96 の範囲内。`test/test_fcitx_textinput.pas` が毎回報告する）。残る検証は、`nil` の管理型に対する `Finalize` のコストがリングバッファ上書きで無視できることの測定。問題があれば管理型フィールドを 1 つの `TPMLEventPayload` クラス参照（nil が普通）にまとめる。
 10. **`cthreads` の要求方法**（2.5）。実行時判定の確実な方法。
 11. **文字列型**: `String`（`{$H+}` の `AnsiString`、UTF-8 前提）で行く。`UTF8String` との相互変換は暗黙。v1 の Windows コードページ問題は初回スコープ外だが、公開 API の型を後で変えられないので、`{$codepage utf8}` を全ユニットに付けるかを決める必要がある。付けない（Lazarus と同じ）を仮採用。
 12. **`TPMLDisplay` をクラスにした**（4.2）ことによる、hotplug で消えたディスプレイの参照をアプリが保持している場合の扱い。`Connected = False` にしてオブジェクトを `TPMLVideoSystem` が次の `Pump` まで生かす（ジョイスティックと同じ）か、即時 `Free` して `DisplayRemoved` イベントには ID だけ載せるか。後者を仮採用（ジョイスティックはアプリが `Open` するので前者、ディスプレイはアプリが生成しないので後者、という区別）。
