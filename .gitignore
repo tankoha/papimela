@@ -11,3 +11,6 @@ backup/
 # スパイクの実行ファイル (拡張子が無いので個別に列挙)
 spikes/spike1_wayland
 spikes/spike2_fcitx
+
+# テスト実行ファイル
+test/test_fcitx_textinput

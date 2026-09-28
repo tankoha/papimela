@@ -996,7 +996,13 @@ TPMLTextInputSystem.SelectBackend:
 ### 7.8 Fcitx5 バックエンド（`PaPiMeLa.TextInput.Fcitx`、P2）
 
 - セッションバスの `org.fcitx.Fcitx5` → `org.fcitx.Fcitx.InputMethod1.CreateInputContext(a(ss))` → `org.fcitx.Fcitx.InputContext1`。
-- `UpdateFormattedPreedit(a(si), cursor)` の各要素が文節に相当し、フラグ `HighLight` を `Focused` に、`Underline` のみを `Converted`、フラグ無しを `Unconverted` に対応させる **[要検証: fcitx5-mozc / fcitx5-anthy / fcitx5-chinese-addons の実際のフラグ]**。
+- `UpdateFormattedPreedit(a(si), cursor)` の各要素が文節に相当する。フラグ → 状態の対応は **fcitx5-mozc で実測して次の規則に確定した**（`test/test_fcitx_textinput.pas` が検証）:
+  1. `HighLight` を持つ文節 → `Focused`
+  2. `HighLight` がどの文節にも無ければ、**全文節を `Unconverted`**
+  3. `HighLight` がどこかにあり、その文節が `Underline` のみ → `Converted`
+
+  規則 2 が必要な理由: ローマ字入力中（変換前）の「わたしのなまえ」は `Underline` 単独で届く。「`Underline` のみ → `Converted`」と単純に決めると、未変換のかなを変換済みとして描いてしまう。`HighLight` の有無が変換段階に入ったかの判定になる。**[要検証: fcitx5-anthy / fcitx5-chinese-addons]**
+- `UpdateFormattedPreedit` の `cursor` は **UTF-8 バイトオフセット**だが、`SetSurroundingText` の `cursor` / `anchor` は**コードポイント単位**。この非対称は fcitx5 側の仕様であり、papimela が `PaPiMeLa.Unicode` で吸収する。
 - `SetSurroundingText` / `DeleteSurroundingText` は IBus とほぼ同形。能力 `CAPABILITY_SURROUNDING_TEXT (1<<5)`、`CAPABILITY_PREEDIT (1<<1)`、`CAPABILITY_FORMATTED_PREEDIT (1<<4)`。
 - SDL の `SDL_fcitx.c`（441 行）は Fcitx5 の D-Bus API を使っているので接続手順は参考にできる。
 
