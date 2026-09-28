@@ -1165,11 +1165,11 @@ wayland-scanner の Pascal 版。C の `wayland-scanner` が生成する `*-clie
 
 影響の大きい順。
 
-1. **IBus の属性 → 文節状態のマッピング規則**（7.4 の手順 3）。ibus-mozc / ibus-anthy / ibus-skk / ibus-libpinyin / ibus-hangul で `dbus-monitor` を使って実際の `IBusAttrList` を採取し、`TPMLIBusSegmenter` の規則を確定する。エンジンごとの差異が大きければエンジン名で分岐する。**設計の中核であり、TextInput.IBus 実装前に必須**。
-2. **IBus 直結時の text-input-v3 との競合**（7.5）。GNOME / KDE / Sway の 3 環境で検証。GNOME で mutter が IBus の唯一のクライアントであることを前提にした最適化（例: mutter がフォーカスを握るとアプリ直結のコンテキストにフォーカスが来ない）があると成立しない。成立しない環境では text-input-v3 にフォールバックする（能力が落ちる）判定条件を決める。
-3. **IBus `ProcessKeyEvent` の非同期化と順序保証**（7.4、7.5）。返信待ちの間にアプリがキー状態（`Keyboard.IsDown`）を参照したときの見え方。「IME 返信待ちのキーは未押下として見せる」か「押下として見せるがイベントは遅延」か。前者を仮採用。
-4. **`SetCursorLocationRelative` の対応状況**。IBus の最低バージョン、コンポジタ（mutter / kwin / sway + ibus のパネル）での実効性。使えないなら候補ウィンドウの位置がずれるだけで機能は動く。
-5. **`wl_proxy_marshal_flags` の可変長引数を FPC から呼ぶ方法**（9.2）。`wl_proxy_marshal_array_flags` を既定にすれば回避できるが、生成コードが `wl_argument` 配列の組み立てを含むため少し長くなる。配列版を仮採用。
+1. **IBus の属性 → 文節状態のマッピング規則**（7.4 の手順 3）。ibus-mozc / ibus-anthy / ibus-skk / ibus-libpinyin / ibus-hangul で `dbus-monitor` を使って実際の `IBusAttrList` を採取し、`TPMLIBusSegmenter` の規則を確定する。エンジンごとの差異が大きければエンジン名で分岐する。**Fcitx5 側は実測済み**（`spikes/RESULTS.md`）: `UpdateFormattedPreedit` の要素が文節に 1 対 1 対応し、注目文節は `HighLight (16)`、非注目文節は `Underline (8)`。IBus 経路も同じ規則（`DOUBLE` = 注目）である見込みだが未実測。
+2. ~~**IBus 直結時の text-input-v3 との競合**~~ → **検証済み（`spikes/RESULTS.md`）**。labwc (wlroots) + fcitx5 で、`zwp_text_input_manager_v3` を bind せずに D-Bus 直結する構成が成立することを確認した。競合は起きない（text-input-v3 は加算的な機能であり、text_input オブジェクトを作らなければコンポジタは通常クライアントとして扱い、キーは `wl_keyboard` から届く）。**残る検証対象は GNOME (mutter) / KDE (kwin)**。mutter が IBus の唯一のクライアントであることを前提にした最適化があると成立しない可能性があるため、この 2 環境では別途確認が必要。
+3. **IBus / Fcitx5 `ProcessKeyEvent` の非同期化と順序保証**（7.4、7.5）。返信待ちの間にアプリがキー状態（`Keyboard.IsDown`）を参照したときの見え方。「IME 返信待ちのキーは未押下として見せる」か「押下として見せるがイベントは遅延」か。前者を仮採用。
+4. **候補ウィンドウ位置の伝達**。IBus の `SetCursorLocationRelative` は対応状況が不明（最低バージョン、コンポジタ側の実効性）。**Fcitx5 には `SetCursorRectV2(i,i,i,i,d)` があり、第 5 引数がスケール値**なので Wayland のグローバル座標問題を回避できる（introspect で確認済み）。Fcitx5 経路ではこちらを使う。使えない場合も候補ウィンドウの位置がずれるだけで機能は動く。
+5. ~~**`wl_proxy_marshal_flags` の可変長引数を FPC から呼ぶ方法**~~ → **検証済み（`spikes/RESULTS.md`）**。FPC 3.2.2 の `cdecl; varargs` で直接呼べることを実証した（NULL 1 個のみのケース、および uint32 + 文字列 + uint32 + NULL の混在ケースの両方）。`wl_proxy_marshal_array_flags` による回避は不要。生成器は C の生成コードと同じ形（`marshal_flags` 直接呼び出し）を出力してよい。
 6. **Wayland 読み取りスレッド**（`SDL_waylandeventthread.c` 相当）の要否。メインスレッドがブロックしているときにコンポジタからのイベントを取りこぼしてキーリピートや `ping` の応答が遅れる問題への対処。初回は無し。`Wait` ベースのアプリなら問題にならない。
 7. **`spa_pod_builder` の Pascal 再実装**（9.4）。PipeWire のヘッダ内インライン関数を再実装するのはライセンス（MIT）上問題ないが、バイナリレイアウトの正確性検証が必要。難しければ初回は PulseAudio バックエンドを既定にし、PipeWire は pipewire-pulse 経由で使う（機能は同等、レイテンシは劣る）。
 8. **ブリッタ生成器**（9.5）。`sdlgenblit.pl` を FPC に移植するか、Perl のまま `tools/` に置くか。ビルド時依存を FPC だけにしたいので移植を仮採用。生成された 11k 行のコンパイル時間も確認する。

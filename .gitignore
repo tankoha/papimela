@@ -7,3 +7,7 @@ reference/
 *.compiled
 lib/
 backup/
+
+# スパイクの実行ファイル (拡張子が無いので個別に列挙)
+spikes/spike1_wayland
+spikes/spike2_fcitx
