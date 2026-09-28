@@ -294,6 +294,8 @@ SDL の `SDL_VideoDevice` を、**責務ごとの抽象クラスに分解し、�
 
 ### 3.2 ビデオ軸の抽象クラス群
 
+実装済み部分のクラス図は `docs/diagrams/backend-abstraction.md`（Mermaid、GitHub 上でそのまま描画される）。
+
 ```
 TPMLVideoBackend（デバイス単位。1 Context に 1 つ）
   ├─ 必須: Connect / Disconnect / EnumerateDisplays / CreateWindowBackend / PumpEvents / WaitEvents / WakeEventLoop
