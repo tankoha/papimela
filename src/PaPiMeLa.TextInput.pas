@@ -21,7 +21,6 @@
     - 文節を提供しないバックエンドは SegmentsReliable = False で全体を 1 文節にする
 
   NOT RESOLVED:
-    - Session.Window は TPMLWindow（#10 Video）が未実装のため TObject
     - 埋め込み候補（TextEditingCandidates）はバックエンド側が未実装
 
   Copyright (C) 2026 papimela contributors
@@ -39,6 +38,7 @@ uses
   PaPiMeLa.Errors,
   PaPiMeLa.Unicode,
   PaPiMeLa.Core.Base,
+  PaPiMeLa.Video,
   PaPiMeLa.Events;
 
 type
@@ -106,7 +106,7 @@ type
   TPMLTextInputSession = class sealed(TPMLSystemObject)
   strict private
     FSystem   : TPMLTextInputSystem;
-    FWindow   : TObject;
+    FWindow   : TPMLWindow;
     FClient   : IPMLTextInputClient;
     FInputType: TPMLTextInputType;
     FHints    : TPMLTextInputHints;
@@ -116,7 +116,7 @@ type
     // System が Sink 経由で更新する。ユニット内限定。
     FComposition: TPMLComposition;
   public
-    constructor Create(ASystem: TPMLTextInputSystem; AWindow: TObject;
+    constructor Create(ASystem: TPMLTextInputSystem; AWindow: TPMLWindow;
       AClient: IPMLTextInputClient; AType: TPMLTextInputType;
       AHints: TPMLTextInputHints);
 
@@ -126,7 +126,7 @@ type
     procedure NotifyCursorRectChanged;
     procedure ResetComposition;
 
-    property Window      : TObject read FWindow;
+    property Window      : TPMLWindow read FWindow;
     property Client      : IPMLTextInputClient read FClient;
     property InputType   : TPMLTextInputType read FInputType;
     property Hints       : TPMLTextInputHints read FHints;
@@ -154,7 +154,7 @@ type
       AQueue: TPMLEventQueue; const APreferred: String = '');
     destructor Destroy; override;
 
-    function  Start(AWindow: TObject; AClient: IPMLTextInputClient;
+    function  Start(AWindow: TPMLWindow; AClient: IPMLTextInputClient;
       AType: TPMLTextInputType = TPMLTextInputType.Text;
       AHints: TPMLTextInputHints = []): TPMLTextInputSession;
     procedure Stop;
@@ -187,7 +187,7 @@ uses
 { TPMLTextInputSession }
 
 constructor TPMLTextInputSession.Create(ASystem: TPMLTextInputSystem;
-  AWindow: TObject; AClient: IPMLTextInputClient; AType: TPMLTextInputType;
+  AWindow: TPMLWindow; AClient: IPMLTextInputClient; AType: TPMLTextInputType;
   AHints: TPMLTextInputHints);
 begin
   inherited Create(ASystem.ContextRef, ASystem);
@@ -314,7 +314,7 @@ begin
     FBackend.Pump(ATimeoutMs);
 end;
 
-function TPMLTextInputSystem.Start(AWindow: TObject; AClient: IPMLTextInputClient;
+function TPMLTextInputSystem.Start(AWindow: TPMLWindow; AClient: IPMLTextInputClient;
   AType: TPMLTextInputType; AHints: TPMLTextInputHints): TPMLTextInputSession;
 begin
   CheckMainThread;

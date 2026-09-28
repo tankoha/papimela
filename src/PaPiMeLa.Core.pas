@@ -20,8 +20,7 @@
     - Context を生成したスレッドがメインスレッド。子はそれを継承する
 
   NOT RESOLVED:
-    - Video / Audio / Joysticks は未実装のため常に nil。要求されたら
-      EPMLUnsupported を投げる
+    - Audio / Joysticks は未実装のため常に nil。要求されたら EPMLUnsupported を投げる
     - TPMLTimerService は TicksNS のみ。タイマースレッドと Timer.AddTimer は
       PaPiMeLa.Threading（#8）の後
     - TPMLHints / TPMLLog は未実装。Log は当面 Context.LogInfo で標準出力へ
@@ -42,6 +41,7 @@ uses
   PaPiMeLa.Errors,
   PaPiMeLa.Core.Base,
   PaPiMeLa.Events,
+  PaPiMeLa.Video,
   PaPiMeLa.TextInput;
 
 type
@@ -62,6 +62,8 @@ type
     // 使用する IME バックエンドを明示指定する（'fcitx' / 'ibus' / 'wayland' / 'none'）。
     // 空なら PAPIMELA_IME 環境変数、それも無ければ自動選択。
     PreferredTextInput: String;
+    // 使用するビデオバックエンドを明示指定する（'wayland'）。空なら PAPIMELA_VIDEO。
+    PreferredVideo    : String;
     // イベントキューの容量（イベント数）。
     EventQueueCapacity: Integer;
     MinimumLogLevel   : TPMLLogLevel;
@@ -72,6 +74,7 @@ type
   strict private
     FEvents    : TPMLEventQueue;
     FTimer     : TPMLTimerService;
+    FVideo     : TPMLVideoSystem;
     FTextInput : TPMLTextInputSystem;
     FSubsystems: TPMLSubsystems;
     FMinLevel  : TPMLLogLevel;
@@ -84,6 +87,7 @@ type
 
     property Events    : TPMLEventQueue      read FEvents;
     property Timer     : TPMLTimerService    read FTimer;
+    property Video     : TPMLVideoSystem     read FVideo;
     property TextInput : TPMLTextInputSystem read FTextInput;
     property Subsystems: TPMLSubsystems      read FSubsystems;
   end;
@@ -94,6 +98,7 @@ constructor TPMLContextOptions.Create;
 begin
   inherited Create;
   PreferredTextInput := '';
+  PreferredVideo := '';
   EventQueueCapacity := 256;
   MinimumLogLevel := TPMLLogLevel.Info;
 end;
@@ -130,8 +135,10 @@ begin
     FTimer := TPMLTimerService.Create(Self, Self);
 
     if TPMLSubsystem.Video in ASubsystems then
-      raise EPMLUnsupported.Create(
-        'the Video subsystem is not implemented yet (see docs/DESIGN.md chapter 11)');
+    begin
+      FVideo := TPMLVideoSystem.Create(Self, Self, FEvents, Opts.PreferredVideo);
+      LogFmt(TPMLLogLevel.Info, 'video backend: %s', [FVideo.BackendName]);
+    end;
     if TPMLSubsystem.Audio in ASubsystems then
       raise EPMLUnsupported.Create('the Audio subsystem is not implemented yet');
     if (TPMLSubsystem.Joystick in ASubsystems)
@@ -155,6 +162,7 @@ destructor TPMLContext.Destroy;
 begin
   // §2.4 の破棄順序: TextInput → Joystick → Audio → Video → Timer → Events
   FreeAndNil(FTextInput);
+  FreeAndNil(FVideo);
   FreeAndNil(FTimer);
   FreeAndNil(FEvents);
   inherited Destroy;
