@@ -62,6 +62,8 @@ type
     // バイト数へ変換するために保持する。
     FSurrounding     : String;
     FSurroundingCursor: Integer;   // コードポイント位置
+    // 致命的でないが診断に必要なエラー。例外を投げ直さない箇所で記録する。
+    FLastNonFatalError: String;
     procedure Subscribe;
     procedure SetCapability(AValue: QWord);
     procedure DispatchSignal(AMsg: PDBusMessage);
@@ -84,6 +86,9 @@ type
     procedure UpdateCursorRect(const ARect: TPMLRect; AScale: Double); override;
     function  FilterKey(const AKey: TPMLKeyEventData; AIsRelease: Boolean): TPMLKeyFilterResult; override;
     procedure Pump(ATimeoutMs: Integer); override;
+
+    // 直近の「無視したが記録した」エラー。空なら何も起きていない。
+    property LastNonFatalError: String read FLastNonFatalError;
   end;
 
 implementation
@@ -233,8 +238,11 @@ begin
         FConn.CallVoid(FCITX_SERVICE, FICPath, IC_IFACE, 'FocusOut');
       FConn.CallVoid(FCITX_SERVICE, FICPath, IC_IFACE, 'DestroyIC');
     except
-      // 切断時のエラーは無視する。既に fcitx5 が終了している場合がある。
-      on E: EPMLError do ;
+      // 切断時のエラーで例外を投げ直さない。既に fcitx5 が終了していれば
+      // FocusOut も DestroyIC も失敗するが、こちらはどのみち閉じる。
+      // ただし黙って捨てると原因が追えなくなるので記録は残す。
+      on E: EPMLError do
+        FLastNonFatalError := 'Disconnect: ' + E.Message;
     end;
   end;
   FActive := False;
@@ -257,7 +265,9 @@ begin
     FConn.CallVoid(FCITX_SERVICE, CTRL_PATH, CTRL_IFACE, 'Activate');
   except
     // Controller が無い構成でも入力自体は動くので致命的ではない。
-    on E: EPMLError do ;
+    // ただし「キーが消費されない」症状の原因になりうるので記録は残す。
+    on E: EPMLError do
+      FLastNonFatalError := 'Activate: ' + E.Message;
   end;
 end;
 

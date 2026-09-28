@@ -29,6 +29,7 @@ papimela で実行したテストの記録。日時は実測値（ファイル�
 | C-01 | `src/` の全ユニット（Types / Errors / Unicode / Core.Base / Core / Events / Platform.DynLib / Platform.DBus / Platform.Wayland.Client / TextInput 系 3 本 / Video 系 5 本） | 2026-09-28 22:49 | **PASS** | 全 19 ユニット。到達過程で D-03〜D-08、D-19 を修正 |
 | C-02 | `tools/wlscan-pas` | 2026-09-28 22:24 | **PASS** | — |
 | C-03 | 生成プロトコル 21 ユニット（9230 行） | 2026-09-28 22:24 | **PASS 21 / 21** | 初回は 9 / 21 が失敗（D-10〜D-12）。§9.2 が挙げる XML のうち、`reference/SDL/wayland-protocols/` にあるものすべて |
+| C-04 | **rawpaco 静的解析（激辛モード `--fail-on=warning`）** — `src` / `src/generated` / `test` / `spikes` / `tools` の全 Pascal ファイル | 2026-09-29 | **PASS 指摘 0 件** | 導入初回は 2 件の指摘（D-20）。修正後は 0 件。`.github/workflows/lint.yml` で push / pull_request ごとに走る |
 
 ## 3. アサーションを置いていない項目
 

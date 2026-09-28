@@ -1,0 +1,73 @@
+name: lint
+
+# push ごとに rawpaco の静的解析を激辛モード（--fail-on=warning）で走らせる。
+# pull_request でも走らせるのは、--format=github の注釈が PR の差分行に
+# インラインで付くのがレビュー時に最も効くため。
+on:
+  push:
+  pull_request:
+
+jobs:
+  rawpaco:
+    name: rawpaco (激辛モード)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout papimela
+        uses: actions/checkout@v4
+
+      # rawpaco は公開リポジトリなのでトークン不要。
+      #
+      # ref を main に固定しているのは、rawpaco 側でルールが増えたら
+      # papimela にも即座に効かせたいため。逆に「rawpaco の更新で突然 CI が
+      # 赤くなる」のを避けたい場合は、ref をコミット SHA に差し替える。
+      - name: Checkout rawpaco
+        uses: actions/checkout@v4
+        with:
+          repository: tankoha/rawpaco
+          ref: main
+          path: .rawpaco
+
+      # rawpaco は tree-sitter を vendoring 済みなので fpc と gcc だけでよい。
+      # gcc は ubuntu-latest に同梱。
+      - name: Install FPC
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y fpc
+
+      - name: Build rawpaco
+        working-directory: .rawpaco
+        run: make
+
+      # 静的解析の前にコンパイルが通ることを確かめる。lint だけ通って
+      # ビルドが壊れている状態を見逃さないための保険。
+      # 不要なら、このステップは削除してよい。
+      #
+      # PaPiMeLa.Core は依存を辿って手書きユニット 17 本すべてを巻き込むが、
+      # 生成プロトコルは実際に使われている 8 本しか通らない。残りも個別に
+      # コンパイルして、生成器の退行を検出できるようにする。
+      - name: Build papimela
+        run: |
+          set -eu
+          mkdir -p lib
+          fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib src/PaPiMeLa.Core.pas
+          fpc -O1 -FUlib tools/wlscan-pas.pas
+          for f in src/generated/*.pas; do
+            fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib "$f"
+          done
+
+      # --fail-on=warning が激辛モード。診断が 1 件でもあれば終了コード 1。
+      # --format=github で GitHub Actions のワークフローコマンド形式にし、
+      # 該当行へインライン注釈を付ける。
+      #
+      # src/generated/ も対象に含めている。生成コードが指摘を受けたら、それは
+      # 生成器 tools/wlscan-pas の不具合なので、むしろ検出したい。
+      - name: Run rawpaco (--fail-on=warning)
+        run: |
+          .rawpaco/src/rawpaco \
+            --fail-on=warning \
+            --format=github \
+            src/*.pas \
+            src/generated/*.pas \
+            test/*.pas \
+            spikes/*.pas \
+            tools/*.pas
