@@ -1,0 +1,9 @@
+reference/
+
+# FPC build artifacts
+*.ppu
+*.o
+*.a
+*.compiled
+lib/
+backup/
