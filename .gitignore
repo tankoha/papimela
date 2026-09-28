@@ -14,3 +14,7 @@ spikes/spike2_fcitx
 
 # テスト実行ファイル
 test/test_fcitx_textinput
+
+# 生成器とテストの実行ファイル
+tools/wlscan-pas
+test/test_wayland_protocols

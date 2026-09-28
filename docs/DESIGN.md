@@ -1120,8 +1120,8 @@ wayland-scanner の Pascal 版。C の `wayland-scanner` が生成する `*-clie
 
 | 要素 | C の wayland-scanner | Pascal 生成 |
 |---|---|---|
-| インターフェース記述子 | `const struct wl_interface xdg_toplevel_interface` + メッセージ表 + 型配列 | `xdg_toplevel_interface: wl_interface` を `initialization` 節ではなく**型付き定数**として生成（`wl_message` の `types` 配列はポインタ配列なので、`{$J+}` 書き込み可能定数 + 初期化手続きで組む。**[要検証: FPC で相互参照するポインタ配列を定数式で書けるか。無理なら `EnsureProtocolsInitialized` を `TPMLDynLib.Load` 後に 1 度呼ぶ]**） |
-| リクエスト | `static inline void xdg_toplevel_set_title(struct xdg_toplevel*, const char*)` → `wl_proxy_marshal_flags` | `procedure xdg_toplevel_set_title(p: Pxdg_toplevel; const title: PChar); inline;` → `wl_proxy_marshal_flags`（可変引数 `cdecl` は FPC で宣言できる。`varargs` 修飾子 **[要検証: `wl_proxy_marshal_flags` の可変長引数を FPC の `varargs` で正しく渡せるか。特に `new_id` と `uint32_t` の混在]**。難しければ `wl_proxy_marshal_array_flags`（`wl_argument` 配列版）を使う。配列版を既定にする方が安全） |
+| インターフェース記述子 | `const struct wl_interface xdg_toplevel_interface` + メッセージ表 + 型配列 | **[解決済み]** 定数式では書けない（`types` はポインタ配列で相互参照するため）。生成器は `EnsureProtocolInitialized` 手続きを出力し、実行時に `types` 配列・メッセージ表・記述子を組む。**コアプロトコルは libwayland が記述子を公開しているので `dlsym` で引き、拡張プロトコルだけ自前で構築する**（libwayland が内部でポインタ比較する経路があるため、コアを二重に定義しない）。実機の labwc で xdg-shell と text-input-v3 の記述子が受理され、`configure` イベントも届くことを `test/test_wayland_protocols.pas` で確認 |
+| リクエスト | `static inline void xdg_toplevel_set_title(struct xdg_toplevel*, const char*)` → `wl_proxy_marshal_flags` | **[解決済み]** `cdecl; varargs` で直接呼べる。**`dlopen` した関数ポインタ経由でも正しく渡る**ことを実測で確認したので、`wl_proxy_marshal_array_flags` による回避は不要。生成形は C と同じ（`destructor` 属性のリクエストは `WL_MARSHAL_FLAG_DESTROY`、`new_id` はプレースホルダの `nil` を引数位置に置く） |
 | イベントリスナー | `struct xdg_toplevel_listener { void (*configure)(...); ... }` | `xdg_toplevel_listener = record configure: procedure(data: Pointer; ...); cdecl; ... end;` + **`Txdg_toplevel_listener` 抽象クラス**（1 イベント = 1 仮想メソッド。8.6）+ サンク束 + `xdg_toplevel_add_listener_object(p, obj: Txdg_toplevel_listener)` |
 | 列挙 | `enum xdg_toplevel_state { ... }` | `{$scopedenums}` の列挙は使わず、`const XDG_TOPLEVEL_STATE_MAXIMIZED = 1;` の整数定数（プロトコル値は疎で、ビットフラグ列挙もある） |
 | バージョン | `XDG_TOPLEVEL_SET_TITLE_SINCE_VERSION` | 同名の定数 |
