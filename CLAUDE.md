@@ -10,6 +10,8 @@ SDL3 を Free Pascal (FPC) の Object Pascal で書き直す再実装プロジ�
 | `docs/DESIGN.md` | 設計の全体。11章の表が由来・難易度・実装担当の割り当て |
 | `docs/CODING-STYLE.md` | コメント規約、ファイルヘッダ、移植コードの変換規則、命名 |
 | `spikes/RESULTS.md` | 実測済みの事実（Wayland varargs、fcitx5 の文節取得） |
+| `docs/TEST-LOG.md` | テスト実行一覧。未検証項目もここに列挙してある |
+| `docs/DEFECTS.md` | 不具合一覧（修正済みも含む全件）。同じ罠を踏まないために読む |
 
 ## 常に効く前提
 
