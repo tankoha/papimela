@@ -45,6 +45,31 @@ type
     function IsEmpty: Boolean; inline;
   end;
 
+
+  { 8 ビット 4 成分の色。並びは R, G, B, A で固定する。
+
+    ピクセル形式（TPMLPixelFormat）が持つ並びとは独立で、変換は
+    PaPiMeLa.Pixels の MapRGBA / GetRGBA が行う。ここは「色そのもの」の型。 }
+  TPMLColor = record
+    R, G, B, A: Byte;
+    class function Make(AR, AG, AB: Byte; AA: Byte = 255): TPMLColor; static; inline;
+    // $RRGGBB または $AARRGGBB。8 桁でなければ A は 255 にする。
+    class function FromHex(AValue: LongWord; AHasAlpha: Boolean = False): TPMLColor; static;
+    class function White: TPMLColor; static; inline;
+    class function Black: TPMLColor; static; inline;
+    class function Transparent: TPMLColor; static; inline;
+    function Equals(const AOther: TPMLColor): Boolean; inline;
+  end;
+  TPMLColors = array of TPMLColor;
+
+  { 0..1 の浮動小数点色。レンダラと色空間変換で使う。 }
+  TPMLFColor = record
+    R, G, B, A: Single;
+    class function Make(AR, AG, AB: Single; AA: Single = 1.0): TPMLFColor; static; inline;
+    class function FromColor(const AColor: TPMLColor): TPMLFColor; static; inline;
+    function ToColor: TPMLColor;
+  end;
+
   TPMLKeyModifier = (Shift, Ctrl, Alt, Super, CapsLock, NumLock);
   TPMLKeyModifiers = set of TPMLKeyModifier;
 
@@ -166,6 +191,87 @@ begin
   else
     Result := 'Unknown';
   end;
+end;
+
+
+{ TPMLColor }
+
+class function TPMLColor.Make(AR, AG, AB: Byte; AA: Byte): TPMLColor;
+begin
+  Result.R := AR;
+  Result.G := AG;
+  Result.B := AB;
+  Result.A := AA;
+end;
+
+class function TPMLColor.FromHex(AValue: LongWord; AHasAlpha: Boolean): TPMLColor;
+begin
+  Result.R := Byte(AValue shr 16);
+  Result.G := Byte(AValue shr 8);
+  Result.B := Byte(AValue);
+  if AHasAlpha then
+    Result.A := Byte(AValue shr 24)
+  else
+    Result.A := 255;
+end;
+
+class function TPMLColor.White: TPMLColor;
+begin
+  Result := TPMLColor.Make(255, 255, 255, 255);
+end;
+
+class function TPMLColor.Black: TPMLColor;
+begin
+  Result := TPMLColor.Make(0, 0, 0, 255);
+end;
+
+class function TPMLColor.Transparent: TPMLColor;
+begin
+  Result := TPMLColor.Make(0, 0, 0, 0);
+end;
+
+function TPMLColor.Equals(const AOther: TPMLColor): Boolean;
+begin
+  Result := (R = AOther.R) and (G = AOther.G)
+        and (B = AOther.B) and (A = AOther.A);
+end;
+
+{ TPMLFColor }
+
+class function TPMLFColor.Make(AR, AG, AB: Single; AA: Single): TPMLFColor;
+begin
+  Result.R := AR;
+  Result.G := AG;
+  Result.B := AB;
+  Result.A := AA;
+end;
+
+class function TPMLFColor.FromColor(const AColor: TPMLColor): TPMLFColor;
+begin
+  Result.R := AColor.R / 255.0;
+  Result.G := AColor.G / 255.0;
+  Result.B := AColor.B / 255.0;
+  Result.A := AColor.A / 255.0;
+end;
+
+{ 0..1 の範囲外は切り詰める。レンダラの計算結果がはみ出すことがある。 }
+function TPMLFColor.ToColor: TPMLColor;
+
+  function Clamp8(AValue: Single): Byte;
+  begin
+    if AValue <= 0 then
+      Result := 0
+    else if AValue >= 1 then
+      Result := 255
+    else
+      Result := Byte(Round(AValue * 255.0));
+  end;
+
+begin
+  Result.R := Clamp8(R);
+  Result.G := Clamp8(G);
+  Result.B := Clamp8(B);
+  Result.A := Clamp8(A);
 end;
 
 end.

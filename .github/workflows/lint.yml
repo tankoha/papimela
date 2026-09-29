@@ -72,9 +72,10 @@ jobs:
       - name: Run headless tests
         run: |
           set -eu
-          fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib \
-            -otest/test_dummy_video test/test_dummy_video.pas
-          ./test/test_dummy_video
+          for t in test_dummy_video test_pixels; do
+            fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/$t test/$t.pas
+            ./test/$t
+          done
 
       # 図と実装の乖離検査。英日の Mermaid ブロックの同一性と、図に出てくる型が
       # 実装に存在することを確認する。速いので lint より先に置く。

@@ -3,7 +3,7 @@
 papimela で実行したテストの記録。日時は実測値（ファイルの mtime と git のコミット時刻、
 および最終一括実行の時刻）に基づく。
 
-最終一括実行: **2026-09-29**（自動テスト 9 本すべて成功、アサーション 197 件・失敗 0 件）。
+最終一括実行: **2026-09-29**（自動テスト 10 本すべて成功、アサーション 249 件・失敗 0 件）。
 対話テスト T-07 / T-09 も同日に別途実行し、観測項目をすべて確認した。
 
 ## 1. 実行可能テスト
@@ -20,7 +20,8 @@ papimela で実行したテストの記録。日時は実測値（ファイル�
 | T-08 | `test/test_pointer_constraints` | ポインタ拘束。能力への写像、要求の記録、そして**拘束の張り替えがプロトコルに違反しないこと** | 2026-09-29 | **PASS 23 / 0** | ロックと閉じ込めを同じシート・同じサーフェスに同時に作ると接続が切られるので、`wl_display_get_error` が終始 0 であることが張り替え順序の証明になる。拘束が**有効になる**かはカーソル位置に依存するため観測扱い（T-09 が担当）。D-24 はこのテストで見つかった |
 | T-09 | `test/demo_pointer_constraints`（**対話・人の操作**） | カーソルをウィンドウ内に入れた状態でロック / 閉じ込め / 相対移動 / カーソル形状が実際に有効になるか | 2026-09-29 | **PASS 観測項目 5 / 5** | 人の目による確認。観測内容は下表。D-25〜D-28 はこのテストで見つかった（すべてデモ側の欠陥） |
 | T-10 | `test/test_touch_cursor` | タッチの状態機械（移動量の算出、ウィンドウの引き継ぎ、取り消し）と cursor-shape-v1 の対応表・能力・切り替え | 2026-09-29 | **PASS 41 / 0** | タッチは合成入力。Wayland は移動量を送らず motion / up にウィンドウも付けないので、そこを埋める部分がタッチ対応の実体であり、ハードウェア無しで検証できる。**実機のタッチパネルは手元に無く未検証**。カーソル形状の実際の適用はカーソル位置に依存するため T-09 が担当 |
-| T-11 | `test/test_dummy_video` | **表示サーバ無し**で公開 API（ウィンドウ生成・リサイズ・状態・フレームバッファ）が動くか | 2026-09-29 | **PASS 38 / 0** | `WAYLAND_DISPLAY` と `DISPLAY` を外して実行しても通る。**CI で走る唯一の実行テスト**。D-29 はこのテストを書いていて見つかった |
+| T-11 | `test/test_dummy_video` | **表示サーバ無し**で公開 API（ウィンドウ生成・リサイズ・状態・フレームバッファ）が動くか | 2026-09-29 | **PASS 38 / 0** | `WAYLAND_DISPLAY` と `DISPLAY` を外して実行しても通る。**CI で走る実行テストの 1 本**。D-29 はこのテストを書いていて見つかった |
+| T-12 | `test/test_pixels` | ピクセル形式の識別、マスクの導出、色 ↔ 画素値の往復 | 2026-09-29 | **PASS 52 / 0** | **表示サーバ不要。CI で走る。** マスクは SDL の 240 行の switch を「並びとレイアウトからの算出」に置き換えたので、13 形式のマスクを SDL の定義と直接比較し、さらに 8 ビット成分の 12 形式 x 6 色で往復一致を検査する。D-31 はこの往復検査で見つかった |
 
 ### T-04 が決定的である理由
 
@@ -114,14 +115,16 @@ fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/demo_japanese_input  test/d
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_pointer_constraints test/test_pointer_constraints.pas
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_touch_cursor        test/test_touch_cursor.pas
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_dummy_video          test/test_dummy_video.pas
+fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_pixels               test/test_pixels.pas
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/demo_pointer_constraints test/demo_pointer_constraints.pas
 fpc -O1 -gl spikes/spike1_wayland.pas && fpc -O1 -gl spikes/spike2_fcitx.pas
 ./spikes/spike1_wayland && ./spikes/spike2_fcitx
 ./test/test_fcitx_textinput && ./test/test_wayland_protocols && ./test/test_wayland_window
 ./test/test_key_routing && ./test/test_pointer_constraints && ./test/test_touch_cursor
 
-# 表示サーバが無くても通る唯一のテスト（CI で走るのはこれ）。
+# 表示サーバが無くても通るテスト（CI で走るのはこの 2 本）。
 env -u WAYLAND_DISPLAY -u DISPLAY ./test/test_dummy_video
+env -u WAYLAND_DISPLAY -u DISPLAY ./test/test_pixels
 
 # T-07（対話）。ウィンドウをクリックしてフォーカスし、日本語を打つ。
 # 途中で別ウィンドウへ移って戻ると、フォーカスの往復が IME に伝わることも確認できる。
