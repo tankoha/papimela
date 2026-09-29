@@ -70,6 +70,23 @@ type
     function ToColor: TPMLColor;
   end;
 
+
+  { 合成の仕方。数式は SDL_blendmode.h の記述に合わせてある。
+
+      None  : dstRGBA = srcRGBA
+      Blend : dstRGB = srcRGB * srcA + dstRGB * (1 - srcA)
+              dstA   = srcA + dstA * (1 - srcA)
+      Add   : dstRGB = srcRGB * srcA + dstRGB、dstA はそのまま
+      Modulate: dstRGB = srcRGB * dstRGB、dstA はそのまま
+      Multiply: dstRGB = srcRGB * dstRGB + dstRGB * (1 - srcA)、dstA はそのまま
+
+    SDL の MOD / MUL を Modulate / Multiply と綴るのは、`mod` が Pascal の
+    予約語で列挙子にできないため。 }
+  TPMLBlendMode = (None, Blend, Add, Modulate, Multiply);
+
+  // 拡大縮小の補間。
+  TPMLScaleMode = (Nearest, Linear);
+
   TPMLKeyModifier = (Shift, Ctrl, Alt, Super, CapsLock, NumLock);
   TPMLKeyModifiers = set of TPMLKeyModifier;
 

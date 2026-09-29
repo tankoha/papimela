@@ -72,7 +72,7 @@ jobs:
       - name: Run headless tests
         run: |
           set -eu
-          for t in test_dummy_video test_pixels test_io test_surface; do
+          for t in test_dummy_video test_pixels test_io test_surface test_blit; do
             fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/$t test/$t.pas
             ./test/$t
           done

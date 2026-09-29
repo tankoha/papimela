@@ -79,6 +79,8 @@ type
     FColorKey  : LongWord;
     FHasColorKey: Boolean;
     FColorMod  : TPMLColor;
+    FAlphaMod  : Byte;
+    FBlendMode : TPMLBlendMode;
     FLockCount : Integer;
     // 共有（CreateShared）で生成したときだけ 0 以上になる。-1 = 共有しない。
     FRefCount  : LongInt;
@@ -146,6 +148,8 @@ type
     property ClipRect : TPMLRect read FClipRect write SetClipRect;
     property ColorKey : LongWord read FColorKey;
     property ColorMod : TPMLColor read FColorMod write FColorMod;
+    property AlphaMod : Byte read FAlphaMod write FAlphaMod;
+    property BlendMode: TPMLBlendMode read FBlendMode write FBlendMode;
     property MustLock : Boolean read GetMustLock;
   end;
 
@@ -193,6 +197,7 @@ begin
   FOwnsPixels := True;
   FClipRect := TPMLRect.Make(0, 0, FWidth, FHeight);
   FColorMod := TPMLColor.White;
+  FAlphaMod := 255;
   FRefCount := -1;
 end;
 
@@ -217,6 +222,7 @@ begin
   FOwnsPixels := False;
   FClipRect := TPMLRect.Make(0, 0, FWidth, FHeight);
   FColorMod := TPMLColor.White;
+  FAlphaMod := 255;
   FRefCount := -1;
 end;
 
@@ -434,6 +440,8 @@ begin
   Result.FColorKey := FColorKey;
   Result.FHasColorKey := FHasColorKey;
   Result.FColorMod := FColorMod;
+  Result.FAlphaMod := FAlphaMod;
+  Result.FBlendMode := FBlendMode;
   if FPalette <> nil then
     Result.SetPalette(FPalette, False);
 end;

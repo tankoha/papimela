@@ -3,7 +3,7 @@
 papimela で実行したテストの記録。日時は実測値（ファイルの mtime と git のコミット時刻、
 および最終一括実行の時刻）に基づく。
 
-最終一括実行: **2026-09-30**（自動テスト 12 本すべて成功、アサーション 325 件・失敗 0 件）。
+最終一括実行: **2026-09-30**（自動テスト 13 本すべて成功、アサーション 352 件・失敗 0 件）。
 対話テスト T-07 / T-09 も同日に別途実行し、観測項目をすべて確認した。
 
 ## 1. 実行可能テスト
@@ -24,6 +24,7 @@ papimela で実行したテストの記録。日時は実測値（ファイル�
 | T-12 | `test/test_pixels` | ピクセル形式の識別、マスクの導出、色 ↔ 画素値の往復 | 2026-09-29 | **PASS 52 / 0** | **表示サーバ不要。CI で走る。** マスクは SDL の 240 行の switch を「並びとレイアウトからの算出」に置き換えたので、13 形式のマスクを SDL の定義と直接比較し、さらに 8 ビット成分の 12 形式 x 6 色で往復一致を検査する。D-31 はこの往復検査で見つかった |
 | T-13 | `test/test_io` | ストリーム。ファイルの往復、型付き読み書きのバイト順、既存メモリの参照、**小刻みにしか返さない相手からの読み切り** | 2026-09-30 | **PASS 31 / 0** | **表示サーバ不要。CI で走る。** 1 回 7 バイトしか返さないストリームを自前で用意して噛ませる。普通のファイルは要求どおり返すので、これが無いと SDL から引き継いだ回避策を通せない。D-32 はこの検査で見つかった |
 | T-14 | `test/test_surface` | サーフェスの生成・所有・画素・変換・反転、共有の opt-in、BMP の往復 | 2026-09-30 | **PASS 45 / 0** | **表示サーバ不要。CI で走る。** BMP は書いて読み直して一致するかを見る。幅 13 の 24 ビット（行に詰め物が要る）と 32 ビットのアルファ付きの両方。加えて手で組んだ 8 ビットパレット BMP を読ませ、他のソフトが書いた並びも解けることを確認する |
+| T-15 | `test/test_blit` | ブリッタ群。等倍転送・クリップ・合成モード・カラーキー・変調・拡大縮小・塗りつぶし | 2026-09-30 | **PASS 27 / 0** | **表示サーバ不要。CI で走る。** テスト側に独立した参照実装を書いて突き合わせる。転送はクリップ規則ごと別に書き下ろし、合成は浮動小数点で計算して ±1 まで許す。実装は「形式が同じなら行ごとに Move、違えば 1 画素ずつ」と分岐するので、**どちらの経路でも同じ絵になること**を見るのが要点 |
 
 ### T-04 が決定的である理由
 
@@ -120,17 +121,19 @@ fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_dummy_video          t
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_pixels               test/test_pixels.pas
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_io                   test/test_io.pas
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_surface              test/test_surface.pas
+fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_blit                 test/test_blit.pas
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/demo_pointer_constraints test/demo_pointer_constraints.pas
 fpc -O1 -gl spikes/spike1_wayland.pas && fpc -O1 -gl spikes/spike2_fcitx.pas
 ./spikes/spike1_wayland && ./spikes/spike2_fcitx
 ./test/test_fcitx_textinput && ./test/test_wayland_protocols && ./test/test_wayland_window
 ./test/test_key_routing && ./test/test_pointer_constraints && ./test/test_touch_cursor
 
-# 表示サーバが無くても通るテスト（CI で走るのはこの 4 本）。
+# 表示サーバが無くても通るテスト（CI で走るのはこの 5 本）。
 env -u WAYLAND_DISPLAY -u DISPLAY ./test/test_dummy_video
 env -u WAYLAND_DISPLAY -u DISPLAY ./test/test_pixels
 env -u WAYLAND_DISPLAY -u DISPLAY ./test/test_io
 env -u WAYLAND_DISPLAY -u DISPLAY ./test/test_surface
+env -u WAYLAND_DISPLAY -u DISPLAY ./test/test_blit
 
 # T-07（対話）。ウィンドウをクリックしてフォーカスし、日本語を打つ。
 # 途中で別ウィンドウへ移って戻ると、フォーカスの往復が IME に伝わることも確認できる。
