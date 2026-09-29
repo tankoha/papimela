@@ -98,10 +98,16 @@ included, because the ones already fixed are the ones most likely to come back.
 
 ### A closing thought
 
-Having spent this long pulling a hand-rolled vtable apart and putting it back
-together as a class hierarchy, I keep arriving at the same place.
+SDL builds its vtables by hand, in C, on purpose, and it has carried the
+industry for thirty years doing exactly that. I have now spent a considerable
+stretch of my life taking one of those vtables apart and reassembling it as a
+class hierarchy — which is to say, I have carefully reinvented the thing the C
+programmers were carefully avoiding.
 
-**Surely we do need inheritance after all?**
+It came out smaller, though. And every time I look at it I arrive at the same
+faintly embarrassing question:
+
+**Inheritance. Maybe it was onto something?**
 
 ---
 
@@ -201,11 +207,52 @@ FPC 3.2.2。`docs/DESIGN.md` が設計、`docs/TEST-LOG.md` が実際に何を�
 
 zlib, the same as SDL. See [LICENSE](LICENSE).
 
-papimela does not contribute back to SDL: SDL states that it does not accept
-AI-generated contributions, and parts of this project are AI-assisted. Bugs
-found in SDL while reading it are recorded in `docs/DEFECTS.md` and not
-reported upstream.
+---
 
-SDL には貢献を返さない。SDL は AI 生成物の貢献を受け付けない方針を明示しており、
-このプロジェクトには AI の手が入っているためである。読んでいて見つけた SDL の
-不具合は `docs/DEFECTS.md` に記録するだけで、上流には報告しない。
+## Should this report bugs back to SDL? I genuinely don't know
+
+SDL's position is that it does not accept AI-generated contributions. Parts of
+this project are AI-assisted. That much is clear, and the policy is a
+reasonable one — nobody wants their codebase quietly filling up with code that
+no human has read.
+
+But reading SDL closely enough to restructure it turns up things. At
+`SDL_ibus.c:115`, a D-Bus type-name check overwrites its own argument and then
+compares that argument with itself, so a validation that *looks* like a
+validation always succeeds. It is in `docs/DEFECTS.md`. It has not been
+reported.
+
+And that is where I'm stuck:
+
+- The policy says **keep the AI out**, and I want to respect that.
+- The bug is real, it is in a shipping library, and somebody should know.
+- Writing it up in my own words is not the same as submitting AI-written code.
+- But an AI is what found it, and quietly not mentioning that feels worse than
+  the thing I'd be trying to avoid.
+
+So: to report, or not to report. I am doing a fairly undignified Hamlet about
+it, and I would honestly like to hear what other people think. **If you have a
+view, please open an issue.** I'd rather be argued out of a bad decision than
+make one quietly.
+
+## SDL にバグ報告を返すべきか、本当に迷っている
+
+SDL は AI 生成物の貢献を受け付けない方針を明示している。このプロジェクトには
+AI の手が入っている。そこははっきりしているし、方針自体はもっともだと思う。
+誰も読んでいないコードが自分のコードベースに静かに溜まっていくのは、たしかに困る。
+
+ただ、作り直せるくらい丁寧に読んでいると、見つかってしまうものがある。
+`SDL_ibus.c` の 115 行目で、D-Bus の型名検証が引数を上書きしてから自分自身と
+比較しているため、**検証の形をしたまま必ず成功する**。`docs/DEFECTS.md` に
+記録してある。報告はしていない。
+
+そこで止まっている。
+
+- 方針は**「AI を入れるな」**と言っていて、それは尊重したい
+- バグは実在していて、現に配布されているライブラリの中にあり、誰かは知るべきだ
+- 自分の言葉で書いて出すことと、AI が書いたコードを投げることは同じではない
+- しかし見つけたのは AI で、そこを黙っているのは避けたかった事態より筋が悪い
+
+報告すべきか、せざるべきか。かなり格好のつかないハムレットをやっている。
+**他の人がどう考えるかを本当に聞きたい。意見のある方は Issue を開いてください。**
+静かに間違った判断をするより、議論で止めてもらう方がありがたい。
