@@ -3,7 +3,8 @@
 papimela で実行したテストの記録。日時は実測値（ファイルの mtime と git のコミット時刻、
 および最終一括実行の時刻）に基づく。
 
-最終一括実行: **2026-09-29 10:01**（6 本すべて成功、アサーション 95 件・失敗 0 件）
+最終一括実行: **2026-09-29 10:01**（自動テスト 6 本すべて成功、アサーション 95 件・失敗 0 件）。
+対話テスト T-07 は同日に別途実行し、観測項目 6 件すべてを確認した。
 
 ## 1. 実行可能テスト
 
@@ -15,6 +16,7 @@ papimela で実行したテストの記録。日時は実測値（ファイル�
 | T-04 | `test/test_wayland_protocols` | 生成したプロトコルバインディングが実機のコンポジタと通信できるか | 2026-09-28 22:33 | **PASS 24 / 0** | 自前構築した拡張プロトコルの記述子が受理され、`configure` イベントも到達 |
 | T-05 | `test/test_wayland_window` | Wayland ビデオバックエンド。ウィンドウ生成、configure → ack_configure、wl_shm への描画、リサイズ通知 | 2026-09-28 22:49 | **PASS 19 / 0** | 実際にウィンドウが約 2 秒表示される。ディスプレイ 2 台を列挙、120 フレーム描画、最大化/復帰の往復も確認 |
 | T-06 | `test/test_key_routing` | キーの IME 転送経路（§7.5）。消費されたキーが KeyDown にならないこと | 2026-09-29 10:01 | **PASS 16 / 0** | コンポジタへキーを注入できないため、シートが届けるのと同じ形の合成キーを `TPMLKeyboardState.SendKey` へ直接流す。実キーボード経由の確認は `test/demo_japanese_input`（対話） |
+| T-07 | `test/demo_japanese_input`（**対話・人の操作**） | 実キーボードから fcitx5 を経て文節情報と確定文字列がアプリへ届くか。ウィンドウのフォーカス往復が IME に伝わるか | 2026-09-29 | **PASS 観測項目 6 / 6** | アサーションではなく人の目による確認。観測できたものを下表に残す。D-21・D-22・D-23 はこのデモで見つかった |
 
 ### T-04 が決定的である理由
 
@@ -22,6 +24,24 @@ papimela で実行したテストの記録。日時は実測値（ファイル�
 生成器が自前で組む。1 バイトでも違えばコンポジタはプロトコルエラーを返して接続を切る。
 `xdg_surface.configure` と `xdg_toplevel.configure` が届き、`wl_display_get_error` が終始 0 で
 あることが、記述子の正しさの証明になっている。
+
+### T-07 で実際に観測したもの
+
+自動化できない部分（コンポジタへキーを注入できない、IME の変換結果は辞書に依存する）を
+人が操作して確認する。2026-09-29 の実行で観測できたのは以下。
+
+| 観測項目 | 観測した内容 |
+|---|---|
+| キーマップの受信 | `wl_keyboard.keymap` から xkb キーマップを読み込めた。実行中にコンポジタが再送した場合も再読み込みしている |
+| 変換中テキストの逐次更新 | ローマ字が仮名へ変わる過程が `TextEditing` として 1 打鍵ごとに届く（`ｎ` → `な` → `なｎ` → `なん`） |
+| **複数文節** | `[なんか]<変なタイミングで>`（2 文節）、`[では]<ここでニューヨーク株式市場の様子を見てみましょう>`（2 文節）。§7.8 のフラグ規則（`HighLight` → `Focused`、`Underline` のみ → `Converted`）が実機の fcitx5-mozc で成立した |
+| 確定文字列 | `TextInput` として届き、アプリのバッファに連結される。最終バッファは打った文と一致した |
+| キーの消費 | 変換中の 105 キーすべてが IME に消費され、素通りした `KeyDown` は 0 件。§7.5 の契約が実キーボードでも保たれている |
+| **フォーカスの往復** | 入力中に別ウィンドウへ移り戻る操作を 4 回。`フォーカスを喪失（IME にも FocusOut）` と `取得（IME にも FocusIn）` が毎回対で記録された（D-22・D-23 の修正の確認） |
+
+別の実行では Backspace の扱いも確認している。変換中は IME が消費し、確定後のバッファに
+対しては素通りして `KeyDown` になる。素通りしたキーの keysym は `$FF08`（BackSpace）と
+`$FFE1`（Shift_L）だけだった。
 
 ## 2. コンパイル検証
 
@@ -43,7 +63,7 @@ papimela で実行したテストの記録。日時は実測値（ファイル�
 | GNOME (mutter) / KDE (kwin) での IME 直結 | **未検証** | 検証環境は labwc (wlroots) のみ。mutter / kwin は IME クライアントを一元管理する設計なので別途確認が必要（設計書 §10 項目 2） |
 | fcitx5-anthy / fcitx5-chinese-addons のフラグ対応 | **未検証** | 文節状態のマッピング規則は fcitx5-mozc でのみ実測（設計書 §10 項目 1） |
 | IBus 経路 | **未実装** | バックエンド自体が未実装（第 11 章 #48） |
-| **実キーボードからの日本語入力** | **対話でのみ検証** | `test/demo_japanese_input` を人が操作して確認する。自動テスト T-06 は合成キーで §7.5 の経路だけを検証しており、wl_keyboard からキーが届く部分は含まない |
+| **実キーボードからの日本語入力** | **対話で検証済み（アサーションは無い）** | T-07 として 2026-09-29 に観測済み。自動化は残課題で、コンポジタへキーを注入できないため CI に載せるには `weston --backend=headless` + キー注入の仕組みが要る（第 11 章 #70） |
 | タッチ（`wl_touch`） | **未実装** | シートの対象だが今回のスコープ外（第 11 章 #37 の残り） |
 | pointer-constraints / relative-pointer / cursor-shape | **未実装** | #37 の残り |
 | ウィンドウのフルスクリーン / 不透明度 / グラブ / ヒットテスト | **未実装** | 対応する能力と一緒に追加する |
@@ -69,9 +89,16 @@ cd papimela
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_fcitx_textinput   test/test_fcitx_textinput.pas
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_wayland_protocols test/test_wayland_protocols.pas
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_wayland_window    test/test_wayland_window.pas
+fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_key_routing     test/test_key_routing.pas
+fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/demo_japanese_input  test/demo_japanese_input.pas
 fpc -O1 -gl spikes/spike1_wayland.pas && fpc -O1 -gl spikes/spike2_fcitx.pas
 ./spikes/spike1_wayland && ./spikes/spike2_fcitx
 ./test/test_fcitx_textinput && ./test/test_wayland_protocols && ./test/test_wayland_window
+./test/test_key_routing
+
+# T-07（対話）。ウィンドウをクリックしてフォーカスし、日本語を打つ。
+# 途中で別ウィンドウへ移って戻ると、フォーカスの往復が IME に伝わることも確認できる。
+./test/demo_japanese_input 60
 ```
 
 実行前提: Wayland セッション、fcitx5 稼働、日本語エンジン（mozc）が利用可能であること。

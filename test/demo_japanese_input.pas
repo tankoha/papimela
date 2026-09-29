@@ -162,10 +162,10 @@ begin
       TPMLEventKind.WindowFocusGained:
         begin
           GotFocus := True;
-          WriteLn('  [INFO] キーボードフォーカスを取得');
+          WriteLn('  [INFO] キーボードフォーカスを取得（IME にも FocusIn を送信）');
         end;
       TPMLEventKind.WindowFocusLost:
-        WriteLn('  [INFO] キーボードフォーカスを喪失');
+        WriteLn('  [INFO] キーボードフォーカスを喪失（IME にも FocusOut を送信）');
       TPMLEventKind.TextEditing:
         ReportComposition(Ev);
       TPMLEventKind.TextInput:

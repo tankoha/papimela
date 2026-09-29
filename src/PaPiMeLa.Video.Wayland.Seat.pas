@@ -357,16 +357,23 @@ begin
     FQueue.Keyboard.SendFocus(FKeyFocus, True);
 end;
 
+{ wl_keyboard.leave はフォーカスを失ったことを意味する。サーフェスが解決できなくても
+  （既に破棄されている、user_data が無い等）失ったことに変わりはないので、
+  直前に持っていたフォーカスを使って必ず通知する。
+
+  ここを「解決できたときだけ通知する」にしていると、IME にフォーカス喪失が
+  届かないまま別アプリへ移る経路ができる（D-22 と同じ症状になる）。 }
 procedure TPMLWaylandSeat.HandleKeyLeave(ASurface: Pwl_surface);
 var
   ID: TPMLWindowID;
 begin
-  ID := WindowIDOf(ASurface);
   StopRepeat;
+  ID := WindowIDOf(ASurface);
+  if ID = 0 then
+    ID := FKeyFocus;
+  FKeyFocus := 0;
   if ID <> 0 then
     FQueue.Keyboard.SendFocus(ID, False);
-  if FKeyFocus = ID then
-    FKeyFocus := 0;
 end;
 
 procedure TPMLWaylandSeat.DeliverKey(AEvdevCode: LongWord; ADown, AIsRepeat: Boolean);
