@@ -98,6 +98,11 @@ type
     FMapSize  : PtrUInt;
     FBufW, FBufH: Integer;
 
+    // ポインタ拘束の「要求」。実際に拘束を張るのはシート（TPMLWaylandPointerGrab）。
+    FMouseGrabbed : Boolean;
+    FRelativeMouse: Boolean;
+    FMouseRect    : TPMLRect;
+
     procedure DestroyBuffer;
     function  EnsureBuffer: Boolean;
     procedure PresentFirstFrame;
@@ -121,6 +126,9 @@ type
     procedure Maximize; override;
     procedure Minimize; override;
     procedure Restore; override;
+    procedure SetMouseGrab(AGrabbed: Boolean); override;
+    procedure SetMouseRect(const ARect: TPMLRect); override;
+    procedure SetRelativeMouseMode(AEnabled: Boolean); override;
     procedure GetSizeInPixels(out AWidth, AHeight: Integer); override;
     function  CreateFramebuffer(out APixels: Pointer; out APitch: Integer): Boolean; override;
     procedure UpdateFramebuffer; override;
@@ -128,6 +136,12 @@ type
     function  NativeHandles: TPMLNativeWindowHandles; override;
 
     property Configured: Boolean read FConfigured;
+
+    // シートが拘束を張るために読む。
+    property Surface: Pwl_surface read FSurface;
+    property MouseGrabbed: Boolean read FMouseGrabbed;
+    property RelativeMouseRequested: Boolean read FRelativeMouse;
+    property MouseRect: TPMLRect read FMouseRect;
   end;
 
 implementation
@@ -491,6 +505,34 @@ procedure TPMLWaylandWindowBackend.Restore;
 begin
   xdg_toplevel_unset_maximized(FToplevel);
   wl_display_flush(FConn.Display);
+end;
+
+
+{ ポインタ拘束の要求を記録して、シートへ「張り直せ」と伝える。
+
+  拘束オブジェクトを持つのは wl_pointer なので、ここでは要求を覚えるだけにする
+  （Design: docs/DESIGN.md §3.2）。誰が拘束を張るかは接続経由で解決する。 }
+procedure TPMLWaylandWindowBackend.SetMouseGrab(AGrabbed: Boolean);
+begin
+  if FMouseGrabbed = AGrabbed then
+    Exit;
+  FMouseGrabbed := AGrabbed;
+  FConn.NotifyGrabsChanged(WindowID);
+end;
+
+procedure TPMLWaylandWindowBackend.SetMouseRect(const ARect: TPMLRect);
+begin
+  FMouseRect := ARect;
+  // 矩形は毎回作り直すので、同じ値でも通知してよい。
+  FConn.NotifyGrabsChanged(WindowID);
+end;
+
+procedure TPMLWaylandWindowBackend.SetRelativeMouseMode(AEnabled: Boolean);
+begin
+  if FRelativeMouse = AEnabled then
+    Exit;
+  FRelativeMouse := AEnabled;
+  FConn.NotifyGrabsChanged(WindowID);
 end;
 
 procedure TPMLWaylandWindowBackend.GetSizeInPixels(out AWidth, AHeight: Integer);

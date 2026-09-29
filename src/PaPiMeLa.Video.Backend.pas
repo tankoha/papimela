@@ -131,6 +131,11 @@ type
     procedure Minimize; virtual;
     procedure Restore; virtual;
     procedure Sync; virtual;
+
+    // 入力の拘束（§3.2 の「入力」）。能力 MouseConfine / RelativeMouse で呼ばれるかが決まる。
+    procedure SetMouseGrab(AGrabbed: Boolean); virtual;
+    procedure SetMouseRect(const ARect: TPMLRect); virtual;
+    procedure SetRelativeMouseMode(AEnabled: Boolean); virtual;
     procedure GetSizeInPixels(out AWidth, AHeight: Integer); virtual; abstract;
     function  GetDisplayScale: Single; virtual;
 
@@ -216,6 +221,18 @@ begin
 end;
 
 procedure TPMLWindowBackend.Sync;
+begin
+end;
+
+procedure TPMLWindowBackend.SetMouseGrab(AGrabbed: Boolean);
+begin
+end;
+
+procedure TPMLWindowBackend.SetMouseRect(const ARect: TPMLRect);
+begin
+end;
+
+procedure TPMLWindowBackend.SetRelativeMouseMode(AEnabled: Boolean);
 begin
 end;
 

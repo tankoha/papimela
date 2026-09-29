@@ -205,6 +205,8 @@ type
     procedure SendMotion(AWindowID: TPMLWindowID; AX, AY: Single);
     procedure SendButton(AWindowID: TPMLWindowID; AButton: LongWord; ADown: Boolean);
     procedure SendWheel(AWindowID: TPMLWindowID; AX, AY: Single);
+    // ポインタがロックされている間の移動。絶対座標は動かない。
+    procedure SendRelativeMotion(AWindowID: TPMLWindowID; ADX, ADY: Single);
     procedure SendFocus(AWindowID: TPMLWindowID; AEntered: Boolean);
     property X: Single read FX;
     property Y: Single read FY;
@@ -737,6 +739,31 @@ begin
   Ev.Strings := nil;
   Ev.Wheel.X := AX;
   Ev.Wheel.Y := AY;
+  FQueue.Push(Ev);
+end;
+
+{ ロック中の相対移動。
+
+  ロック中はコンポジタが wl_pointer.motion を送ってこない。ポインタは実際に
+  動いていないので、絶対座標は直前の値をそのまま載せ、FX / FY も更新しない。
+  アプリは XRel / YRel だけを見る。 }
+procedure TPMLMouseState.SendRelativeMotion(AWindowID: TPMLWindowID;
+  ADX, ADY: Single);
+var
+  Ev: TPMLEvent;
+begin
+  FillChar(Ev.Motion, SizeOf(Ev.Motion), 0);
+  Ev.Kind := TPMLEventKind.MouseMotion;
+  Ev.Timestamp := PMLNowNS;
+  Ev.WindowID := AWindowID;
+  Ev.Text := '';
+  Ev.Segments := nil;
+  Ev.Strings := nil;
+  Ev.Motion.ButtonState := FButtonState;
+  Ev.Motion.X := FX;
+  Ev.Motion.Y := FY;
+  Ev.Motion.XRel := ADX;
+  Ev.Motion.YRel := ADY;
   FQueue.Push(Ev);
 end;
 

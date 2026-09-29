@@ -99,6 +99,9 @@ classDiagram
         +CreateFramebuffer()
         +UpdateFramebuffer()
         +DestroyFramebuffer()
+        +SetMouseGrab()
+        +SetMouseRect()
+        +SetRelativeMouseMode()
         +NativeHandles()
     }
     class TPMLWaylandVideoBackend {
@@ -109,10 +112,15 @@ classDiagram
     }
     class TPMLWaylandWindowBackend {
         +Configured
+        +Surface
+        +MouseGrabbed
+        +RelativeMouseRequested
+        +MouseRect
     }
     class TPMLWaylandConnection {
         +Connect()
         +Capabilities()
+        +NotifyGrabsChanged()
         +Display
         +Outputs
     }
@@ -145,8 +153,11 @@ classDiagram
   splitting the god object possible.
 - §3.2 also gives `TPMLVideoBackend` eight optional parts (GL, Vulkan, Clipboard, Cursors,
   ScreenSaver, MessageBox, SystemMenu, ScreenKeyboard). None are implemented, so none are drawn.
-- The 19 methods on `TPMLWindowBackend` correspond to the window-operation slice of SDL's 44.
-  The remaining 25 (fullscreen, opacity, shape, grabs, hit-testing) are not implemented.
+- The 22 methods on `TPMLWindowBackend` correspond to the window-operation slice of SDL's 44.
+  The remaining 22 (fullscreen, opacity, shape, icon, keyboard grab, hit-testing) are not
+  implemented. The three pointer-constraint methods only record a request: the constraint object
+  belongs to `wl_pointer`, so `TPMLWaylandConnection.NotifyGrabsChanged` hands the change to the
+  seats, and `TPMLWaylandPointerGrab` decides which constraint to hold (see `event-model.md`).
 - `TPMLWaylandConnection` inherits the generated `Twl_registry_listener` because it binds globals
   from the registry's `global` event.
 

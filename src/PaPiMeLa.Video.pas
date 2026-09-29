@@ -91,8 +91,14 @@ type
     FWidth, FHeight: Integer;
     FFlags  : TPMLWindowFlags;
     FCloseRequested: Boolean;
+    FMouseGrab      : Boolean;
+    FRelativeMouseMode: Boolean;
+    FMouseRect      : TPMLRect;
     procedure SetTitle(const AValue: String);
     procedure SetSize(AWidth, AHeight: Integer);
+    procedure SetMouseGrab(AValue: Boolean);
+    procedure SetRelativeMouseMode(AValue: Boolean);
+    procedure SetMouseRect(const AValue: TPMLRect);
     function  GetSizeInPixels: TPMLRect;
     function  GetDisplayScale: Single;
   protected
@@ -130,6 +136,12 @@ type
     property Flags   : TPMLWindowFlags read FFlags;
     property SizeInPixels: TPMLRect read GetSizeInPixels;
     property DisplayScale: Single read GetDisplayScale;
+    // ポインタの拘束。能力 MouseConfine / RelativeMouse が無ければ例外になる。
+    property MouseGrab: Boolean read FMouseGrab write SetMouseGrab;
+    property RelativeMouseMode: Boolean
+      read FRelativeMouseMode write SetRelativeMouseMode;
+    // ウィンドウ内の閉じ込め矩形。空 = ウィンドウ全体。
+    property MouseRect: TPMLRect read FMouseRect write SetMouseRect;
     property CloseRequested: Boolean read FCloseRequested;
     property Backend : TPMLWindowBackend read FBackend;
   end;
@@ -311,9 +323,24 @@ begin
   FHeight := AHeight;
 end;
 
+{ バックエンドが報告した状態フラグを取り込む。
+
+  WHAT:
+    バックエンドが知っているフラグだけを差し替え、公開層が持つフラグ
+    （生成時の指定、ポインタ拘束の要求）はそのまま残す。
+
+  WHY:
+    以前は集合をまるごと置き換えていたため、最初の configure で Resizable や
+    MouseGrabbed が消えていた（不具合 D-24）。どちらが持ち主かはフラグごとに
+    決まっているので、境界を定数で明示する。 }
 procedure TPMLWindow.ApplyFlags(AFlags: TPMLWindowFlags);
+const
+  // コンポジタしか知らないフラグ。これ以外は公開層が持つ。
+  BackendOwned = [TPMLWindowFlag.Maximized, TPMLWindowFlag.Fullscreen,
+    TPMLWindowFlag.InputFocus, TPMLWindowFlag.Minimized,
+    TPMLWindowFlag.Occluded];
 begin
-  FFlags := AFlags;
+  FFlags := (FFlags - BackendOwned) + (AFlags * BackendOwned);
 end;
 
 procedure TPMLWindow.ApplyCloseRequested;
@@ -389,6 +416,48 @@ procedure TPMLWindow.Sync;
 begin
   CheckMainThread;
   FBackend.Sync;
+end;
+
+
+{ ポインタをこのウィンドウに閉じ込める。
+
+  Flags の MouseGrabbed も併せて更新する。実際に閉じ込めが有効になるのは
+  ウィンドウがキーボードフォーカスを持っているときだけで、それはバックエンドが
+  判断する。ここは「要求」を記録するだけ。 }
+procedure TPMLWindow.SetMouseGrab(AValue: Boolean);
+begin
+  CheckMainThread;
+  if FMouseGrab = AValue then
+    Exit;
+  FSystem.Require(TPMLVideoCapability.MouseConfine, 'Mouse grab');
+  FMouseGrab := AValue;
+  if AValue then
+    Include(FFlags, TPMLWindowFlag.MouseGrabbed)
+  else
+    Exclude(FFlags, TPMLWindowFlag.MouseGrabbed);
+  FBackend.SetMouseGrab(AValue);
+end;
+
+{ 相対マウスモード。ポインタを固定して移動量だけを受け取る。
+
+  有効な間 MouseMotion の X / Y は動かず、XRel / YRel だけが変化する。
+  カーソルの表示は変えない（#38 の TPMLCursorBackend を待つ）。 }
+procedure TPMLWindow.SetRelativeMouseMode(AValue: Boolean);
+begin
+  CheckMainThread;
+  if FRelativeMouseMode = AValue then
+    Exit;
+  FSystem.Require(TPMLVideoCapability.RelativeMouse, 'Relative mouse mode');
+  FRelativeMouseMode := AValue;
+  FBackend.SetRelativeMouseMode(AValue);
+end;
+
+procedure TPMLWindow.SetMouseRect(const AValue: TPMLRect);
+begin
+  CheckMainThread;
+  FSystem.Require(TPMLVideoCapability.MouseConfine, 'Mouse confinement rectangle');
+  FMouseRect := AValue;
+  FBackend.SetMouseRect(AValue);
 end;
 
 procedure TPMLWindow.SetMinimumSize(AWidth, AHeight: Integer);

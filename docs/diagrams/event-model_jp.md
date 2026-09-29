@@ -131,6 +131,7 @@ classDiagram
     }
     class TPMLMouseState {
         +SendMotion()
+        +SendRelativeMotion()
         +SendButton()
         +SendWheel()
         +SendFocus()
@@ -140,6 +141,14 @@ classDiagram
     class TPMLTextInputSystem
     class TPMLContext
     class TPMLWaylandSeat
+    class TPMLWaylandPointerGrab {
+        +Update()
+        +SetPointerFocus()
+        +SetKeyboardFocus()
+        +Kind
+        +Effective
+        +RelativeActive
+    }
 
     TPMLContext *-- TPMLEventQueue : owns
     TPMLEventQueue *-- TPMLKeyboardState : owns
@@ -152,6 +161,8 @@ classDiagram
     IPMLKeyFilter <|.. TPMLTextInputSystem
     TPMLWaylandSeat ..> TPMLKeyboardState : SendKey
     TPMLWaylandSeat ..> TPMLMouseState : SendMotion
+    TPMLWaylandSeat *-- TPMLWaylandPointerGrab : owns per wl_pointer
+    TPMLWaylandPointerGrab ..> TPMLMouseState : SendRelativeMotion
     TPMLKeyboardState ..> IPMLKeyFilter : asks first
     TPMLKeyboardState ..> TPMLEventQueue : Push
     TPMLVideoSystem ..> TPMLEventQueue : Push
@@ -164,6 +175,14 @@ IME が `Consumed` と答えたら `KeyDown` も `TextInput` も一切出さな�
 経路で `TextEditing` / `TextInput` として届く）。`PassThrough` なら通常の `KeyDown` になり、
 xkb が印字可能な文字を求めていれば `TextInput` も出す。`Deferred`（IME の非同期返信待ち）は
 定義してあるが、返すバックエンドはまだ無い。
+
+
+**ポインタ拘束の経路。** `TPMLWaylandPointerGrab` は `zwp_locked_pointer_v1` と
+`zwp_confined_pointer_v1` のどちらか一方しか持たない。同じシート・同じサーフェスに両方を作ると
+プロトコルエラーになり、接続が切られるためである。ウィンドウバックエンドはアプリの要求を
+記録するだけで、どの拘束を張るかは、その要求とポインタ・キーボードのフォーカスから拘束側が
+決める。ロック中はコンポジタが `wl_pointer.motion` を送らなくなるので、`SendRelativeMotion` が
+唯一の移動情報になる。`XRel` / `YRel` だけが動き、`X` / `Y` は止まったままの `MouseMotion` を出す。
 
 **規約。**
 
@@ -184,5 +203,5 @@ xkb が印字可能な文字を求めていれば `TextInput` も出す。`Defer
 | 複数 fd をまとめた `poll(2)` | 未実装。現状 fd を出すのは D-Bus と Wayland だけで各自が待っている。§6.3 はこれで足りなくなった時点で 1 つの poll セットに統合することを求めている |
 | `eventfd` による `WakeUp` | 現在は待ちループが見るフラグ |
 | 排他 | `SyncObjs.TCriticalSection`。`PaPiMeLa.Threading`（#8）ができたら `TPMLMutex` へ移す |
-| `TPMLKeyboardState` / `TPMLMouseState` / `TPMLTouchState` | 未実装。シート（#37）と同時に入る |
+| `TPMLTouchState` | 未実装。`TPMLKeyboardState` と `TPMLMouseState` はシート（#37）と同時に入った。残りはタッチ |
 | nil の管理型に対する `Finalize` コスト測定 | サイズは実測済み。ベンチマークは未実施（§10 項目 9） |

@@ -49,7 +49,9 @@ uses
   PaPiMeLa.Platform.Wayland.Protocols.FractionalScaleV1,
   PaPiMeLa.Platform.Wayland.Protocols.IdleInhibitUnstableV1,
   PaPiMeLa.Platform.Wayland.Protocols.XdgActivationV1,
-  PaPiMeLa.Platform.Wayland.Protocols.TextInputUnstableV3;
+  PaPiMeLa.Platform.Wayland.Protocols.TextInputUnstableV3,
+  PaPiMeLa.Platform.Wayland.Protocols.PointerConstraintsUnstableV1,
+  PaPiMeLa.Platform.Wayland.Protocols.RelativePointerUnstableV1;
 
 type
   { 1 つの wl_output。メタデータを溜めて TPMLDisplayBackend に見せる。 }
@@ -91,6 +93,11 @@ type
   // 直後の roundtrip で capabilities が配送されて取りこぼす。
   TPMLWaylandSeatBoundProc = procedure(ASeat: Pwl_seat) of object;
 
+  // ウィンドウの拘束要求（グラブ / 相対モード / 矩形）が変わったときに呼ばれる。
+  // 拘束オブジェクトは wl_pointer 単位なのでシートが持つ。シートを知っているのは
+  // Video.Wayland なのでそちらが設定する。AWindowID = 0 は「全ウィンドウ」。
+  TPMLWaylandGrabsChangedProc = procedure(AWindowID: TPMLWindowID) of object;
+
   { xdg_wm_base の ping に応答する。 }
   TPMLWaylandWmBaseWatcher = class(Txdg_wm_base_listener)
   public
@@ -106,6 +113,7 @@ type
     FOutputs   : TPMLWaylandOutputs;
     FSeats     : TPMLWaylandSeatHandles;
     FOnSeatBound: TPMLWaylandSeatBoundProc;
+    FOnGrabsChanged: TPMLWaylandGrabsChangedProc;
     procedure BindGlobal(AName: LongWord; const AInterface: String; AVersion: LongWord);
   public
     // 束縛したグローバル（nil = そのコンポジタに無い）
@@ -118,6 +126,8 @@ type
     IdleInhibitMgr  : Pzwp_idle_inhibit_manager_v1;
     ActivationMgr   : Pxdg_activation_v1;
     TextInputMgr    : Pzwp_text_input_manager_v3;
+    PointerConstraints: Pzwp_pointer_constraints_v1;
+    RelativePointerMgr: Pzwp_relative_pointer_manager_v1;
 
     constructor Create;
     destructor Destroy; override;
@@ -125,6 +135,9 @@ type
     function  Connect: Boolean;
     procedure Disconnect;
     function  Capabilities: TPMLVideoCapabilities;
+
+    // ウィンドウバックエンドが拘束要求を変えたときに呼ぶ。設定されていなければ何もしない。
+    procedure NotifyGrabsChanged(AWindowID: TPMLWindowID);
 
     procedure global(AProxy: Pwl_registry; name: LongWord;
       interface_: PAnsiChar; version: LongWord); override;
@@ -136,6 +149,8 @@ type
     property Seats  : TPMLWaylandSeatHandles read FSeats;
     // Connect の前に設定すること。束縛時に呼ばれる。
     property OnSeatBound: TPMLWaylandSeatBoundProc read FOnSeatBound write FOnSeatBound;
+    property OnGrabsChanged: TPMLWaylandGrabsChangedProc
+      read FOnGrabsChanged write FOnGrabsChanged;
   end;
 
 implementation
@@ -223,6 +238,8 @@ begin
   PaPiMeLa.Platform.Wayland.Protocols.IdleInhibitUnstableV1.EnsureProtocolInitialized;
   PaPiMeLa.Platform.Wayland.Protocols.XdgActivationV1.EnsureProtocolInitialized;
   PaPiMeLa.Platform.Wayland.Protocols.TextInputUnstableV3.EnsureProtocolInitialized;
+  PaPiMeLa.Platform.Wayland.Protocols.PointerConstraintsUnstableV1.EnsureProtocolInitialized;
+  PaPiMeLa.Platform.Wayland.Protocols.RelativePointerUnstableV1.EnsureProtocolInitialized;
 
   FDisplay := wl_display_connect(nil);
   if FDisplay = nil then
@@ -262,6 +279,8 @@ begin
     PMLWaylandClientUnload;
   end;
   FRegistry := nil;
+  PointerConstraints := nil;
+  RelativePointerMgr := nil;
   Compositor := nil;
   Shm := nil;
   WmBase := nil;
@@ -304,6 +323,10 @@ begin
       IdleInhibitMgr := Pzwp_idle_inhibit_manager_v1(B(zwp_idle_inhibit_manager_v1_interface, 1));
     'xdg_activation_v1':
       ActivationMgr := Pxdg_activation_v1(B(xdg_activation_v1_interface, 1));
+    'zwp_pointer_constraints_v1':
+      PointerConstraints := Pzwp_pointer_constraints_v1(B(zwp_pointer_constraints_v1_interface, 1));
+    'zwp_relative_pointer_manager_v1':
+      RelativePointerMgr := Pzwp_relative_pointer_manager_v1(B(zwp_relative_pointer_manager_v1_interface, 1));
     'zwp_text_input_manager_v3':
       TextInputMgr := Pzwp_text_input_manager_v3(B(zwp_text_input_manager_v3_interface, 1));
     'wl_output':
@@ -315,7 +338,7 @@ begin
       end;
     'wl_seat':
       begin
-        // 束縛はするが keyboard / pointer / touch は #37 で実装する。
+        // keyboard / pointer は TPMLWaylandSeat が取り出す。wl_touch は未実装。
         Seat := Pwl_seat(B(wl_seat_interface, 9));
         SetLength(FSeats, Length(FSeats) + 1);
         FSeats[High(FSeats)] := Seat;
@@ -361,8 +384,20 @@ begin
     Include(Result, TPMLVideoCapability.IdleInhibit);
   if ActivationMgr <> nil then
     Include(Result, TPMLVideoCapability.WindowActivation);
+  // 相対モードはロック（pointer-constraints）と relative-pointer の両方が要る。
+  // 閉じ込めだけならロックは不要なので、必要な拡張が別であることを能力でも分ける。
+  if PointerConstraints <> nil then
+    Include(Result, TPMLVideoCapability.MouseConfine);
+  if (PointerConstraints <> nil) and (RelativePointerMgr <> nil) then
+    Include(Result, TPMLVideoCapability.RelativeMouse);
   // xdg-shell はウィンドウ位置を持たないので WindowPositioning は入れない（§3.3）。
   Include(Result, TPMLVideoCapability.SystemMenu);
+end;
+
+procedure TPMLWaylandConnection.NotifyGrabsChanged(AWindowID: TPMLWindowID);
+begin
+  if Assigned(FOnGrabsChanged) then
+    FOnGrabsChanged(AWindowID);
 end;
 
 end.

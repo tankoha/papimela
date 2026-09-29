@@ -132,6 +132,7 @@ classDiagram
     }
     class TPMLMouseState {
         +SendMotion()
+        +SendRelativeMotion()
         +SendButton()
         +SendWheel()
         +SendFocus()
@@ -141,6 +142,14 @@ classDiagram
     class TPMLTextInputSystem
     class TPMLContext
     class TPMLWaylandSeat
+    class TPMLWaylandPointerGrab {
+        +Update()
+        +SetPointerFocus()
+        +SetKeyboardFocus()
+        +Kind
+        +Effective
+        +RelativeActive
+    }
 
     TPMLContext *-- TPMLEventQueue : owns
     TPMLEventQueue *-- TPMLKeyboardState : owns
@@ -153,6 +162,8 @@ classDiagram
     IPMLKeyFilter <|.. TPMLTextInputSystem
     TPMLWaylandSeat ..> TPMLKeyboardState : SendKey
     TPMLWaylandSeat ..> TPMLMouseState : SendMotion
+    TPMLWaylandSeat *-- TPMLWaylandPointerGrab : owns per wl_pointer
+    TPMLWaylandPointerGrab ..> TPMLMouseState : SendRelativeMotion
     TPMLKeyboardState ..> IPMLKeyFilter : asks first
     TPMLKeyboardState ..> TPMLEventQueue : Push
     TPMLVideoSystem ..> TPMLEventQueue : Push
@@ -165,6 +176,15 @@ If the IME answers `Consumed`, no `KeyDown` and no `TextInput` is emitted at all
 arrive later as `TextEditing` / `TextInput` from the IME's own path. If it answers `PassThrough`,
 the key becomes a normal `KeyDown`, plus a `TextInput` when xkb produced printable text.
 `Deferred` (awaiting an async IME reply) is defined but no backend returns it yet.
+
+
+**The pointer-constraint path.** `TPMLWaylandPointerGrab` holds at most one of
+`zwp_locked_pointer_v1` / `zwp_confined_pointer_v1` — they are mutually exclusive on one seat and
+surface, and creating both is a protocol error that kills the connection. The window backend only
+records what the application asked for; the grab decides, from that request plus pointer and
+keyboard focus, which constraint to hold. While locked, the compositor stops sending
+`wl_pointer.motion`, so `SendRelativeMotion` is the only source of movement: it emits `MouseMotion`
+with `XRel` / `YRel` set and `X` / `Y` frozen.
 
 **Rules.**
 
@@ -186,5 +206,5 @@ the key becomes a normal `KeyDown`, plus a `TextInput` when xkb produced printab
 | unified `poll(2)` over several file descriptors | not built. Only D-Bus and Wayland contribute descriptors today and each waits on its own; §6.3 wants one `poll` set once that stops being enough |
 | `WakeUp` via `eventfd` | currently a flag checked by the wait loop |
 | mutex | `SyncObjs.TCriticalSection`; will move to `TPMLMutex` when `PaPiMeLa.Threading` (#8) exists |
-| `TPMLKeyboardState` / `TPMLMouseState` / `TPMLTouchState` | not implemented; they arrive with seats (#37) |
+| `TPMLTouchState` | not implemented. `TPMLKeyboardState` and `TPMLMouseState` landed with seats (#37); touch is the remaining piece |
 | `Finalize` cost measurement for nil managed fields | size measured, benchmark not run (§10 item 9) |

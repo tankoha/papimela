@@ -98,6 +98,9 @@ classDiagram
         +CreateFramebuffer()
         +UpdateFramebuffer()
         +DestroyFramebuffer()
+        +SetMouseGrab()
+        +SetMouseRect()
+        +SetRelativeMouseMode()
         +NativeHandles()
     }
     class TPMLWaylandVideoBackend {
@@ -108,10 +111,15 @@ classDiagram
     }
     class TPMLWaylandWindowBackend {
         +Configured
+        +Surface
+        +MouseGrabbed
+        +RelativeMouseRequested
+        +MouseRect
     }
     class TPMLWaylandConnection {
         +Connect()
         +Capabilities()
+        +NotifyGrabsChanged()
         +Display
         +Outputs
     }
@@ -145,8 +153,11 @@ classDiagram
 - §3.2 は `TPMLVideoBackend` に任意搭載の部品 8 種（GL、Vulkan、Clipboard、Cursors、
   ScreenSaver、MessageBox、SystemMenu、ScreenKeyboard）も持たせる予定だが、
   どれも未実装なので描いていない。
-- `TPMLWindowBackend` の 19 メソッドが、SDL のウィンドウ操作 44 個のうち実装済みの部分に当たる。
-  残り 25 個（フルスクリーン、不透明度、形状、グラブ、ヒットテスト）は未実装。
+- `TPMLWindowBackend` の 22 メソッドが、SDL のウィンドウ操作 44 個のうち実装済みの部分に当たる。
+  残り 22 個（フルスクリーン、不透明度、形状、アイコン、キーボードグラブ、ヒットテスト）は未実装。
+  ポインタ拘束の 3 メソッドは要求を記録するだけである。拘束オブジェクトは `wl_pointer` に
+  紐づくので、`TPMLWaylandConnection.NotifyGrabsChanged` が変化をシートへ渡し、
+  `TPMLWaylandPointerGrab` がどの拘束を持つかを決める（`event-model_jp.md` を参照）。
 - `TPMLWaylandConnection` が生成リスナー `Twl_registry_listener` を継承しているのは、
   レジストリの `global` イベントでグローバルを束縛するため。
 

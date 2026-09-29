@@ -23,8 +23,7 @@
     - 能力集合は Connect 後に確定する（拡張の有無で変わる）
 
   NOT RESOLVED:
-    - シート（キーボード / ポインタ / タッチ）は未実装（#37）。現状 KeyDown /
-      MouseMotion 等のイベントは一切発生しない
+    - タッチ（wl_touch）は未実装（#37 の残り）。キーボードとポインタは実装済み
     - GL / Vulkan / クリップボード / カーソルの部品は nil のまま（#33、#38、#39）
     - ディスプレイ hotplug は DisplaysChanged で全列挙をやり直すだけ
 
@@ -72,6 +71,7 @@ type
     FSeats: TPMLWaylandSeats;
     procedure CheckConnectionAlive;
     procedure HandleSeatBound(ASeat: Pwl_seat);
+    procedure HandleGrabsChanged(AWindowID: TPMLWindowID);
     procedure DestroySeats;
   public
     constructor Create(AContextRef: TObject; AOwner: TPMLObject;
@@ -90,6 +90,8 @@ type
 
     // IME バックエンド（TextInput.WaylandTI、#49）が seat を得るために使う。
     property Connection: TPMLWaylandConnection read FConn;
+    // テストと診断用。拘束の状態はシートが持つ。
+    property Seats: TPMLWaylandSeats read FSeats;
   end;
 
 implementation
@@ -162,6 +164,7 @@ begin
   // 失敗しても接続は続ける（シートを作らないだけ）。
   if PMLXKBLoad then
     FConn.OnSeatBound := @HandleSeatBound;
+  FConn.OnGrabsChanged := @HandleGrabsChanged;
   Result := FConn.Connect;
   if not Result then
     Exit;
@@ -183,7 +186,19 @@ end;
 procedure TPMLWaylandVideoBackend.HandleSeatBound(ASeat: Pwl_seat);
 begin
   SetLength(FSeats, Length(FSeats) + 1);
-  FSeats[High(FSeats)] := TPMLWaylandSeat.Create(FQueue, ASeat);
+  FSeats[High(FSeats)] := TPMLWaylandSeat.Create(FQueue, FConn, ASeat);
+end;
+
+{ ウィンドウの拘束要求が変わった。ポインタフォーカスを持つシートだけが張り直す。
+
+  拘束オブジェクトは wl_pointer 単位なので、ウィンドウが直接張ることはできない。
+  ウィンドウ → 接続 → ここ → シート、という順で伝わる。 }
+procedure TPMLWaylandVideoBackend.HandleGrabsChanged(AWindowID: TPMLWindowID);
+var
+  I: Integer;
+begin
+  for I := 0 to High(FSeats) do
+    FSeats[I].UpdateGrabs(AWindowID);
 end;
 
 procedure TPMLWaylandVideoBackend.DestroySeats;

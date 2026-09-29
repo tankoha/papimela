@@ -23,3 +23,5 @@ test/test_wayland_window
 
 test/test_key_routing
 test/demo_japanese_input
+test/test_pointer_constraints
+test/demo_pointer_constraints

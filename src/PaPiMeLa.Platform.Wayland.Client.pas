@@ -125,6 +125,12 @@ function  PMLWaylandClientLoad: Boolean;
 procedure PMLWaylandClientUnload;
 function  PMLWaylandClientLoaded: Boolean;
 
+// wl_fixed_t（24.8 固定小数点）との相互変換。libwayland のインライン関数
+// wl_fixed_to_double / wl_fixed_from_double に相当する。インラインなので
+// dlsym では引けず、自前で持つ必要がある。
+function  PMLFixedToSingle(AValue: wl_fixed_t): Single; inline;
+function  PMLSingleToFixed(AValue: Single): wl_fixed_t; inline;
+
 // 生成プロトコルユニットがコアの wl_interface 記述子を引くために使う。
 // 見つからなければ nil。
 function PMLWaylandResolve(const ASymbol: String): Pointer;
@@ -141,6 +147,17 @@ var
 procedure Bind(out ATarget; const ASymbol: String);
 begin
   Pointer(ATarget) := GLib.Resolve(ASymbol);
+end;
+
+{ 24.8 固定小数点。下位 8 ビットが小数部。 }
+function PMLFixedToSingle(AValue: wl_fixed_t): Single;
+begin
+  Result := AValue / 256.0;
+end;
+
+function PMLSingleToFixed(AValue: Single): wl_fixed_t;
+begin
+  Result := Round(AValue * 256.0);
 end;
 
 procedure LoadAll;

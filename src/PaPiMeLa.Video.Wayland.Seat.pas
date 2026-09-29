@@ -28,7 +28,9 @@
 
   NOT RESOLVED:
     - wl_touch は未実装。タッチは本ユニットの対象だが今回のスコープ外
-    - pointer-constraints / relative-pointer / cursor-shape は未実装
+    - ポインタ拘束は PaPiMeLa.Video.Wayland.PointerGrab に分けた。ここはフォーカスと
+      直近位置を渡すだけ
+    - cursor-shape は未実装。カーソルの見た目は #38 で扱う
     - Scancode（USB HID Usage 準拠）への変換は未実装。現状は evdev コードと
       キーシムのみを載せる
 
@@ -51,7 +53,9 @@ uses
   PaPiMeLa.Platform.XKB,
   PaPiMeLa.Platform.Wayland.Client,
   PaPiMeLa.Platform.Wayland.Protocols.Wayland,
-  PaPiMeLa.Video.Wayland.Window;
+  PaPiMeLa.Video.Wayland.Types,
+  PaPiMeLa.Video.Wayland.Window,
+  PaPiMeLa.Video.Wayland.PointerGrab;
 
 type
   TPMLWaylandSeat = class;
@@ -96,12 +100,14 @@ type
   TPMLWaylandSeat = class(Twl_seat_listener)
   strict private
     FQueue    : TPMLEventQueue;
+    FConn     : TPMLWaylandConnection;
     FSeat     : Pwl_seat;
     FKeyboard : Pwl_keyboard;
     FPointer  : Pwl_pointer;
     FKbdFwd   : TPMLWaylandKeyboardFwd;
     FPtrFwd   : TPMLWaylandPointerFwd;
     FXKB      : TPMLXKBState;
+    FGrab     : TPMLWaylandPointerGrab;
     FName     : String;
 
     FKeyFocus : TPMLWindowID;
@@ -116,8 +122,10 @@ type
 
     procedure StopRepeat;
     function  GetHasKeyboard: Boolean;
+    function  WindowOf(ASurface: Pwl_surface): TPMLWaylandWindowBackend;
     function  WindowIDOf(ASurface: Pwl_surface): TPMLWindowID;
     procedure DeliverKey(AEvdevCode: LongWord; ADown, AIsRepeat: Boolean);
+    procedure NotifyKeyFocusToGrab;
   private
     procedure HandleKeymap(AFormat: LongWord; AFD: LongInt; ASize: LongWord);
     procedure HandleKeyEnter(ASurface: Pwl_surface);
@@ -131,7 +139,8 @@ type
     procedure HandlePointerButton(AButton: LongWord; ADown: Boolean);
     procedure HandlePointerAxis(AAxis: LongWord; AValue: wl_fixed_t);
   public
-    constructor Create(AQueue: TPMLEventQueue; ASeat: Pwl_seat);
+    constructor Create(AQueue: TPMLEventQueue; AConn: TPMLWaylandConnection;
+      ASeat: Pwl_seat);
     destructor Destroy; override;
 
     procedure capabilities(AProxy: Pwl_seat; capabilities_: LongWord); override;
@@ -139,11 +148,16 @@ type
 
     // ビデオバックエンドの Pump から呼ぶ。期限が来たリピートを発火させる。
     procedure ProcessRepeat;
+    // ウィンドウの拘束要求が変わったときに Video.Wayland から呼ばれる。
+    // AWindowID = 0 は「どのウィンドウか分からないので必ず見直せ」。
+    procedure UpdateGrabs(AWindowID: TPMLWindowID);
     // 次のリピートまでの残り時間（ミリ秒）。リピート中でなければ -1。
     function  MillisecondsUntilRepeat: Integer;
 
     property SeatName: String read FName;
     property HasKeyboard: Boolean read GetHasKeyboard;
+    // ポインタ拘束。ポインタが無いシートでは nil。
+    property Grab: TPMLWaylandPointerGrab read FGrab;
   end;
   TPMLWaylandSeats = array of TPMLWaylandSeat;
 
@@ -154,11 +168,6 @@ const
   BTN_LEFT   = $110;
   BTN_RIGHT  = $111;
   BTN_MIDDLE = $112;
-
-function FixedToSingle(AValue: wl_fixed_t): Single;
-begin
-  Result := AValue / 256.0;
-end;
 
 { 転送クラス }
 
@@ -243,10 +252,12 @@ end;
 
 { TPMLWaylandSeat }
 
-constructor TPMLWaylandSeat.Create(AQueue: TPMLEventQueue; ASeat: Pwl_seat);
+constructor TPMLWaylandSeat.Create(AQueue: TPMLEventQueue;
+  AConn: TPMLWaylandConnection; ASeat: Pwl_seat);
 begin
   inherited Create;
   FQueue := AQueue;
+  FConn := AConn;
   FSeat := ASeat;
   FXKB := TPMLXKBState.Create;
   FRepeatRate := 25;
@@ -256,6 +267,9 @@ end;
 
 destructor TPMLWaylandSeat.Destroy;
 begin
+  // 拘束は wl_pointer より先に捨てる。ポインタを解放したあとに拘束オブジェクトを
+  // 破棄する順序はプロトコル上あいまいなので、依存する側から畳む。
+  FreeAndNil(FGrab);
   if FKeyboard <> nil then
     wl_keyboard_release(FKeyboard);
   if FPointer <> nil then
@@ -292,13 +306,19 @@ begin
     FPointer := wl_seat_get_pointer(FSeat);
     FPtrFwd := TPMLWaylandPointerFwd.Create(Self);
     wl_pointer_add_listener_object(FPointer, FPtrFwd);
+    FGrab := TPMLWaylandPointerGrab.Create(FConn, FQueue, FPointer);
   end
   else if ((capabilities_ and WL_SEAT_CAPABILITY_POINTER) = 0) and (FPointer <> nil) then
   begin
+    FreeAndNil(FGrab);
     wl_pointer_release(FPointer);
     FPointer := nil;
     FreeAndNil(FPtrFwd);
   end;
+  // 相対モードと閉じ込めの判定はキーボードフォーカスを見る。このシートに
+  // キーボードがあるかどうかで規則が変わるので、拘束側へ伝えておく（§3.2）。
+  if FGrab <> nil then
+    FGrab.HasKeyboard := FKeyboard <> nil;
   // wl_touch は未実装（#37 の残り）。
 end;
 
@@ -307,17 +327,29 @@ begin
   FName := String(name_);
 end;
 
-function TPMLWaylandSeat.WindowIDOf(ASurface: Pwl_surface): TPMLWindowID;
+{ サーフェスからウィンドウバックエンドを引く。ウィンドウ backend が自分自身を
+  user_data に入れている。破棄済みのサーフェスでは nil になる。 }
+function TPMLWaylandSeat.WindowOf(ASurface: Pwl_surface): TPMLWaylandWindowBackend;
 var
   Obj: TObject;
 begin
-  Result := 0;
+  Result := nil;
   if ASurface = nil then
     Exit;
-  // ウィンドウ backend が自分自身を user_data に入れている。
   Obj := TObject(wl_proxy_get_user_data(Pwl_proxy(ASurface)));
   if Obj is TPMLWaylandWindowBackend then
-    Result := TPMLWaylandWindowBackend(Obj).WindowID;
+    Result := TPMLWaylandWindowBackend(Obj);
+end;
+
+function TPMLWaylandSeat.WindowIDOf(ASurface: Pwl_surface): TPMLWindowID;
+var
+  W: TPMLWaylandWindowBackend;
+begin
+  W := WindowOf(ASurface);
+  if W = nil then
+    Result := 0
+  else
+    Result := W.WindowID;
 end;
 
 { キーマップは fd で渡ってくる。mmap してヌル終端文字列として読む。 }
@@ -353,6 +385,8 @@ end;
 procedure TPMLWaylandSeat.HandleKeyEnter(ASurface: Pwl_surface);
 begin
   FKeyFocus := WindowIDOf(ASurface);
+  // 閉じ込めと相対モードはキーボードフォーカスの有無で成立が変わる（§3.2）。
+  NotifyKeyFocusToGrab;
   if FKeyFocus <> 0 then
     FQueue.Keyboard.SendFocus(FKeyFocus, True);
 end;
@@ -372,6 +406,7 @@ begin
   if ID = 0 then
     ID := FKeyFocus;
   FKeyFocus := 0;
+  NotifyKeyFocusToGrab;
   if ID <> 0 then
     FQueue.Keyboard.SendFocus(ID, False);
 end;
@@ -463,32 +498,81 @@ begin
   Result := Integer((FRepeatNext - Now_) div 1000000) + 1;
 end;
 
-procedure TPMLWaylandSeat.HandlePointerEnter(ASurface: Pwl_surface;
-  AX, AY: wl_fixed_t);
+{ キーボードフォーカスを拘束側へ渡して、拘束を張り直させる。 }
+procedure TPMLWaylandSeat.NotifyKeyFocusToGrab;
 begin
-  FPtrFocus := WindowIDOf(ASurface);
-  if FPtrFocus <> 0 then
-  begin
-    FQueue.Mouse.SendFocus(FPtrFocus, True);
-    FQueue.Mouse.SendMotion(FPtrFocus, FixedToSingle(AX), FixedToSingle(AY));
-  end;
+  if FGrab = nil then
+    Exit;
+  FGrab.SetKeyboardFocus(FKeyFocus);
+  FGrab.Update;
 end;
 
+procedure TPMLWaylandSeat.UpdateGrabs(AWindowID: TPMLWindowID);
+begin
+  if FGrab = nil then
+    Exit;
+  // 関係のないウィンドウの変化で張り替えると、無駄な破棄と再生成が起きる。
+  if (AWindowID <> 0) and (AWindowID <> FPtrFocus) then
+    Exit;
+  FGrab.Update;
+end;
+
+procedure TPMLWaylandSeat.HandlePointerEnter(ASurface: Pwl_surface;
+  AX, AY: wl_fixed_t);
+var
+  W: TPMLWaylandWindowBackend;
+  X, Y: Single;
+begin
+  W := WindowOf(ASurface);
+  if W = nil then
+  begin
+    FPtrFocus := 0;
+    if FGrab <> nil then
+      FGrab.SetPointerFocus(nil);
+    Exit;
+  end;
+
+  FPtrFocus := W.WindowID;
+  X := PMLFixedToSingle(AX);
+  Y := PMLFixedToSingle(AY);
+  if FGrab <> nil then
+  begin
+    FGrab.SetPointerFocus(W);
+    FGrab.NoteMotion(X, Y);
+    FGrab.Update;
+  end;
+  FQueue.Mouse.SendFocus(FPtrFocus, True);
+  FQueue.Mouse.SendMotion(FPtrFocus, X, Y);
+end;
+
+{ wl_pointer.leave。HandleKeyLeave と同じ理由で、サーフェスが解決できなくても
+  直前のフォーカスを使って通知する（D-23）。拘束もここで捨てる。 }
 procedure TPMLWaylandSeat.HandlePointerLeave(ASurface: Pwl_surface);
 var
   ID: TPMLWindowID;
 begin
   ID := WindowIDOf(ASurface);
+  if ID = 0 then
+    ID := FPtrFocus;
+  FPtrFocus := 0;
+  if FGrab <> nil then
+    FGrab.SetPointerFocus(nil);
   if ID <> 0 then
     FQueue.Mouse.SendFocus(ID, False);
-  if FPtrFocus = ID then
-    FPtrFocus := 0;
 end;
 
 procedure TPMLWaylandSeat.HandlePointerMotion(AX, AY: wl_fixed_t);
+var
+  X, Y: Single;
 begin
-  if FPtrFocus <> 0 then
-    FQueue.Mouse.SendMotion(FPtrFocus, FixedToSingle(AX), FixedToSingle(AY));
+  if FPtrFocus = 0 then
+    Exit;
+  X := PMLFixedToSingle(AX);
+  Y := PMLFixedToSingle(AY);
+  // 閉じ込め矩形へ引き寄せるときに直近位置が要る。ロック中はこの経路が来ない。
+  if FGrab <> nil then
+    FGrab.NoteMotion(X, Y);
+  FQueue.Mouse.SendMotion(FPtrFocus, X, Y);
 end;
 
 procedure TPMLWaylandSeat.HandlePointerButton(AButton: LongWord; ADown: Boolean);
@@ -513,7 +597,7 @@ begin
   if FPtrFocus = 0 then
     Exit;
   // 表面座標での移動量。ノッチ換算は 10 単位を 1 とする（SDL と同じ目安）。
-  V := FixedToSingle(AValue) / 10.0;
+  V := PMLFixedToSingle(AValue) / 10.0;
   if AAxis = WL_POINTER_AXIS_VERTICAL_SCROLL then
     FQueue.Mouse.SendWheel(FPtrFocus, 0, -V)
   else
