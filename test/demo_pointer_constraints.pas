@@ -180,16 +180,23 @@ begin
         WriteLn('  キーボードフォーカスを喪失');
       TPMLEventKind.MouseMotion:
         begin
-          if (Ev.Motion.XRel = 0) and (Ev.Motion.YRel = 0) then
-            Inc(AbsCount)
-          else
+          // 絶対移動にも XRel / YRel は載る（前回位置との差）。相対モードかどうかは
+          // 要求側の状態で判断する。XRel が 0 かどうかでは区別できない。
+          if Win.RelativeMouseMode then
           begin
             Inc(RelCount);
             SumRelX := SumRelX + Ev.Motion.XRel;
             SumRelY := SumRelY + Ev.Motion.YRel;
-            // 相対モード中は絶対座標が動かないことを見せる。
+            // ロック中は絶対座標が動かないことを見せる。
             if (RelCount mod 20) = 1 then
-              WriteLn(Format('  移動 abs=(%.0f, %.0f) rel=(%+.1f, %+.1f)',
+              WriteLn(Format('  相対移動 abs=(%.0f, %.0f) rel=(%.1f, %.1f)',
+                [Ev.Motion.X, Ev.Motion.Y, Ev.Motion.XRel, Ev.Motion.YRel]));
+          end
+          else
+          begin
+            Inc(AbsCount);
+            if (AbsCount mod 40) = 1 then
+              WriteLn(Format('  絶対移動 abs=(%.0f, %.0f) rel=(%.1f, %.1f)',
                 [Ev.Motion.X, Ev.Motion.Y, Ev.Motion.XRel, Ev.Motion.YRel]));
           end;
         end;
@@ -227,6 +234,10 @@ begin
               Ctx.Video.Cursors.Visible := not Ctx.Video.Cursors.Visible;
               WriteLn('  カーソル表示: ', BoolToStr(Ctx.Video.Cursors.Visible, True));
             end;
+        else
+          // 割り当ての無いキーも出す。「押したのに何も起きない」のか
+          // 「そもそも届いていない」のかを切り分けるための診断。
+          WriteLn(Format('  （割り当ての無いキー keysym=$%x）', [Ev.Key.Keysym]));
         end;
       TPMLEventKind.WindowCloseRequested:
         Running := False;
@@ -281,7 +292,7 @@ begin
     WriteLn;
     WriteLn('=== 結果 ===');
     WriteLn(Format('  絶対移動: %d 件 / 相対移動: %d 件', [AbsCount, RelCount]));
-    WriteLn(Format('  相対移動の累計: (%+.1f, %+.1f)', [SumRelX, SumRelY]));
+    WriteLn(Format('  相対移動の累計: (%.1f, %.1f)', [SumRelX, SumRelY]));
     WriteLn(Format('  ロックを張れた: %s', [BoolToStr(SawLock, True)]));
     WriteLn(Format('  閉じ込めを張れた: %s', [BoolToStr(SawConfine, True)]));
     WriteLn(Format('  相対ポインタを張れた: %s', [BoolToStr(SawRelative, True)]));
