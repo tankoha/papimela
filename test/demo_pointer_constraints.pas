@@ -44,11 +44,8 @@ uses
   PaPiMeLa.Core;
 
 const
-  KEY_g = $0067;
-  KEY_r = $0072;
-  KEY_c = $0063;
-  KEY_s = $0073;
-  KEY_h = $0068;
+  // キーは大文字と小文字でキーシムが違う。Shift や CapsLock で押されても効くよう
+  // 両方を受ける。定数にすると Pascal は大文字小文字を区別しないので衝突する（D-27）。
 
   // 形状を巡回させる順。全 20 種類は多いので代表だけ。
   SHAPES: array[0..5] of TPMLSystemCursor = (
@@ -75,7 +72,11 @@ var
   SawRelative: Boolean = False;
   SawShape : Boolean = False;
 
-function GrabText: String;
+{ 拘束の状態を 1 行にする。
+
+  相対移動の件数は毎イベント変わるので、変化検知に使う文字列からは外す。
+  含めてしまうと、相対モード中は毎回「変わった」と判定されてログが埋まる。 }
+function GrabText(AWithCounts: Boolean): String;
 var
   I: Integer;
   G: TPMLWaylandPointerGrab;
@@ -102,8 +103,9 @@ begin
       Result := Result + ' ＋相対ポインタ';
       SawRelative := True;
     end;
-    Result := Result + Format(' [フォーカス=%d, 相対移動 %d 件]',
-      [G.FocusWindowID, G.RelativeCount]);
+    Result := Result + Format(' [フォーカス=%d]', [G.FocusWindowID]);
+    if AWithCounts then
+      Result := Result + Format(' 相対移動 %d 件', [G.RelativeCount]);
   end;
   if Result = '' then
     Result := 'ポインタを持つシートが無い';
@@ -113,11 +115,11 @@ procedure ReportGrab;
 var
   S: String;
 begin
-  S := GrabText;
+  S := GrabText(False);
   if S = LastKind then
     Exit;
   LastKind := S;
-  WriteLn('  状態: ', S);
+  WriteLn('  状態: ', GrabText(True));
 end;
 
 procedure ApplyRect;
@@ -203,22 +205,22 @@ begin
       TPMLEventKind.KeyDown:
         case Ev.Key.Keysym of
           XKB_KEY_Escape: Running := False;
-          KEY_g:
+          Ord('g'), Ord('G'):
             begin
               Win.MouseGrab := not Win.MouseGrab;
               WriteLn('  グラブ: ', BoolToStr(Win.MouseGrab, True));
             end;
-          KEY_r:
+          Ord('r'), Ord('R'):
             begin
               Win.RelativeMouseMode := not Win.RelativeMouseMode;
               WriteLn('  相対モード: ', BoolToStr(Win.RelativeMouseMode, True));
             end;
-          KEY_c:
+          Ord('c'), Ord('C'):
             begin
               RectMode := (RectMode + 1) mod 3;
               ApplyRect;
             end;
-          KEY_s:
+          Ord('s'), Ord('S'):
             if Ctx.Video.Cursors.CanChooseShape then
             begin
               ShapeIdx := (ShapeIdx + 1) mod Length(SHAPES);
@@ -229,7 +231,7 @@ begin
             end
             else
               WriteLn('  cursor-shape-v1 が無いので形状は選べません');
-          KEY_h:
+          Ord('h'), Ord('H'):
             begin
               Ctx.Video.Cursors.Visible := not Ctx.Video.Cursors.Visible;
               WriteLn('  カーソル表示: ', BoolToStr(Ctx.Video.Cursors.Visible, True));
