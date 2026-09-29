@@ -26,3 +26,4 @@ test/demo_japanese_input
 test/test_pointer_constraints
 test/demo_pointer_constraints
 test/test_touch_cursor
+test/test_dummy_video

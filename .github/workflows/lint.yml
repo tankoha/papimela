@@ -55,6 +55,27 @@ jobs:
             fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib "$f"
           done
 
+      # Babashka は checkorigin と qwen-gen が使う。単一バイナリなので導入は速い。
+      - name: Install Babashka
+        run: |
+          curl -sSL https://raw.githubusercontent.com/babashka/babashka/master/install \
+            | sudo bash
+
+      # Origin 行と設計書 第11章の由来列の突き合わせ。移植部分に SDL の著作権表示が
+      # あるか、クリーンルーム部分に紛れ込んでいないかもここで見る。
+      - name: Check origins
+        run: ./tools/checkorigin.bb
+
+      # 表示サーバの要らないテスト。CI には Wayland セッションが無いので、
+      # ダミーバックエンドで動く公開 API の検証だけをここで回す。
+      # 実機のコンポジタが要るテスト（T-04/T-05/T-08/T-10）はローカル専用。
+      - name: Run headless tests
+        run: |
+          set -eu
+          fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib \
+            -otest/test_dummy_video test/test_dummy_video.pas
+          ./test/test_dummy_video
+
       # 図と実装の乖離検査。英日の Mermaid ブロックの同一性と、図に出てくる型が
       # 実装に存在することを確認する。速いので lint より先に置く。
       - name: Check diagrams

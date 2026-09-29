@@ -95,7 +95,6 @@ type
     FRelativeMouseMode: Boolean;
     FMouseRect      : TPMLRect;
     procedure SetTitle(const AValue: String);
-    procedure SetSize(AWidth, AHeight: Integer);
     procedure SetMouseGrab(AValue: Boolean);
     procedure SetRelativeMouseMode(AValue: Boolean);
     procedure SetMouseRect(const AValue: TPMLRect);
@@ -120,6 +119,8 @@ type
     procedure Restore;
     procedure RaiseWindow;
     procedure Sync;
+    // 大きさの変更。Width / Height は読むだけで、変えるのはこちらから行う。
+    procedure SetSize(AWidth, AHeight: Integer);
     procedure SetMinimumSize(AWidth, AHeight: Integer);
     procedure SetMaximumSize(AWidth, AHeight: Integer);
 
@@ -228,7 +229,8 @@ type
 implementation
 
 uses
-  PaPiMeLa.Video.Wayland;
+  PaPiMeLa.Video.Wayland,
+  PaPiMeLa.Video.Dummy;
 
 { TPMLWindowOptions }
 
@@ -591,8 +593,11 @@ begin
   if Wanted = '' then
     Wanted := LowerCase(Trim(GetEnvironmentVariable('PAPIMELA_VIDEO')));
 
+  // 試す順。PAPIMELA_VIDEO で名前を指定すると、その 1 つだけが候補になる。
+  // dummy を最後に置くのは、既定で実画面より先に選ばれないようにするため。
   if not TryBackend(TPMLWaylandVideoBackend.Create(AContextRef, Self, AQueue)) then
-    raise EPMLVideoError.Create('no video backend could be selected');
+    if not TryBackend(TPMLDummyVideoBackend.Create(AContextRef, Self)) then
+      raise EPMLVideoError.Create('no video backend could be selected');
 
   RefreshDisplays;
   // カーソル部品はバックエンドが Connect のときに用意する。無い場合もある。

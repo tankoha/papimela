@@ -19,7 +19,7 @@ SDL3 を Free Pascal (FPC) の Object Pascal で書き直す再実装プロジ�
 - 初回スコープは **Linux / Wayland のコア機能のみ**。他プラットフォームは抽象化の
   拡張ポイントだけ用意し、実装しない。
 - 移植部分は zlib ライセンスの派生物。ファイルヘッダの `Origin:` 行が必須で、
-  `tools/checkorigin` が `docs/DESIGN.md` 第11章の由来列との一致を検査する。
+  `tools/checkorigin.bb` が `docs/DESIGN.md` 第11章の由来列との一致を CI で検査する。
 - **SDL へのアップストリーム貢献は行わない。** SDL は AI 生成コードの貢献を
   受け付けない方針を明示している。バグを見つけても PR や Issue を出さない。
 - 参照用の SDL ソースは `reference/SDL`（gitignore 済み）。
@@ -43,3 +43,19 @@ warning 1 件でも CI が落ちる。現在の指摘は 0 件なので、その
 `docs/DESIGN.md` 第11章の難易度列に従う。Low は qwen2.5-coder:14b、Medium は
 Sonnet 5、High は Opus 5。**qwen はスキルも CLAUDE.md も読まない**ので、
 qwen に渡すプロンプトには `docs/CODING-STYLE.md` の内容を明示的に含める。
+
+**qwen の呼び出しは `tools/qwen-gen.bb` を使う。** `ollama run` は TUI が ANSI
+エスケープ（カーソル移動・行消去）を出力に混ぜるため、長い行が折り返される位置で
+ソースが壊れる。`qwen-gen.bb` は HTTP API を叩くので素のテキストが返る。
+
+```bash
+tools/qwen-gen.bb プロンプトファイル 出力ファイル
+```
+
+実際の進め方（#34 で確立）:
+
+1. interface 部（設計にあたる部分）はこちらで書く
+2. 「implementation 部だけを書け」という指示と `docs/CODING-STYLE.md` の全文、
+   各メソッドの振る舞いを 1 行ずつ書いた仕様、interface 部を渡す
+3. 返ってきた実装を**必ず読んでから**採用する。#34 では 3 箇所直した
+   （引数の取り違え、環境変数の部分適用、無駄な再計算）

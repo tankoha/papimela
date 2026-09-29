@@ -1223,27 +1223,27 @@ wayland-scanner の Pascal 版。C の `wayland-scanner` が生成する `*-clie
 | # | ユニット | 対応する SDL ソース | 規模 | 依存 | 優先度 | 由来 | 難易度 | 担当 | 注意点 |
 |---|---|---|---|---|---|---|---|---|---|
 | 1 | `PaPiMeLa.Errors` | （`SDL_error.c` は捨てる） | 小 | — | P0 | クリーンルーム | Medium | Sonnet | 5.2 の階層。`CreateNative` の書式、`EPMLBackendLost` の扱い |
-| 2 | `PaPiMeLa.Core` | `SDL.c`（初期化順序の知見のみ） | 中 | 1 | P0 | クリーンルーム | **High** | Opus | `TPMLContext`、`TPMLObject` / `TPMLSystemObject` / `TPMLOwnedObject`、所有グラフ（2.4）、`RunOnMainThread`、メインスレッド検査。全モジュールの土台 |
-| 3 | `PaPiMeLa.Types` | `video/SDL_rect.c`、`SDL_rect_impl.h`、`SDL_guid.c` | 中 | 1 | P0 | 一部移植 | Low | qwen | 8.3 の表どおり。矩形アルゴリズム（線分クリップ等）は移植、演算子は新規 |
+| 2 | `PaPiMeLa.Core`、`.Core.Base` | `SDL.c`（初期化順序の知見のみ） | 中 | 1 | P0 | クリーンルーム | **High** | Opus | `TPMLContext`、`TPMLObject` / `TPMLSystemObject` / `TPMLOwnedObject`、所有グラフ（2.4）、`RunOnMainThread`、メインスレッド検査。全モジュールの土台 |
+| 3 | `PaPiMeLa.Types` | `video/SDL_rect.c`、`SDL_rect_impl.h`、`SDL_guid.c` | 中 | 1 | P0 | クリーンルーム | Low | qwen | 8.3 の表どおり。矩形アルゴリズム（線分クリップ等）は移植、演算子は新規 |
 | 4 | `PaPiMeLa.Unicode` | （`SDL_stdinc.h` の UTF-8 部を参考） | 小 | — | P0 | クリーンルーム | Low | qwen | `UTF8CharToByteOffset` / `UTF8ByteToCharOffset` / `UTF8Length` / 文字境界での切り詰め。IME 経路が依存。テストを厚く |
 | 5 | `PaPiMeLa.Log` | `SDL_log.c` (870) | 小 | 1, 2 | P0 | 移植 | Low | qwen | カテゴリ・優先度・出力関数フック。`Context.Log` のインスタンス。stderr 出力と `journald` は不要 |
 | 6 | `PaPiMeLa.Properties` | `SDL_properties.c` (855)、`SDL_hints.c` (404) | 中 | 2 | P0 | 移植 | Low | qwen | ハッシュ表は `TDictionary`。ヒントは環境変数 `PAPIMELA_*` を読む。ヒントコールバック |
 | 7 | `PaPiMeLa.Atomic` | `atomic/` (573) | 小 | — | P0 | 移植 | Medium | Sonnet | FPC の `Interlocked*` へのマッピング、メモリバリア、スピンロックのバックオフ |
 | 8 | `PaPiMeLa.Threading` | `thread/pthread/` (1003)、`thread/` (772)、`core/linux/SDL_threadprio.c` (345) | 中 | 1, 2, 7 | P0 | 移植 | **High** | Opus | pthread 直接使用、`TThread` 派生の `TPMLThread`、`TPMLLockGuard`（管理レコード）、RealtimeKit 経路は D-Bus（#16）完成後に追加、`cthreads` 検査 |
 | 9 | `PaPiMeLa.Time` | `timer/SDL_timer.c` (795)、`timer/unix/` (180) | 小 | 2, 8 | P0 | 移植 | Medium | Sonnet | タイマースレッドと期限管理、`DelayPrecise`、`CLOCK_MONOTONIC` |
-| 10 | `PaPiMeLa.Platform.DynLib`、`.Platform.Posix` | `loadso/dlopen/` (82) | 小 | 1 | P0 | 一部移植 | Medium | Sonnet | 参照カウント付きロード、必須/任意シンボルの区別、`eventfd` / `inotify` / `memfd_create` / `poll` の宣言 |
+| 10 | `PaPiMeLa.Platform.DynLib`、`.Platform.Posix` | `loadso/dlopen/` (82) | 小 | 1 | P0 | クリーンルーム | Medium | Sonnet | 参照カウント付きロード、必須/任意シンボルの区別、`eventfd` / `inotify` / `memfd_create` / `poll` の宣言 |
 | 11 | `tools/gensyms` | `SDL_*sym.h` / `SDL_*dyn.c` のマクロ機構 | 小 | — | P0 | クリーンルーム | Medium | Sonnet | 9.1。定義ファイル形式の設計と生成器（FPC で書く） |
 | 12 | `tools/wlscan-pas` | （`wayland-scanner` 相当） | 中 | — | P0 | クリーンルーム | **High** | Opus | 9.2。`wl_interface` 定数表の生成、`wl_proxy_marshal_array_flags` 経由のリクエスト、リスナー抽象クラスとサンク束の生成。**Wayland 実装全体の前提** |
-| 13 | `PaPiMeLa.Platform.Wayland.Client` | `SDL_waylandsym.h` (247)、`SDL_waylanddyn.c` (217) | 小 | 10, 11 | P0 | 一部移植 | Low | qwen | libwayland-client / -egl / -cursor のシンボル表を `gensyms` 定義に写す |
+| 13 | `PaPiMeLa.Platform.Wayland.Client` | `SDL_waylandsym.h` (247)、`SDL_waylanddyn.c` (217) | 小 | 10, 11 | P0 | クリーンルーム | Low | qwen | libwayland-client / -egl / -cursor のシンボル表を `gensyms` 定義に写す |
 | 14 | `PaPiMeLa.Platform.Wayland.Protocols.*`（21 ユニット） | `wayland-protocols/*.xml` | 大（生成） | 12, 13 | P0 | クリーンルーム（生成） | Low | qwen | 生成器を回し、コンパイルエラーを生成器側に差し戻す。手で生成物を直さない |
-| 15 | `PaPiMeLa.Platform.XKB` | `SDL_waylandsym.h` の xkbcommon 節 | 小 | 10 | P0 | 一部移植 | Low | qwen | 関数約 40、キーシム定数は #26 が参照する範囲 |
-| 16 | `PaPiMeLa.Platform.DBus` | `core/linux/SDL_dbus.c` (2052) | 中 | 8, 10 | P1 | 一部移植 | **High** | Opus | `TPMLDBusConnection`（watch 関数で fd をイベントループへ）、`TPMLDBusReader`（シグネチャ駆動の再帰読み取り）、例外遮断。IME 経路の土台 |
+| 15 | `PaPiMeLa.Platform.XKB` | `SDL_waylandsym.h` の xkbcommon 節 | 小 | 10 | P0 | クリーンルーム | Low | qwen | 関数約 40、キーシム定数は #26 が参照する範囲 |
+| 16 | `PaPiMeLa.Platform.DBus` | `core/linux/SDL_dbus.c` (2052) | 中 | 8, 10 | P1 | クリーンルーム | **High** | Opus | `TPMLDBusConnection`（watch 関数で fd をイベントループへ）、`TPMLDBusReader`（シグネチャ駆動の再帰読み取り）、例外遮断。IME 経路の土台 |
 | 17 | `PaPiMeLa.Platform.EGL`、`.GLES2`、`.GL` | `SDL_egl.h` 系、`render/opengles2/SDL_glesfuncs.h`、`render/opengl/SDL_glfuncs.h` | 中 | 10 | P0 | 一部移植 | Low | qwen | khronos ヘッダは使わない。必要な定数・関数のみ。`eglGetProcAddress` 経由 |
 | 18 | `PaPiMeLa.Platform.Evdev` | `core/linux/SDL_evdev_capabilities.c` (168)、Linux `input.h` | 小 | — | P2 | 一部移植 | Low | qwen | ioctl 番号を定数式で計算、`ff_effect`。`BaseUnix.FpIOCtl` |
 | 19 | `PaPiMeLa.Platform.Udev` | `core/linux/SDL_udev.c` (690) | 小 | 8, 10 | P2 | 移植 | Medium | Sonnet | 監視スレッド、udev 不在時の inotify フォールバック |
 | 20 | `PaPiMeLa.Platform.Alsa`、`.Platform.Pulse` | `audio/alsa/`、`audio/pulseaudio/` の冒頭シンボル表 | 中 | 10 | P2 | 一部移植 | Low | qwen | 各 50〜60 関数の宣言 |
 | 21 | `PaPiMeLa.Platform.PipeWire` | `audio/pipewire/SDL_pipewire.c` の冒頭 + PipeWire `spa/` ヘッダ | 中 | 10 | P2 | 一部移植 | **High** | Opus | `spa_pod_builder` の Pascal 再実装（未解決 7）。PipeWire ヘッダ（MIT）の告知 |
-| 22 | `PaPiMeLa.Events` | `events/SDL_events.c` (2090)、`SDL_eventwatch.c`、`SDL_quit.c` | 大 | 2, 7, 8, 9 | P1 | 一部移植 | **High** | Opus | 6.2 のレコード、リングバッファ、`poll` セットの統合、`WakeUp`、`Push` のスレッド安全性、ウォッチ/フィルタ。SDL のキュー実装の回避策（センチネル、満杯時の扱い）は移植 |
+| 22 | `PaPiMeLa.Events` | `events/SDL_events.c` (2090)、`SDL_eventwatch.c`、`SDL_quit.c` | 大 | 2, 7, 8, 9 | P1 | クリーンルーム | **High** | Opus | 6.2 のレコード、リングバッファ、`poll` セットの統合、`WakeUp`、`Push` のスレッド安全性、ウォッチ/フィルタ。SDL のキュー実装の回避策（センチネル、満杯時の扱い）は移植 |
 | 23 | `PaPiMeLa.Events.Dispatcher` | （v1 4.2 の設計） | 中 | 22 | P1 | クリーンルーム | Medium | Sonnet | 型別リスナーの `Supports` 検出、配信中の Add/Remove、ウィンドウ別振り分け、`of object` イベント |
 | 24 | `PaPiMeLa.Events.Keyboard`、`.Events.Keymap` | `events/SDL_keyboard.c` (969)、`SDL_keymap.c` (1231) | 大 | 22, 4 | P1 | 一部移植 | **High** | Opus | 状態機械は移植。**IME フィルタフック（7.5）と `TPMLDeferredKeyQueue` は新規**。フォーカス喪失時の全キー解放 |
 | 25 | `PaPiMeLa.Events.Mouse`、`.Events.Touch` | `events/SDL_mouse.c` (1991)、`SDL_touch.c` (635) | 大 | 22 | P1 | 移植 | Medium | Sonnet | 相対モード、クリック回数、二重押下抑制、`TPMLCursorBackend` との境界 |
@@ -1253,10 +1253,10 @@ wayland-scanner の Pascal 版。C の `wayland-scanner` が生成する `*-clie
 | 29 | `PaPiMeLa.Surface.Blit`（手書きブリッタ群） | `SDL_blit.c`、`SDL_blit_0/1/A/N/slow/copy.c`（計約 8000）、`SDL_RLEaccel.c` (1395)、`SDL_stretch.c` (950)、`SDL_rotate.c` (605)、`SDL_fillrect.c` (437) | 大 | 27 | P1 | 移植 | Low | qwen | **スカラー版のみ**。SIMD `#ifdef` は落とす。マクロ展開（`DUFFS_LOOP` 等）は素直なループに |
 | 30 | `tools/genblit` + `PaPiMeLa.Surface.Blit.Auto` | `sdlgenblit.pl` → `SDL_blit_auto.c` (11542) | 大（生成） | 27 | P1 | 移植 | Medium | Sonnet | Perl 生成器を FPC に移植。生成物のコンパイル時間を確認（未解決 8） |
 | 31 | `PaPiMeLa.Video.Backend` | `video/SDL_sysvideo.h` (623)（分解元） | 中 | 2, 3, 22 | P1 | クリーンルーム | **High** | Opus | 3.2 の抽象クラス群、能力集合、`TPMLNativeWindowHandles`。**他の全ビデオモジュールの土台** |
-| 32 | `PaPiMeLa.Video`（公開 API）、`.Clipboard` | `video/SDL_video.c` (6592)、`SDL_clipboard.c` (487) | 大 | 31, 22, 23 | P1 | 一部移植 | **High** | Opus | `TPMLVideoSystem` / `TPMLDisplay` / `TPMLWindow`。フルスクリーン・表示モードの状態遷移、ウィンドウフラグの整合性検査、親子ウィンドウは SDL から移植。`_this` 参照 456 箇所を所有グラフに置き換える |
+| 32 | `PaPiMeLa.Video`（公開 API）、`.Clipboard` | `video/SDL_video.c` (6592)、`SDL_clipboard.c` (487) | 大 | 31, 22, 23 | P1 | クリーンルーム | **High** | Opus | `TPMLVideoSystem` / `TPMLDisplay` / `TPMLWindow`。フルスクリーン・表示モードの状態遷移、ウィンドウフラグの整合性検査、親子ウィンドウは SDL から移植。`_this` 参照 456 箇所を所有グラフに置き換える |
 | 33 | `PaPiMeLa.Video.EGL` | `video/SDL_egl.c` (1426) | 中 | 17, 31 | P1 | 移植 | Medium | Sonnet | `TPMLEGLBackend` 基底。プラットフォーム固有 4 メソッドを抽象に。コンフィグ選択の回避策を継承 |
-| 34 | `PaPiMeLa.Video.Dummy` | `video/dummy/` (414) | 小 | 31 | P1 | 移植 | Low | qwen | ヘッドレステスト用。#31 の最初の実装例として先に書く |
-| 35 | `PaPiMeLa.Video.Wayland`（接続・レジストリ・出力） | `SDL_waylandvideo.c` (2083)、`SDL_waylandutil.c` | 大 | 13, 14, 31 | P1 | 一部移植 | **High** | Opus | グローバル束縛と能力集合への写像、`wl_output` / `xdg_output` / `fractional-scale` → `TPMLDisplayBackend`、`IPMLWaylandSeatProvider` 実装、`PumpEvents` / `poll` 統合、`FPendingException` |
+| 34 | `PaPiMeLa.Video.Dummy` | `video/dummy/` (414) | 小 | 31 | P1 | クリーンルーム | Low | qwen | ヘッドレステスト用。#31 の最初の実装例として先に書く |
+| 35 | `PaPiMeLa.Video.Wayland`（接続・レジストリ・出力）、`.Wayland.Types` | `SDL_waylandvideo.c` (2083)、`SDL_waylandutil.c` | 大 | 13, 14, 31 | P1 | 一部移植 | **High** | Opus | グローバル束縛と能力集合への写像、`wl_output` / `xdg_output` / `fractional-scale` → `TPMLDisplayBackend`、`IPMLWaylandSeatProvider` 実装、`PumpEvents` / `poll` 統合、`FPendingException` |
 | 36 | `PaPiMeLa.Video.Wayland.Window` | `SDL_waylandwindow.c` (3931) | 大 | 35 | P1 | 一部移植 | **High** | Opus | xdg-shell の `configure` / `ack_configure` 状態機械、フルスクリーン・最大化の往復、viewporter によるスケーリング、xdg-activation、ポップアップ。回避策は移植、構造は `TPMLWindowBackend` に合わせる |
 | 37 | `PaPiMeLa.Video.Wayland.Seat`、`.Wayland.PointerGrab`、`.Wayland.Cursor` | `SDL_waylandevents.c` (3917、`text_input_*` を除く)、`SDL_waylandkeyboard.c` (280)、`SDL_waylandmouse.c` (1530) | 大 | 35, 15, 24, 25, 26 | P1 | 一部移植 | **High** | Opus | `wl_keyboard` / `wl_pointer` / `wl_touch`、xkb 状態、キーリピートタイマ、pointer-constraints / relative-pointer / cursor-shape、`TPMLCursorBackend` 実装。**text-input-v3 は含めない**（#49 へ） |
 | 38 | `PaPiMeLa.Video.Wayland.Data` | `SDL_waylanddatamanager.c` (847)、`SDL_waylandclipboard.c` (217) | 中 | 35 | P2 | 移植 | Medium | Sonnet | `TPMLClipboardBackend` 実装、primary selection、D&D 受信（パイプ読み取り） |

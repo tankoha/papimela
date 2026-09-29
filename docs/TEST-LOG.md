@@ -3,7 +3,7 @@
 papimela で実行したテストの記録。日時は実測値（ファイルの mtime と git のコミット時刻、
 および最終一括実行の時刻）に基づく。
 
-最終一括実行: **2026-09-29**（自動テスト 8 本すべて成功、アサーション 159 件・失敗 0 件）。
+最終一括実行: **2026-09-29**（自動テスト 9 本すべて成功、アサーション 197 件・失敗 0 件）。
 対話テスト T-07 / T-09 も同日に別途実行し、観測項目をすべて確認した。
 
 ## 1. 実行可能テスト
@@ -20,6 +20,7 @@ papimela で実行したテストの記録。日時は実測値（ファイル�
 | T-08 | `test/test_pointer_constraints` | ポインタ拘束。能力への写像、要求の記録、そして**拘束の張り替えがプロトコルに違反しないこと** | 2026-09-29 | **PASS 23 / 0** | ロックと閉じ込めを同じシート・同じサーフェスに同時に作ると接続が切られるので、`wl_display_get_error` が終始 0 であることが張り替え順序の証明になる。拘束が**有効になる**かはカーソル位置に依存するため観測扱い（T-09 が担当）。D-24 はこのテストで見つかった |
 | T-09 | `test/demo_pointer_constraints`（**対話・人の操作**） | カーソルをウィンドウ内に入れた状態でロック / 閉じ込め / 相対移動 / カーソル形状が実際に有効になるか | 2026-09-29 | **PASS 観測項目 5 / 5** | 人の目による確認。観測内容は下表。D-25〜D-28 はこのテストで見つかった（すべてデモ側の欠陥） |
 | T-10 | `test/test_touch_cursor` | タッチの状態機械（移動量の算出、ウィンドウの引き継ぎ、取り消し）と cursor-shape-v1 の対応表・能力・切り替え | 2026-09-29 | **PASS 41 / 0** | タッチは合成入力。Wayland は移動量を送らず motion / up にウィンドウも付けないので、そこを埋める部分がタッチ対応の実体であり、ハードウェア無しで検証できる。**実機のタッチパネルは手元に無く未検証**。カーソル形状の実際の適用はカーソル位置に依存するため T-09 が担当 |
+| T-11 | `test/test_dummy_video` | **表示サーバ無し**で公開 API（ウィンドウ生成・リサイズ・状態・フレームバッファ）が動くか | 2026-09-29 | **PASS 38 / 0** | `WAYLAND_DISPLAY` と `DISPLAY` を外して実行しても通る。**CI で走る唯一の実行テスト**。D-29 はこのテストを書いていて見つかった |
 
 ### T-04 が決定的である理由
 
@@ -69,7 +70,8 @@ papimela で実行したテストの記録。日時は実測値（ファイル�
 | C-02 | `tools/wlscan-pas` | 2026-09-28 22:24 | **PASS** | — |
 | C-03 | 生成プロトコル 21 ユニット（9230 行） | 2026-09-28 22:24 | **PASS 21 / 21** | 初回は 9 / 21 が失敗（D-10〜D-12）。§9.2 が挙げる XML のうち、`reference/SDL/wayland-protocols/` にあるものすべて |
 | C-04 | **rawpaco 静的解析（激辛モード `--fail-on=warning`）** — `src` / `src/generated` / `test` / `spikes` / `tools` の全 Pascal ファイル | 2026-09-29 | **PASS 指摘 0 件** | 導入初回は 2 件の指摘（D-20）。修正後は 0 件。`.github/workflows/lint.yml` で push / pull_request ごとに走る |
-| C-05 | **図と実装の整合性検査**（`tools/check-diagrams.sh`） — 英日の Mermaid ブロック同一性、図に出てくる型 38 個の実在 | 2026-09-29 | **PASS 不整合 0 件** | `.github/workflows/lint.yml` で push ごとに走る |
+| C-05 | **図と実装の整合性検査**（`tools/check-diagrams.sh`） — 英日の Mermaid ブロック同一性、図に出てくる型 51 個の実在 | 2026-09-29 | **PASS 不整合 0 件** | `.github/workflows/lint.yml` で push ごとに走る |
+| C-06 | **Origin 行と設計書の突き合わせ**（`tools/checkorigin.bb`） — 第11章の由来列との一致、移植部分の SDL 著作権表示の有無 | 2026-09-29 | **PASS 不一致 0 件** | 導入初回は 10 件の不一致（D-30）。`.github/workflows/lint.yml` で push ごとに走る |
 
 ## 3. アサーションを置いていない項目
 
@@ -87,7 +89,7 @@ papimela で実行したテストの記録。日時は実測値（ファイル�
 | ウィンドウのフルスクリーン / 不透明度 / アイコン / ヒットテスト / キーボードグラブ | **未実装** | 対応する能力と一緒に追加する |
 | GL / Vulkan / レンダラ / クリップボード / 任意ピクセルのカーソル | **未実装** | 第 11 章 #33、#38、#39、#41、#67。カーソルはシステム形状のみ実装済みで、`wl_shm` の共通部品（#39）が入ってから任意ピクセル版を足す |
 | `TPMLEvent` の `Finalize` コスト測定 | **未実施** | サイズは実測済み（72 バイト）。ベンチマークは残課題（設計書 §10 項目 9） |
-| CI でのヘッドレス実行 | **未整備** | `weston --backend=headless` + fcitx5 を CI で起動する構成は未着手（第 11 章 #70） |
+| CI でのヘッドレス実行 | **一部整備済み** | ダミーバックエンド（#34）で T-11 が CI で走るようになった。ただし CI で検査できるのは**バックエンドに依存しない公開 API だけ**で、Wayland のプロトコル手順（T-04/T-05/T-08/T-10）と IME（T-02/T-03/T-06）はローカル専用のまま。そこまで CI へ載せるには `weston --backend=headless` + fcitx5 の起動が要る（第 11 章 #70 の残り） |
 
 ## 4. 使い捨ての事前検証（恒久化していない）
 
@@ -111,11 +113,15 @@ fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_key_routing     test/t
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/demo_japanese_input  test/demo_japanese_input.pas
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_pointer_constraints test/test_pointer_constraints.pas
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_touch_cursor        test/test_touch_cursor.pas
+fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_dummy_video          test/test_dummy_video.pas
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/demo_pointer_constraints test/demo_pointer_constraints.pas
 fpc -O1 -gl spikes/spike1_wayland.pas && fpc -O1 -gl spikes/spike2_fcitx.pas
 ./spikes/spike1_wayland && ./spikes/spike2_fcitx
 ./test/test_fcitx_textinput && ./test/test_wayland_protocols && ./test/test_wayland_window
 ./test/test_key_routing && ./test/test_pointer_constraints && ./test/test_touch_cursor
+
+# 表示サーバが無くても通る唯一のテスト（CI で走るのはこれ）。
+env -u WAYLAND_DISPLAY -u DISPLAY ./test/test_dummy_video
 
 # T-07（対話）。ウィンドウをクリックしてフォーカスし、日本語を打つ。
 # 途中で別ウィンドウへ移って戻ると、フォーカスの往復が IME に伝わることも確認できる。
