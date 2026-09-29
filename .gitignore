@@ -29,3 +29,4 @@ test/test_touch_cursor
 test/test_dummy_video
 test/test_pixels
 test/test_io
+test/test_surface
