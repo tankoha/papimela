@@ -1,16 +1,17 @@
 {
-  demo_pointer_constraints — ポインタ拘束を実際のマウスで確認する対話デモ
+  demo_pointer_constraints — ポインタ拘束とカーソルを実際のマウスで確認する対話デモ
 
   Origin : original work (clean-room design; not derived from SDL sources)
 
   WHAT:
-    ウィンドウを開き、キー操作でグラブ・相対モード・閉じ込め矩形を切り替えて、
-    コンポジタが拘束を有効にしたかどうかと、届いた移動量を表示する。
+    ウィンドウを開き、キー操作でグラブ・相対モード・閉じ込め矩形・カーソル形状を
+    切り替える。コンポジタが拘束を有効にしたかどうかと、届いた移動量を表示する。
 
   WHY:
-    test_pointer_constraints は「要求の記録」と「プロトコル違反をしないこと」しか
-    検証できない。拘束が実際に有効になるにはポインタがウィンドウの上にある必要が
-    あり、カーソルをプログラムから動かす手段が無いためである。ここは人が触る。
+    test_pointer_constraints と test_touch_cursor が検証できるのは「要求の記録」と
+    「プロトコル違反をしないこと」までである。拘束もカーソル形状も、ポインタが
+    ウィンドウの上にあること（形状の指定は wl_pointer.enter の serial を要求する）が
+    前提で、カーソルをプログラムから動かす手段が無い。ここは人が触って確かめる。
 
   使い方:
     ./test/demo_pointer_constraints [秒数]        既定は 60 秒
@@ -19,6 +20,8 @@
       G  グラブ（ウィンドウ全体への閉じ込め）を切り替え
       R  相対モード（ロック）を切り替え
       C  閉じ込め矩形を 切らない → 中央 160x120 → 1x1 の順で切り替え
+      S  カーソル形状を巡回
+      H  カーソルの表示 / 非表示
       Escape  終了
 }
 program demo_pointer_constraints;
@@ -44,6 +47,15 @@ const
   KEY_g = $0067;
   KEY_r = $0072;
   KEY_c = $0063;
+  KEY_s = $0073;
+  KEY_h = $0068;
+
+  // 形状を巡回させる順。全 20 種類は多いので代表だけ。
+  SHAPES: array[0..5] of TPMLSystemCursor = (
+    TPMLSystemCursor.Arrow, TPMLSystemCursor.Text, TPMLSystemCursor.Crosshair,
+    TPMLSystemCursor.Hand, TPMLSystemCursor.Wait, TPMLSystemCursor.NotAllowed);
+  SHAPE_NAMES: array[0..5] of String = (
+    '矢印', 'テキスト', '十字', '手', '砂時計', '禁止');
 
 var
   Ctx     : TPMLContext;
@@ -52,6 +64,7 @@ var
   Running : Boolean = True;
   Seconds : Integer = 60;
   RectMode: Integer = 0;     // 0 = 無し、1 = 中央 160x120、2 = 1x1
+  ShapeIdx: Integer = 0;
   AbsCount: Integer = 0;
   RelCount: Integer = 0;
   SumRelX : Single = 0;
@@ -60,6 +73,7 @@ var
   SawLock : Boolean = False;
   SawConfine: Boolean = False;
   SawRelative: Boolean = False;
+  SawShape : Boolean = False;
 
 function GrabText: String;
 var
@@ -197,6 +211,22 @@ begin
               RectMode := (RectMode + 1) mod 3;
               ApplyRect;
             end;
+          KEY_s:
+            if Ctx.Video.Cursors.CanChooseShape then
+            begin
+              ShapeIdx := (ShapeIdx + 1) mod Length(SHAPES);
+              Ctx.Video.Cursors.SystemCursor := SHAPES[ShapeIdx];
+              SawShape := True;
+              WriteLn(Format('  カーソル形状: %s',
+                [SHAPE_NAMES[ShapeIdx]]));
+            end
+            else
+              WriteLn('  cursor-shape-v1 が無いので形状は選べません');
+          KEY_h:
+            begin
+              Ctx.Video.Cursors.Visible := not Ctx.Video.Cursors.Visible;
+              WriteLn('  カーソル表示: ', BoolToStr(Ctx.Video.Cursors.Visible, True));
+            end;
         end;
       TPMLEventKind.WindowCloseRequested:
         Running := False;
@@ -216,6 +246,8 @@ begin
   WriteLn('    G  グラブ（ウィンドウ全体への閉じ込め）');
   WriteLn('    R  相対モード（ロック。カーソルが止まり移動量だけが届く）');
   WriteLn('    C  閉じ込め矩形を 無し → 中央 160x120 → 1x1 と切り替え');
+  WriteLn('    S  カーソル形状を巡回（矢印 / テキスト / 十字 / 手 / 砂時計 / 禁止）');
+  WriteLn('    H  カーソルの表示 / 非表示');
   WriteLn(Format('    Escape で終了。%d 秒で自動終了します。', [Seconds]));
   WriteLn;
 
@@ -223,9 +255,11 @@ begin
   try
     VB := Ctx.Video.Backend as TPMLWaylandVideoBackend;
     WriteLn(Format('  ビデオ: %s', [Ctx.Video.BackendName]));
-    WriteLn(Format('  能力: MouseConfine=%s RelativeMouse=%s',
+    WriteLn(Format('  能力: MouseConfine=%s RelativeMouse=%s CursorShape=%s Touch=%s',
       [BoolToStr(TPMLVideoCapability.MouseConfine in Ctx.Video.Capabilities, True),
-       BoolToStr(TPMLVideoCapability.RelativeMouse in Ctx.Video.Capabilities, True)]));
+       BoolToStr(TPMLVideoCapability.RelativeMouse in Ctx.Video.Capabilities, True),
+       BoolToStr(TPMLVideoCapability.CursorShape in Ctx.Video.Capabilities, True),
+       BoolToStr(TPMLVideoCapability.Touch in Ctx.Video.Capabilities, True)]));
     if not (TPMLVideoCapability.MouseConfine in Ctx.Video.Capabilities) then
     begin
       WriteLn('  このコンポジタは pointer-constraints を持たないので何も試せません。');
@@ -251,6 +285,7 @@ begin
     WriteLn(Format('  ロックを張れた: %s', [BoolToStr(SawLock, True)]));
     WriteLn(Format('  閉じ込めを張れた: %s', [BoolToStr(SawConfine, True)]));
     WriteLn(Format('  相対ポインタを張れた: %s', [BoolToStr(SawRelative, True)]));
+    WriteLn(Format('  カーソル形状を切り替えた: %s', [BoolToStr(SawShape, True)]));
     WriteLn(Format('  wl_display_get_error: %d（0 ならプロトコル違反なし）',
       [wl_display_get_error(VB.Connection.Display)]));
     Win.Free;

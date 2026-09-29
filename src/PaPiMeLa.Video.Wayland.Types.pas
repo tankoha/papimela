@@ -51,7 +51,9 @@ uses
   PaPiMeLa.Platform.Wayland.Protocols.XdgActivationV1,
   PaPiMeLa.Platform.Wayland.Protocols.TextInputUnstableV3,
   PaPiMeLa.Platform.Wayland.Protocols.PointerConstraintsUnstableV1,
-  PaPiMeLa.Platform.Wayland.Protocols.RelativePointerUnstableV1;
+  PaPiMeLa.Platform.Wayland.Protocols.RelativePointerUnstableV1,
+  PaPiMeLa.Platform.Wayland.Protocols.TabletV2,
+  PaPiMeLa.Platform.Wayland.Protocols.CursorShapeV1;
 
 type
   { 1 つの wl_output。メタデータを溜めて TPMLDisplayBackend に見せる。 }
@@ -128,6 +130,7 @@ type
     TextInputMgr    : Pzwp_text_input_manager_v3;
     PointerConstraints: Pzwp_pointer_constraints_v1;
     RelativePointerMgr: Pzwp_relative_pointer_manager_v1;
+    CursorShapeMgr    : Pwp_cursor_shape_manager_v1;
 
     constructor Create;
     destructor Destroy; override;
@@ -240,6 +243,8 @@ begin
   PaPiMeLa.Platform.Wayland.Protocols.TextInputUnstableV3.EnsureProtocolInitialized;
   PaPiMeLa.Platform.Wayland.Protocols.PointerConstraintsUnstableV1.EnsureProtocolInitialized;
   PaPiMeLa.Platform.Wayland.Protocols.RelativePointerUnstableV1.EnsureProtocolInitialized;
+  PaPiMeLa.Platform.Wayland.Protocols.TabletV2.EnsureProtocolInitialized;
+  PaPiMeLa.Platform.Wayland.Protocols.CursorShapeV1.EnsureProtocolInitialized;
 
   FDisplay := wl_display_connect(nil);
   if FDisplay = nil then
@@ -281,6 +286,7 @@ begin
   FRegistry := nil;
   PointerConstraints := nil;
   RelativePointerMgr := nil;
+  CursorShapeMgr := nil;
   Compositor := nil;
   Shm := nil;
   WmBase := nil;
@@ -325,6 +331,8 @@ begin
       ActivationMgr := Pxdg_activation_v1(B(xdg_activation_v1_interface, 1));
     'zwp_pointer_constraints_v1':
       PointerConstraints := Pzwp_pointer_constraints_v1(B(zwp_pointer_constraints_v1_interface, 1));
+    'wp_cursor_shape_manager_v1':
+      CursorShapeMgr := Pwp_cursor_shape_manager_v1(B(wp_cursor_shape_manager_v1_interface, 1));
     'zwp_relative_pointer_manager_v1':
       RelativePointerMgr := Pzwp_relative_pointer_manager_v1(B(zwp_relative_pointer_manager_v1_interface, 1));
     'zwp_text_input_manager_v3':
@@ -388,6 +396,8 @@ begin
   // 閉じ込めだけならロックは不要なので、必要な拡張が別であることを能力でも分ける。
   if PointerConstraints <> nil then
     Include(Result, TPMLVideoCapability.MouseConfine);
+  if CursorShapeMgr <> nil then
+    Include(Result, TPMLVideoCapability.CursorShape);
   if (PointerConstraints <> nil) and (RelativePointerMgr <> nil) then
     Include(Result, TPMLVideoCapability.RelativeMouse);
   // xdg-shell はウィンドウ位置を持たないので WindowPositioning は入れない（§3.3）。

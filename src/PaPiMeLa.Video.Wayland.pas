@@ -23,8 +23,9 @@
     - 能力集合は Connect 後に確定する（拡張の有無で変わる）
 
   NOT RESOLVED:
-    - タッチ（wl_touch）は未実装（#37 の残り）。キーボードとポインタは実装済み
-    - GL / Vulkan / クリップボード / カーソルの部品は nil のまま（#33、#38、#39）
+    - シートはキーボード / ポインタ / タッチを実装済み。タブレット（tablet-v2）は未対応
+    - GL / Vulkan / クリップボードの部品は nil のまま（#33、#38、#39）。
+      カーソル部品は cursor-shape-v1 で実装済みだが、任意ピクセルのカーソルは未対応
     - ディスプレイ hotplug は DisplaysChanged で全列挙をやり直すだけ
 
   Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
@@ -46,6 +47,7 @@ uses
   PaPiMeLa.Video.Wayland.Types,
   PaPiMeLa.Video.Wayland.Window,
   PaPiMeLa.Video.Wayland.Seat,
+  PaPiMeLa.Video.Wayland.Cursor,
   PaPiMeLa.Events,
   PaPiMeLa.Platform.XKB,
   PaPiMeLa.Platform.Wayland.Client,
@@ -72,6 +74,7 @@ type
     procedure CheckConnectionAlive;
     procedure HandleSeatBound(ASeat: Pwl_seat);
     procedure HandleGrabsChanged(AWindowID: TPMLWindowID);
+    function  GetSeats: TPMLWaylandSeats;
     procedure DestroySeats;
   public
     constructor Create(AContextRef: TObject; AOwner: TPMLObject;
@@ -148,6 +151,7 @@ end;
 
 destructor TPMLWaylandVideoBackend.Destroy;
 begin
+  FreeAndNil(FCursors);
   DestroySeats;
   FreeAndNil(FConn);
   inherited Destroy;
@@ -159,6 +163,8 @@ begin
 end;
 
 function TPMLWaylandVideoBackend.Connect(ASink: IPMLVideoSink): Boolean;
+var
+  I: Integer;
 begin
   // xkb が無ければキーは扱えないが、ウィンドウ表示自体は成立するので
   // 失敗しても接続は続ける（シートを作らないだけ）。
@@ -170,10 +176,21 @@ begin
     Exit;
   FSink := ASink;
   FCapabilities := FConn.Capabilities;
+
+  // タッチの有無は接続ではなくシートが知っている。wl_seat.capabilities は
+  // Connect の roundtrip で配送済みなので、ここで能力へ写せる。
+  for I := 0 to High(FSeats) do
+    if FSeats[I].HasTouch then
+      Include(FCapabilities, TPMLVideoCapability.Touch);
+
+  // カーソル部品。cursor-shape-v1 が無くても表示 / 非表示は使えるので常に作る。
+  FCursors := TPMLWaylandCursorBackend.Create(ContextRef, Self, @GetSeats);
 end;
 
 procedure TPMLWaylandVideoBackend.Disconnect;
 begin
+  // カーソル部品はシートを触るので、シートより先に捨てる。
+  FreeAndNil(FCursors);
   DestroySeats;
   FConn.Disconnect;
   inherited Disconnect;
@@ -186,7 +203,9 @@ end;
 procedure TPMLWaylandVideoBackend.HandleSeatBound(ASeat: Pwl_seat);
 begin
   SetLength(FSeats, Length(FSeats) + 1);
-  FSeats[High(FSeats)] := TPMLWaylandSeat.Create(FQueue, FConn, ASeat);
+  // 識別子は 1 から振る。0 は「デバイス無し」の意味に取っておく。
+  FSeats[High(FSeats)] := TPMLWaylandSeat.Create(FQueue, FConn, ASeat,
+    LongWord(Length(FSeats)));
 end;
 
 { ウィンドウの拘束要求が変わった。ポインタフォーカスを持つシートだけが張り直す。
@@ -199,6 +218,13 @@ var
 begin
   for I := 0 to High(FSeats) do
     FSeats[I].UpdateGrabs(AWindowID);
+end;
+
+{ カーソル部品にシート一覧を貸す。Cursor ユニットは Seat を参照できるが、
+  シートを所有しているのはこちらなので、取得だけを関数で渡す。 }
+function TPMLWaylandVideoBackend.GetSeats: TPMLWaylandSeats;
+begin
+  Result := FSeats;
 end;
 
 procedure TPMLWaylandVideoBackend.DestroySeats;

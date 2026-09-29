@@ -1,5 +1,5 @@
 {
-  PaPiMeLa.Video.Wayland.Seat — wl_seat（キーボード / ポインタ）
+  PaPiMeLa.Video.Wayland.Seat — wl_seat（キーボード / ポインタ / タッチ）
 
   Origin : partially ported from SDL (src/video/wayland/SDL_waylandevents.c,
            src/video/wayland/SDL_waylandkeyboard.c)
@@ -10,7 +10,7 @@
   Design : docs/DESIGN.md §3.2、§7.5、§11 #37
 
   WHAT:
-    wl_seat から wl_keyboard と wl_pointer を取り出し、xkb でキーコードを
+    wl_seat から wl_keyboard / wl_pointer / wl_touch を取り出し、xkb でキーコードを
     キーシムと文字へ変換して、イベントキューの状態機械へ流す。
 
   WHY:
@@ -19,7 +19,7 @@
     従ってクライアントが生成する。
 
   RESOLVED:
-    - 生成リスナーは抽象クラスなので 1 クラスで seat / keyboard / pointer を
+    - 生成リスナーは抽象クラスなので 1 クラスで seat / keyboard / pointer / touch を
       同時に継承できない。転送用の内部クラスを置いて実体へ委譲する
     - サーフェスからウィンドウを引くのは wl_proxy_get_user_data。
       ウィンドウ backend が自分自身を設定しておく
@@ -27,10 +27,12 @@
       使うため通す（§7.5）
 
   NOT RESOLVED:
-    - wl_touch は未実装。タッチは本ユニットの対象だが今回のスコープ外
+    - タッチは押下・移動・解放・取り消しだけ。shape / orientation（接触面の
+      大きさと向き）は受け取っていない
     - ポインタ拘束は PaPiMeLa.Video.Wayland.PointerGrab に分けた。ここはフォーカスと
       直近位置を渡すだけ
-    - cursor-shape は未実装。カーソルの見た目は #38 で扱う
+    - カーソル形状は PaPiMeLa.Video.Wayland.Cursor に分けた。ここは serial を
+      持っているので、実際の set_shape / set_cursor だけを引き受ける
     - Scancode（USB HID Usage 準拠）への変換は未実装。現状は evdev コードと
       キーシムのみを載せる
 
@@ -53,12 +55,15 @@ uses
   PaPiMeLa.Platform.XKB,
   PaPiMeLa.Platform.Wayland.Client,
   PaPiMeLa.Platform.Wayland.Protocols.Wayland,
+  PaPiMeLa.Platform.Wayland.Protocols.CursorShapeV1,
+  PaPiMeLa.Platform.Wayland.Protocols.TabletV2,
   PaPiMeLa.Video.Wayland.Types,
   PaPiMeLa.Video.Wayland.Window,
   PaPiMeLa.Video.Wayland.PointerGrab;
 
 type
   TPMLWaylandSeat = class;
+
 
   TPMLWaylandKeyboardFwd = class(Twl_keyboard_listener)
   strict private
@@ -97,6 +102,20 @@ type
       value: wl_fixed_t); override;
   end;
 
+  TPMLWaylandTouchFwd = class(Twl_touch_listener)
+  strict private
+    FOwner: TPMLWaylandSeat;
+  public
+    constructor Create(AOwner: TPMLWaylandSeat);
+    procedure down(AProxy: Pwl_touch; serial: LongWord; time: LongWord;
+      surface: Pwl_surface; id: LongInt; x: wl_fixed_t; y: wl_fixed_t); override;
+    procedure up(AProxy: Pwl_touch; serial: LongWord; time: LongWord;
+      id: LongInt); override;
+    procedure motion(AProxy: Pwl_touch; time: LongWord; id: LongInt;
+      x: wl_fixed_t; y: wl_fixed_t); override;
+    procedure cancel(AProxy: Pwl_touch); override;
+  end;
+
   TPMLWaylandSeat = class(Twl_seat_listener)
   strict private
     FQueue    : TPMLEventQueue;
@@ -106,12 +125,21 @@ type
     FPointer  : Pwl_pointer;
     FKbdFwd   : TPMLWaylandKeyboardFwd;
     FPtrFwd   : TPMLWaylandPointerFwd;
+    FTouch    : Pwl_touch;
+    FTouchFwd : TPMLWaylandTouchFwd;
     FXKB      : TPMLXKBState;
     FGrab     : TPMLWaylandPointerGrab;
     FName     : String;
 
     FKeyFocus : TPMLWindowID;
     FPtrFocus : TPMLWindowID;
+    FPtrSerial: LongWord;      // 直近の wl_pointer.enter の serial。set_cursor に要る
+    FTouchDeviceID: LongWord;  // wl_touch はシートに 1 つ。シートを識別子にする
+
+    // カーソル形状（cursor-shape-v1）。要求は TPMLWaylandCursorBackend から来る。
+    FCursorDev    : Pwp_cursor_shape_device_v1;
+    FCursorShape  : LongWord;
+    FCursorVisible: Boolean;
 
     // キーリピート（コンポジタは送ってこない。クライアントが生成する）
     FRepeatRate : Integer;    // 1 秒あたりの回数。0 = リピートしない
@@ -122,6 +150,8 @@ type
 
     procedure StopRepeat;
     function  GetHasKeyboard: Boolean;
+    function  GetHasTouch: Boolean;
+    procedure ReapplyCursor;
     function  WindowOf(ASurface: Pwl_surface): TPMLWaylandWindowBackend;
     function  WindowIDOf(ASurface: Pwl_surface): TPMLWindowID;
     procedure DeliverKey(AEvdevCode: LongWord; ADown, AIsRepeat: Boolean);
@@ -133,14 +163,22 @@ type
     procedure HandleKey(AEvdevCode: LongWord; ADown: Boolean);
     procedure HandleModifiers(ADepressed, ALatched, ALocked, AGroup: LongWord);
     procedure HandleRepeatInfo(ARate, ADelay: Integer);
-    procedure HandlePointerEnter(ASurface: Pwl_surface; AX, AY: wl_fixed_t);
+    procedure HandlePointerEnter(ASerial: LongWord; ASurface: Pwl_surface;
+      AX, AY: wl_fixed_t);
     procedure HandlePointerLeave(ASurface: Pwl_surface);
     procedure HandlePointerMotion(AX, AY: wl_fixed_t);
     procedure HandlePointerButton(AButton: LongWord; ADown: Boolean);
     procedure HandlePointerAxis(AAxis: LongWord; AValue: wl_fixed_t);
+    procedure HandleTouchDown(ASurface: Pwl_surface; AID: LongInt;
+      AX, AY: wl_fixed_t);
+    procedure HandleTouchUp(AID: LongInt);
+    procedure HandleTouchMotion(AID: LongInt; AX, AY: wl_fixed_t);
+    procedure HandleTouchCancel;
   public
+    // ADeviceID は入力デバイスの識別子。所有者が連番で振る（wl_touch はシートに
+    // 1 つなので、シートの識別子がそのままタッチデバイスの識別子になる）。
     constructor Create(AQueue: TPMLEventQueue; AConn: TPMLWaylandConnection;
-      ASeat: Pwl_seat);
+      ASeat: Pwl_seat; ADeviceID: LongWord);
     destructor Destroy; override;
 
     procedure capabilities(AProxy: Pwl_seat; capabilities_: LongWord); override;
@@ -151,11 +189,15 @@ type
     // ウィンドウの拘束要求が変わったときに Video.Wayland から呼ばれる。
     // AWindowID = 0 は「どのウィンドウか分からないので必ず見直せ」。
     procedure UpdateGrabs(AWindowID: TPMLWindowID);
+    // カーソル部品（TPMLWaylandCursorBackend）から呼ばれる。要求を覚えて即適用し、
+    // 次に wl_pointer.enter が来たときにも同じ形を張り直す。
+    procedure ApplyCursor(AShape: LongWord; AVisible: Boolean);
     // 次のリピートまでの残り時間（ミリ秒）。リピート中でなければ -1。
     function  MillisecondsUntilRepeat: Integer;
 
     property SeatName: String read FName;
     property HasKeyboard: Boolean read GetHasKeyboard;
+    property HasTouch: Boolean read GetHasTouch;
     // ポインタ拘束。ポインタが無いシートでは nil。
     property Grab: TPMLWaylandPointerGrab read FGrab;
   end;
@@ -223,7 +265,7 @@ end;
 procedure TPMLWaylandPointerFwd.enter(AProxy: Pwl_pointer; serial: LongWord;
   surface: Pwl_surface; surface_x: wl_fixed_t; surface_y: wl_fixed_t);
 begin
-  FOwner.HandlePointerEnter(surface, surface_x, surface_y);
+  FOwner.HandlePointerEnter(serial, surface, surface_x, surface_y);
 end;
 
 procedure TPMLWaylandPointerFwd.leave(AProxy: Pwl_pointer; serial: LongWord;
@@ -250,10 +292,44 @@ begin
   FOwner.HandlePointerAxis(axis_, value);
 end;
 
+
+constructor TPMLWaylandTouchFwd.Create(AOwner: TPMLWaylandSeat);
+begin
+  inherited Create;
+  FOwner := AOwner;
+end;
+
+procedure TPMLWaylandTouchFwd.down(AProxy: Pwl_touch; serial: LongWord;
+  time: LongWord; surface: Pwl_surface; id: LongInt; x: wl_fixed_t;
+  y: wl_fixed_t);
+begin
+  FOwner.HandleTouchDown(surface, id, x, y);
+end;
+
+procedure TPMLWaylandTouchFwd.up(AProxy: Pwl_touch; serial: LongWord;
+  time: LongWord; id: LongInt);
+begin
+  FOwner.HandleTouchUp(id);
+end;
+
+procedure TPMLWaylandTouchFwd.motion(AProxy: Pwl_touch; time: LongWord;
+  id: LongInt; x: wl_fixed_t; y: wl_fixed_t);
+begin
+  FOwner.HandleTouchMotion(id, x, y);
+end;
+
+procedure TPMLWaylandTouchFwd.cancel(AProxy: Pwl_touch);
+begin
+  FOwner.HandleTouchCancel;
+end;
+
+// wl_touch.frame は「この一連の変化はここまで」の区切り。papimela は指ごとに
+// その場でイベントを出すのでまとめる必要がなく、既定の空実装のままにしてある。
+
 { TPMLWaylandSeat }
 
 constructor TPMLWaylandSeat.Create(AQueue: TPMLEventQueue;
-  AConn: TPMLWaylandConnection; ASeat: Pwl_seat);
+  AConn: TPMLWaylandConnection; ASeat: Pwl_seat; ADeviceID: LongWord);
 begin
   inherited Create;
   FQueue := AQueue;
@@ -262,6 +338,8 @@ begin
   FXKB := TPMLXKBState.Create;
   FRepeatRate := 25;
   FRepeatDelay := 600;
+  FCursorVisible := True;
+  FTouchDeviceID := ADeviceID;
   wl_seat_add_listener_object(FSeat, Self);
 end;
 
@@ -270,12 +348,17 @@ begin
   // 拘束は wl_pointer より先に捨てる。ポインタを解放したあとに拘束オブジェクトを
   // 破棄する順序はプロトコル上あいまいなので、依存する側から畳む。
   FreeAndNil(FGrab);
+  if FCursorDev <> nil then
+    wp_cursor_shape_device_v1_destroy(FCursorDev);
   if FKeyboard <> nil then
     wl_keyboard_release(FKeyboard);
   if FPointer <> nil then
     wl_pointer_release(FPointer);
+  if FTouch <> nil then
+    wl_touch_release(FTouch);
   FreeAndNil(FKbdFwd);
   FreeAndNil(FPtrFwd);
+  FreeAndNil(FTouchFwd);
   FreeAndNil(FXKB);
   inherited Destroy;
 end;
@@ -283,6 +366,70 @@ end;
 function TPMLWaylandSeat.GetHasKeyboard: Boolean;
 begin
   Result := FKeyboard <> nil;
+end;
+
+function TPMLWaylandSeat.GetHasTouch: Boolean;
+begin
+  Result := FTouch <> nil;
+end;
+
+{ ---- カーソル形状（cursor-shape-v1） ---- }
+
+{ 覚えている形状を今の serial で張り直す。
+
+  set_shape も set_cursor も wl_pointer.enter の serial を要求する。enter を
+  まだ受けていない（= カーソルがウィンドウの上にない）場合は何もできないので、
+  次の enter で呼び直す。 }
+procedure TPMLWaylandSeat.ReapplyCursor;
+begin
+  if (FPointer = nil) or (FPtrSerial = 0) then
+    Exit;
+  if not FCursorVisible then
+  begin
+    // サーフェスを渡さない set_cursor が「カーソルを消す」の意味になる。
+    wl_pointer_set_cursor(FPointer, FPtrSerial, nil, 0, 0);
+    Exit;
+  end;
+  if (FCursorDev <> nil) and (FCursorShape <> 0) then
+    wp_cursor_shape_device_v1_set_shape(FCursorDev, FPtrSerial, FCursorShape);
+end;
+
+procedure TPMLWaylandSeat.ApplyCursor(AShape: LongWord; AVisible: Boolean);
+begin
+  FCursorShape := AShape;
+  FCursorVisible := AVisible;
+  ReapplyCursor;
+end;
+
+{ ---- wl_touch ---- }
+
+procedure TPMLWaylandSeat.HandleTouchDown(ASurface: Pwl_surface; AID: LongInt;
+  AX, AY: wl_fixed_t);
+var
+  ID: TPMLWindowID;
+begin
+  ID := WindowIDOf(ASurface);
+  if ID = 0 then
+    Exit;
+  // デバイス識別子はシートごとに 1 つ。wl_touch は seat に 1 つしかない。
+  FQueue.Touch.SendDown(ID, FTouchDeviceID, Int32(AID),
+    PMLFixedToSingle(AX), PMLFixedToSingle(AY));
+end;
+
+procedure TPMLWaylandSeat.HandleTouchUp(AID: LongInt);
+begin
+  FQueue.Touch.SendUp(FTouchDeviceID, Int32(AID));
+end;
+
+procedure TPMLWaylandSeat.HandleTouchMotion(AID: LongInt; AX, AY: wl_fixed_t);
+begin
+  FQueue.Touch.SendMotion(FTouchDeviceID, Int32(AID),
+    PMLFixedToSingle(AX), PMLFixedToSingle(AY));
+end;
+
+procedure TPMLWaylandSeat.HandleTouchCancel;
+begin
+  FQueue.Touch.SendCancel(FTouchDeviceID);
 end;
 
 procedure TPMLWaylandSeat.capabilities(AProxy: Pwl_seat; capabilities_: LongWord);
@@ -307,19 +454,44 @@ begin
     FPtrFwd := TPMLWaylandPointerFwd.Create(Self);
     wl_pointer_add_listener_object(FPointer, FPtrFwd);
     FGrab := TPMLWaylandPointerGrab.Create(FConn, FQueue, FPointer);
+    // カーソル形状の装置はポインタごと。無い環境では nil のままで、
+    // 表示 / 非表示（set_cursor）だけが使える。
+    if FConn.CursorShapeMgr <> nil then
+      FCursorDev := wp_cursor_shape_manager_v1_get_pointer(FConn.CursorShapeMgr,
+        FPointer);
   end
   else if ((capabilities_ and WL_SEAT_CAPABILITY_POINTER) = 0) and (FPointer <> nil) then
   begin
     FreeAndNil(FGrab);
+    if FCursorDev <> nil then
+    begin
+      wp_cursor_shape_device_v1_destroy(FCursorDev);
+      FCursorDev := nil;
+    end;
     wl_pointer_release(FPointer);
     FPointer := nil;
+    FPtrSerial := 0;
     FreeAndNil(FPtrFwd);
+  end;
+
+  if ((capabilities_ and WL_SEAT_CAPABILITY_TOUCH) <> 0) and (FTouch = nil) then
+  begin
+    FTouch := wl_seat_get_touch(FSeat);
+    FTouchFwd := TPMLWaylandTouchFwd.Create(Self);
+    wl_touch_add_listener_object(FTouch, FTouchFwd);
+  end
+  else if ((capabilities_ and WL_SEAT_CAPABILITY_TOUCH) = 0) and (FTouch <> nil) then
+  begin
+    // 触っている指が残っていると押されたままになる。先に全部落とす。
+    FQueue.Touch.SendCancel(FTouchDeviceID);
+    wl_touch_release(FTouch);
+    FTouch := nil;
+    FreeAndNil(FTouchFwd);
   end;
   // 相対モードと閉じ込めの判定はキーボードフォーカスを見る。このシートに
   // キーボードがあるかどうかで規則が変わるので、拘束側へ伝えておく（§3.2）。
   if FGrab <> nil then
     FGrab.HasKeyboard := FKeyboard <> nil;
-  // wl_touch は未実装（#37 の残り）。
 end;
 
 procedure TPMLWaylandSeat.name(AProxy: Pwl_seat; name_: PAnsiChar);
@@ -517,12 +689,15 @@ begin
   FGrab.Update;
 end;
 
-procedure TPMLWaylandSeat.HandlePointerEnter(ASurface: Pwl_surface;
-  AX, AY: wl_fixed_t);
+procedure TPMLWaylandSeat.HandlePointerEnter(ASerial: LongWord;
+  ASurface: Pwl_surface; AX, AY: wl_fixed_t);
 var
   W: TPMLWaylandWindowBackend;
   X, Y: Single;
 begin
+  // set_cursor と set_shape はこの serial を要求する。カーソルの張り直しにも使う。
+  FPtrSerial := ASerial;
+  ReapplyCursor;
   W := WindowOf(ASurface);
   if W = nil then
   begin
@@ -555,6 +730,9 @@ begin
   if ID = 0 then
     ID := FPtrFocus;
   FPtrFocus := 0;
+  // serial は enter のときだけ有効。離れたあとに set_cursor を送っても
+  // コンポジタは無視するので、無駄な要求を出さないよう捨てる。
+  FPtrSerial := 0;
   if FGrab <> nil then
     FGrab.SetPointerFocus(nil);
   if ID <> 0 then

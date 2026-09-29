@@ -3,7 +3,7 @@
 papimela で実行したテストの記録。日時は実測値（ファイルの mtime と git のコミット時刻、
 および最終一括実行の時刻）に基づく。
 
-最終一括実行: **2026-09-29**（自動テスト 7 本すべて成功、アサーション 118 件・失敗 0 件）。
+最終一括実行: **2026-09-29**（自動テスト 8 本すべて成功、アサーション 159 件・失敗 0 件）。
 対話テスト T-07 は同日に別途実行し、観測項目 6 件すべてを確認した。T-09 は未実行。
 
 ## 1. 実行可能テスト
@@ -18,7 +18,8 @@ papimela で実行したテストの記録。日時は実測値（ファイル�
 | T-06 | `test/test_key_routing` | キーの IME 転送経路（§7.5）。消費されたキーが KeyDown にならないこと | 2026-09-29 10:01 | **PASS 16 / 0** | コンポジタへキーを注入できないため、シートが届けるのと同じ形の合成キーを `TPMLKeyboardState.SendKey` へ直接流す。実キーボード経由の確認は `test/demo_japanese_input`（対話） |
 | T-07 | `test/demo_japanese_input`（**対話・人の操作**） | 実キーボードから fcitx5 を経て文節情報と確定文字列がアプリへ届くか。ウィンドウのフォーカス往復が IME に伝わるか | 2026-09-29 | **PASS 観測項目 6 / 6** | アサーションではなく人の目による確認。観測できたものを下表に残す。D-21・D-22・D-23 はこのデモで見つかった |
 | T-08 | `test/test_pointer_constraints` | ポインタ拘束。能力への写像、要求の記録、そして**拘束の張り替えがプロトコルに違反しないこと** | 2026-09-29 | **PASS 23 / 0** | ロックと閉じ込めを同じシート・同じサーフェスに同時に作ると接続が切られるので、`wl_display_get_error` が終始 0 であることが張り替え順序の証明になる。拘束が**有効になる**かはカーソル位置に依存するため観測扱い（T-09 が担当）。D-24 はこのテストで見つかった |
-| T-09 | `test/demo_pointer_constraints`（**対話・人の操作**） | カーソルをウィンドウ内に入れた状態でロック / 閉じ込め / 相対移動が実際に有効になるか | — | **未実行** | G / R / C キーで切り替える。T-08 では毎回「拘束なし」と観測された（カーソルがウィンドウ外だったため）。実際に張れたことはまだ確認していない |
+| T-09 | `test/demo_pointer_constraints`（**対話・人の操作**） | カーソルをウィンドウ内に入れた状態でロック / 閉じ込め / 相対移動 / カーソル形状が実際に有効になるか | — | **未実行** | G / R / C / S / H キーで切り替える。T-08 では毎回「拘束なし」と観測された（カーソルがウィンドウ外だったため）。実際に張れたことはまだ確認していない |
+| T-10 | `test/test_touch_cursor` | タッチの状態機械（移動量の算出、ウィンドウの引き継ぎ、取り消し）と cursor-shape-v1 の対応表・能力・切り替え | 2026-09-29 | **PASS 41 / 0** | タッチは合成入力。Wayland は移動量を送らず motion / up にウィンドウも付けないので、そこを埋める部分がタッチ対応の実体であり、ハードウェア無しで検証できる。**実機のタッチパネルは手元に無く未検証**。カーソル形状の実際の適用はカーソル位置に依存するため T-09 が担当 |
 
 ### T-04 が決定的である理由
 
@@ -49,7 +50,7 @@ papimela で実行したテストの記録。日時は実測値（ファイル�
 
 | # | 対象 | 最終実行 | 結果 | 備考 |
 |---|---|---|---|---|
-| C-01 | `src/` の全ユニット（Types / Errors / Unicode / Core.Base / Core / Events / Platform.DynLib / Platform.DBus / Platform.Wayland.Client / Platform.XKB / TextInput 系 3 本 / Video 系 7 本） | 2026-09-29 | **PASS** | 全 20 ユニット。到達過程で D-03〜D-08、D-19 を修正 |
+| C-01 | `src/` の全ユニット（Types / Errors / Unicode / Core.Base / Core / Events / Platform.DynLib / Platform.DBus / Platform.Wayland.Client / Platform.XKB / TextInput 系 3 本 / Video 系 8 本） | 2026-09-29 | **PASS** | 全 21 ユニット。到達過程で D-03〜D-08、D-19 を修正 |
 | C-02 | `tools/wlscan-pas` | 2026-09-28 22:24 | **PASS** | — |
 | C-03 | 生成プロトコル 21 ユニット（9230 行） | 2026-09-28 22:24 | **PASS 21 / 21** | 初回は 9 / 21 が失敗（D-10〜D-12）。§9.2 が挙げる XML のうち、`reference/SDL/wayland-protocols/` にあるものすべて |
 | C-04 | **rawpaco 静的解析（激辛モード `--fail-on=warning`）** — `src` / `src/generated` / `test` / `spikes` / `tools` の全 Pascal ファイル | 2026-09-29 | **PASS 指摘 0 件** | 導入初回は 2 件の指摘（D-20）。修正後は 0 件。`.github/workflows/lint.yml` で push / pull_request ごとに走る |
@@ -66,11 +67,10 @@ papimela で実行したテストの記録。日時は実測値（ファイル�
 | fcitx5-anthy / fcitx5-chinese-addons のフラグ対応 | **未検証** | 文節状態のマッピング規則は fcitx5-mozc でのみ実測（設計書 §10 項目 1） |
 | IBus 経路 | **未実装** | バックエンド自体が未実装（第 11 章 #48） |
 | **実キーボードからの日本語入力** | **対話で検証済み（アサーションは無い）** | T-07 として 2026-09-29 に観測済み。自動化は残課題で、コンポジタへキーを注入できないため CI に載せるには `weston --backend=headless` + キー注入の仕組みが要る（第 11 章 #70） |
-| タッチ（`wl_touch`） | **未実装** | シートの対象だが今回のスコープ外（第 11 章 #37 の残り） |
-| cursor-shape | **未実装** | #37 の残り。カーソルの見た目は #38 と一緒に扱う |
-| **ポインタ拘束が実際に有効になること** | **未確認** | pointer-constraints / relative-pointer は実装済みで、T-08 がプロトコル違反の無さを検査している。ただし拘束が有効になるにはカーソルがウィンドウ上にある必要があり、T-08 の実行では毎回ウィンドウ外だった。T-09（対話）で確認する |
+| **タッチパネルからの実入力** | **未検証** | `wl_touch` の受け取りと `TPMLTouchState` は実装済みで、T-10 が合成入力で検査している。検証環境にタッチパネルが無いため、`wl_touch` のイベントが実際に届く経路は通していない。`shape` / `orientation` は未対応 |
+| **カーソル形状・ポインタ拘束が実際に有効になること** | **未確認** | cursor-shape-v1 / pointer-constraints / relative-pointer は実装済みで、T-08 と T-10 がプロトコル違反の無さを検査している。ただしどれも `wl_pointer.enter` を受けている（カーソルがウィンドウ上にある）ことが前提で、自動テストの実行では毎回ウィンドウ外だった。T-09（対話）で確認する |
 | ウィンドウのフルスクリーン / 不透明度 / アイコン / ヒットテスト / キーボードグラブ | **未実装** | 対応する能力と一緒に追加する |
-| GL / Vulkan / レンダラ / クリップボード / カーソル | **未実装** | 第 11 章 #33、#38、#39、#41、#67 |
+| GL / Vulkan / レンダラ / クリップボード / 任意ピクセルのカーソル | **未実装** | 第 11 章 #33、#38、#39、#41、#67。カーソルはシステム形状のみ実装済みで、`wl_shm` の共通部品（#39）が入ってから任意ピクセル版を足す |
 | `TPMLEvent` の `Finalize` コスト測定 | **未実施** | サイズは実測済み（72 バイト）。ベンチマークは残課題（設計書 §10 項目 9） |
 | CI でのヘッドレス実行 | **未整備** | `weston --backend=headless` + fcitx5 を CI で起動する構成は未着手（第 11 章 #70） |
 
@@ -95,17 +95,18 @@ fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_wayland_window    test
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_key_routing     test/test_key_routing.pas
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/demo_japanese_input  test/demo_japanese_input.pas
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_pointer_constraints test/test_pointer_constraints.pas
+fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_touch_cursor        test/test_touch_cursor.pas
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/demo_pointer_constraints test/demo_pointer_constraints.pas
 fpc -O1 -gl spikes/spike1_wayland.pas && fpc -O1 -gl spikes/spike2_fcitx.pas
 ./spikes/spike1_wayland && ./spikes/spike2_fcitx
 ./test/test_fcitx_textinput && ./test/test_wayland_protocols && ./test/test_wayland_window
-./test/test_key_routing && ./test/test_pointer_constraints
+./test/test_key_routing && ./test/test_pointer_constraints && ./test/test_touch_cursor
 
 # T-07（対話）。ウィンドウをクリックしてフォーカスし、日本語を打つ。
 # 途中で別ウィンドウへ移って戻ると、フォーカスの往復が IME に伝わることも確認できる。
 ./test/demo_japanese_input 60
 
-# T-09（対話）。カーソルをウィンドウの中に入れて G / R / C で切り替える。
+# T-09（対話）。カーソルをウィンドウの中に入れて G / R / C / S / H で切り替える。
 ./test/demo_pointer_constraints 60
 ```
 

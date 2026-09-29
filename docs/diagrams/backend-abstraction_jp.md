@@ -33,6 +33,11 @@ SDL は `SDL_VideoDevice` という**単一の構造体に 98 個の関数ポイ
 
 ```mermaid
 classDiagram
+    class TPMLCursorSystem {
+        +SystemCursor
+        +Visible
+        +CanChooseShape
+    }
     class TPMLVideoSystem {
         +CreateWindow()
         +WindowFromID()
@@ -67,6 +72,15 @@ classDiagram
         +WaitEvents()
         +WakeEventLoop()
         +Capabilities
+    }
+    class TPMLCursorBackend {
+        <<abstract>>
+        +SetSystemCursor()
+        +SetVisible()
+    }
+    class TPMLWaylandCursorBackend {
+        +Kind
+        +Visible
     }
     class TPMLDisplayBackend {
         <<abstract>>
@@ -105,6 +119,7 @@ classDiagram
     }
     class TPMLWaylandVideoBackend {
         +Connection
+        +Seats
     }
     class TPMLWaylandDisplayBackend {
         +GetDesktopMode()
@@ -132,6 +147,7 @@ classDiagram
     TPMLVideoBackend <|-- TPMLWaylandVideoBackend
     TPMLDisplayBackend <|-- TPMLWaylandDisplayBackend
     TPMLWindowBackend <|-- TPMLWaylandWindowBackend
+    TPMLCursorBackend <|-- TPMLWaylandCursorBackend
     Twl_registry_listener <|-- TPMLWaylandConnection
 
     IPMLVideoSink <|.. TPMLVideoSystem
@@ -139,6 +155,9 @@ classDiagram
 
     TPMLVideoSystem *-- TPMLVideoBackend : owns
     TPMLWaylandVideoBackend *-- TPMLWaylandConnection : owns
+    TPMLVideoBackend *-- TPMLCursorBackend : owns (nil when absent)
+    TPMLVideoSystem *-- TPMLCursorSystem : owns
+    TPMLCursorSystem --> TPMLCursorBackend : borrows
     TPMLVideoBackend ..> IPMLVideoSink : notifies
     TPMLVideoBackend ..> TPMLDisplayBackend : creates
     TPMLVideoBackend ..> TPMLWindowBackend : creates
@@ -151,8 +170,9 @@ classDiagram
   バックエンドは `TPMLWindow` を知らない。この一方向の依存（公開層 → 抽象 → 実装）が、
   god object を分解できた要因である。
 - §3.2 は `TPMLVideoBackend` に任意搭載の部品 8 種（GL、Vulkan、Clipboard、Cursors、
-  ScreenSaver、MessageBox、SystemMenu、ScreenKeyboard）も持たせる予定だが、
-  どれも未実装なので描いていない。
+  ScreenSaver、MessageBox、SystemMenu、ScreenKeyboard）を持たせる予定で、現在あるのは
+  `Cursors` だけなので、それだけを描いている。コンポジタが対応していない部品は nil のままで、
+  能力集合がそれを示す。
 - `TPMLWindowBackend` の 22 メソッドが、SDL のウィンドウ操作 44 個のうち実装済みの部分に当たる。
   残り 22 個（フルスクリーン、不透明度、形状、アイコン、キーボードグラブ、ヒットテスト）は未実装。
   ポインタ拘束の 3 メソッドは要求を記録するだけである。拘束オブジェクトは `wl_pointer` に

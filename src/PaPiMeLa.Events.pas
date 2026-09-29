@@ -111,6 +111,30 @@ type
     Flipped: Boolean;
   end;
 
+  { 指 1 本。
+
+    SDL は座標をウィンドウ幅・高さで正規化した 0..1 で渡すが、papimela は
+    マウスと同じウィンドウ座標のまま渡す。Wayland のタッチは必ずサーフェスと
+    一緒に届くので正規化する理由が無く、2 つの座標系を混ぜない方が使いやすい。
+
+    Pressure は Wayland に無いので、触っている間 1.0、離したら 0.0 とする。 }
+  TPMLTouchPoint = record
+    DeviceID: LongWord;      // wl_touch ごとの識別子（シート単位）
+    FingerID: Int32;         // wl_touch の id。同時に触っている指を区別する
+    WindowID: TPMLWindowID;  // down のときに決まる。motion と up には付いてこない
+    X, Y    : Single;        // ウィンドウ座標
+    Pressure: Single;
+  end;
+  TPMLTouchPoints = array of TPMLTouchPoint;
+
+  TPMLTouchFingerData = record
+    DeviceID: LongWord;
+    FingerID: Int32;
+    X, Y    : Single;
+    DX, DY  : Single;        // 同じ指の前回位置からの移動量
+    Pressure: Single;
+  end;
+
   TPMLUserEventData = record
     Code        : Int32;
     Data1, Data2: Pointer;
@@ -135,6 +159,7 @@ type
       5: (Motion           : TPMLMouseMotionData);
       6: (Button           : TPMLMouseButtonData);
       7: (Wheel            : TPMLMouseWheelData);
+      8: (Finger           : TPMLTouchFingerData);
       // Display / JAxis / GAxis / Finger ... は各サブシステム着手時に追加する。
       // 可変部への追加は既存コードに影響しない。
   end;
@@ -213,6 +238,39 @@ type
     property ButtonState: LongWord read FButtonState;
   end;
 
+
+  { タッチの状態機械。
+
+    WHAT:
+      wl_touch の down / motion / up / cancel を FingerDown / FingerMotion /
+      FingerUp / FingerCanceled に変換し、指ごとの前回位置から移動量を出す。
+
+    WHY:
+      Wayland は移動量を送らない。同じ指の前回位置を覚えているのはここだけなので、
+      DX / DY はここで算出する。cancel は「今触っている指すべてが無効」の意味なので、
+      保持している指の一覧が必要になる。 }
+  TPMLTouchState = class sealed(TPMLSystemObject)
+  strict private
+    FQueue  : TPMLEventQueue;
+    FFingers: array of TPMLTouchPoint;
+    function  IndexOf(AFingerID: Int32): Integer;
+    procedure Emit(AKind: TPMLEventKind; const APoint: TPMLTouchPoint;
+      ADX, ADY: Single);
+    function  GetFingerCount: Integer;
+  public
+    constructor Create(AContextRef: TObject; AQueue: TPMLEventQueue);
+    procedure SendDown(AWindowID: TPMLWindowID; ADeviceID: LongWord;
+      AFingerID: Int32; AX, AY: Single);
+    // motion と up はウィンドウを取らない。Wayland が送ってこないので、down で
+    // 覚えたウィンドウを使う。
+    procedure SendMotion(ADeviceID: LongWord; AFingerID: Int32; AX, AY: Single);
+    procedure SendUp(ADeviceID: LongWord; AFingerID: Int32);
+    // 触っている指すべてを無効にする。コンポジタがジェスチャを奪ったときに来る。
+    procedure SendCancel(ADeviceID: LongWord);
+    function  TryGetFinger(AFingerID: Int32; out APoint: TPMLTouchPoint): Boolean;
+    property FingerCount: Integer read GetFingerCount;
+  end;
+
   TPMLEventQueue = class sealed(TPMLSystemObject)
   strict private
     FLock      : TCriticalSection;
@@ -227,6 +285,7 @@ type
     FNextUser  : Integer;
     FKeyboard  : TPMLKeyboardState;
     FMouse     : TPMLMouseState;
+    FTouch     : TPMLTouchState;
     FKeyFilter : IPMLKeyFilter;
     function  TakeLocked(out AEvent: TPMLEvent): Boolean;
     function  NotifyWatches(const AEvent: TPMLEvent): Boolean;
@@ -267,6 +326,7 @@ type
     // 状態機械。バックエンドはこれを通してイベントを流す（§6.3）。
     property Keyboard: TPMLKeyboardState read FKeyboard;
     property Mouse   : TPMLMouseState read FMouse;
+    property Touch   : TPMLTouchState read FTouch;
     // Context が TextInput を生成したあとに差し込む。nil なら IME 転送なし。
     property KeyFilter: IPMLKeyFilter read FKeyFilter write FKeyFilter;
   end;
@@ -311,6 +371,7 @@ begin
   FNextUser := 0;
   FKeyboard := TPMLKeyboardState.Create(AContextRef, Self);
   FMouse := TPMLMouseState.Create(AContextRef, Self);
+  FTouch := TPMLTouchState.Create(AContextRef, Self);
 end;
 
 destructor TPMLEventQueue.Destroy;
@@ -318,6 +379,7 @@ begin
   FKeyFilter := nil;
   FreeAndNil(FKeyboard);
   FreeAndNil(FMouse);
+  FreeAndNil(FTouch);
   SetLength(FSources, 0);
   SetLength(FWatches, 0);
   SetLength(FRing, 0);
@@ -780,6 +842,143 @@ begin
       FFocusedWindow := 0;
     FButtonState := 0;
     FQueue.PushSimple(TPMLEventKind.WindowMouseLeave, AWindowID);
+  end;
+end;
+
+
+{ TPMLTouchState }
+
+constructor TPMLTouchState.Create(AContextRef: TObject; AQueue: TPMLEventQueue);
+begin
+  inherited Create(AContextRef, AQueue);
+  FQueue := AQueue;
+end;
+
+function TPMLTouchState.GetFingerCount: Integer;
+begin
+  Result := Length(FFingers);
+end;
+
+function TPMLTouchState.IndexOf(AFingerID: Int32): Integer;
+var
+  I: Integer;
+begin
+  for I := 0 to High(FFingers) do
+    if FFingers[I].FingerID = AFingerID then
+      Exit(I);
+  Result := -1;
+end;
+
+function TPMLTouchState.TryGetFinger(AFingerID: Int32;
+  out APoint: TPMLTouchPoint): Boolean;
+var
+  I: Integer;
+begin
+  I := IndexOf(AFingerID);
+  Result := I >= 0;
+  if Result then
+    APoint := FFingers[I]
+  else
+    FillChar(APoint, SizeOf(APoint), 0);
+end;
+
+procedure TPMLTouchState.Emit(AKind: TPMLEventKind; const APoint: TPMLTouchPoint;
+  ADX, ADY: Single);
+var
+  Ev: TPMLEvent;
+begin
+  FillChar(Ev.Finger, SizeOf(Ev.Finger), 0);
+  Ev.Kind := AKind;
+  Ev.Timestamp := PMLNowNS;
+  Ev.WindowID := APoint.WindowID;
+  Ev.Text := '';
+  Ev.Segments := nil;
+  Ev.Strings := nil;
+  Ev.Finger.DeviceID := APoint.DeviceID;
+  Ev.Finger.FingerID := APoint.FingerID;
+  Ev.Finger.X := APoint.X;
+  Ev.Finger.Y := APoint.Y;
+  Ev.Finger.DX := ADX;
+  Ev.Finger.DY := ADY;
+  Ev.Finger.Pressure := APoint.Pressure;
+  FQueue.Push(Ev);
+end;
+
+procedure TPMLTouchState.SendDown(AWindowID: TPMLWindowID; ADeviceID: LongWord;
+  AFingerID: Int32; AX, AY: Single);
+var
+  I: Integer;
+  P: TPMLTouchPoint;
+begin
+  P.DeviceID := ADeviceID;
+  P.FingerID := AFingerID;
+  P.WindowID := AWindowID;
+  P.X := AX;
+  P.Y := AY;
+  P.Pressure := 1.0;
+
+  // 同じ id が離されずに再度 down することは仕様上ないが、来ても壊れないようにする。
+  I := IndexOf(AFingerID);
+  if I < 0 then
+  begin
+    SetLength(FFingers, Length(FFingers) + 1);
+    I := High(FFingers);
+  end;
+  FFingers[I] := P;
+  Emit(TPMLEventKind.FingerDown, P, 0, 0);
+end;
+
+procedure TPMLTouchState.SendMotion(ADeviceID: LongWord; AFingerID: Int32;
+  AX, AY: Single);
+var
+  I: Integer;
+  DX, DY: Single;
+begin
+  I := IndexOf(AFingerID);
+  // down を見ていない指の motion は捨てる。移動量の基準もウィンドウも無い。
+  if I < 0 then
+    Exit;
+  DX := AX - FFingers[I].X;
+  DY := AY - FFingers[I].Y;
+  FFingers[I].X := AX;
+  FFingers[I].Y := AY;
+  Emit(TPMLEventKind.FingerMotion, FFingers[I], DX, DY);
+end;
+
+procedure TPMLTouchState.SendUp(ADeviceID: LongWord; AFingerID: Int32);
+var
+  I, J: Integer;
+  P: TPMLTouchPoint;
+begin
+  I := IndexOf(AFingerID);
+  if I < 0 then
+    Exit;
+  // wl_touch.up は座標を送らない。最後に分かっている位置をそのまま載せる。
+  P := FFingers[I];
+  P.Pressure := 0.0;
+  for J := I to High(FFingers) - 1 do
+    FFingers[J] := FFingers[J + 1];
+  SetLength(FFingers, Length(FFingers) - 1);
+  Emit(TPMLEventKind.FingerUp, P, 0, 0);
+end;
+
+{ コンポジタがタッチ列を奪った（ジェスチャとして解釈した等）。
+
+  触っている指すべてを無効にする。up は来ないので、ここで全部落とさないと
+  指が押されたままになる。 }
+procedure TPMLTouchState.SendCancel(ADeviceID: LongWord);
+var
+  I: Integer;
+  Snapshot: TPMLTouchPoints;
+begin
+  if Length(FFingers) = 0 then
+    Exit;
+  Snapshot := Copy(FFingers, 0, Length(FFingers));
+  SetLength(FFingers, 0);
+  for I := 0 to High(Snapshot) do
+  begin
+    Snapshot[I].Pressure := 0.0;
+    Emit(TPMLEventKind.FingerCanceled, Snapshot[I], 0, 0);
   end;
 end;
 

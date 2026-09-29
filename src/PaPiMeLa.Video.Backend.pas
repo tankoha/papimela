@@ -55,7 +55,8 @@ type
     KeyboardGrab, SystemMenu, IdleInhibit, WindowActivation,
     SetIcon,
     Touch, Tablet, MessageBox, ScreenKeyboard,
-    SoftwareFramebuffer       // papimela 追加: wl_shm 等でピクセルを直接置ける
+    SoftwareFramebuffer,      // papimela 追加: wl_shm 等でピクセルを直接置ける
+    CursorShape               // papimela 追加: システムカーソルを選べる（cursor-shape-v1）
   );
   TPMLVideoCapabilities = set of TPMLVideoCapability;
 
@@ -149,6 +150,34 @@ type
     property WindowID: TPMLWindowID read FWindowID;
   end;
 
+
+  { システムカーソルの種類。
+
+    cursor-shape-v1 の shape 列挙のうち、アプリが実際に使うものだけを並べた。
+    名前は Wayland の綴りではなく papimela の綴りにしてある（`Default` や
+    `Pointer` は Pascal の文脈で紛らわしいため Arrow / Hand とした）。 }
+  TPMLSystemCursor = (
+    Arrow, Text, Wait, Crosshair, Progress, Hand, Move, NotAllowed,
+    ResizeNWSE, ResizeNESW, ResizeEW, ResizeNS,
+    ResizeN, ResizeE, ResizeS, ResizeW,
+    ResizeNE, ResizeNW, ResizeSE, ResizeSW
+  );
+
+  { カーソル部品。TPMLVideoBackend.Cursors が nil でなければ使える。
+
+    WHAT:
+      システムカーソルの選択と、カーソルの表示 / 非表示。
+
+    NOT RESOLVED:
+      任意のピクセルからカーソルを作る経路（設計 4.2 の
+      `Cursors.Create(Surface, HotX, HotY)`）は未実装。wl_shm バッファの
+      共通部品（第 11 章 #39）が入ってから足す。 }
+  TPMLCursorBackend = class abstract(TPMLSystemObject)
+  public
+    procedure SetSystemCursor(AKind: TPMLSystemCursor); virtual; abstract;
+    procedure SetVisible(AVisible: Boolean); virtual; abstract;
+  end;
+
   TPMLDisplayBackend = class abstract(TPMLSystemObject)
   public
     function  GetName: String; virtual; abstract;
@@ -166,6 +195,7 @@ type
   strict protected
     FSink        : IPMLVideoSink;
     FCapabilities: TPMLVideoCapabilities;
+    FCursors     : TPMLCursorBackend;
   public
     function  BackendName: String; virtual; abstract;
     function  Connect(ASink: IPMLVideoSink): Boolean; virtual; abstract;
@@ -181,6 +211,8 @@ type
     procedure WaitEvents(ATimeoutMs: Integer); virtual;
     procedure WakeEventLoop; virtual;
 
+    // 部品（nil = 未搭載。能力で判定する）。所有はバックエンド。
+    property Cursors     : TPMLCursorBackend read FCursors;
     property Capabilities: TPMLVideoCapabilities read FCapabilities;
   end;
 

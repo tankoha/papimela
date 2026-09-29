@@ -146,6 +146,35 @@ type
     property Backend : TPMLWindowBackend read FBackend;
   end;
 
+  { カーソルの公開窓口。TPMLVideoSystem.Cursors で取る。
+
+    WHAT:
+      システムカーソルの選択と表示 / 非表示。
+
+    WHY:
+      バックエンドの部品（TPMLCursorBackend）はウィンドウ単位ではなく
+      デバイス単位なので、ウィンドウではなく TPMLVideoSystem 側に置く。
+
+    NOT RESOLVED:
+      任意のピクセルからカーソルを作る `Create(Surface, HotX, HotY)`（設計 4.2）は
+      未実装。形状は cursor-shape-v1 が持つ 20 種類から選ぶ。 }
+  TPMLCursorSystem = class sealed(TPMLSystemObject)
+  strict private
+    FSystem : TPMLVideoSystem;
+    FBackend: TPMLCursorBackend;     // nil = カーソルを扱えないバックエンド
+    FKind   : TPMLSystemCursor;
+    FVisible: Boolean;
+    procedure SetSystemCursor(AValue: TPMLSystemCursor);
+    procedure SetVisible(AValue: Boolean);
+    function  GetCanChooseShape: Boolean;
+  public
+    constructor Create(ASystem: TPMLVideoSystem; ABackend: TPMLCursorBackend);
+    // 形状を選べるか。False でも表示 / 非表示は使える。
+    property CanChooseShape: Boolean read GetCanChooseShape;
+    property SystemCursor: TPMLSystemCursor read FKind write SetSystemCursor;
+    property Visible: Boolean read FVisible write SetVisible;
+  end;
+
   TPMLWindowList = array of TPMLWindow;
   TPMLDisplayList = array of TPMLDisplay;
 
@@ -157,6 +186,7 @@ type
     FWindows      : TPMLWindowList;
     FNextWindowID : TPMLWindowID;
     FSelectedName : String;
+    FCursors      : TPMLCursorSystem;
     function  GetCapabilities: TPMLVideoCapabilities;
     procedure RefreshDisplays;
     procedure PushWindowEvent(AKind: TPMLEventKind; AWindowID: TPMLWindowID;
@@ -191,6 +221,7 @@ type
     property Backend     : TPMLVideoBackend read FBackend;
     property Displays    : TPMLDisplayList read FDisplays;
     property Windows     : TPMLWindowList read FWindows;
+    property Cursors     : TPMLCursorSystem read FCursors;
     property Capabilities: TPMLVideoCapabilities read GetCapabilities;
   end;
 
@@ -486,6 +517,49 @@ begin
   Result := FBackend.NativeHandles;
 end;
 
+
+{ TPMLCursorSystem }
+
+constructor TPMLCursorSystem.Create(ASystem: TPMLVideoSystem;
+  ABackend: TPMLCursorBackend);
+begin
+  inherited Create(ASystem.ContextRef, ASystem);
+  FSystem := ASystem;
+  FBackend := ABackend;
+  FKind := TPMLSystemCursor.Arrow;
+  FVisible := True;
+end;
+
+function TPMLCursorSystem.GetCanChooseShape: Boolean;
+begin
+  Result := (FBackend <> nil)
+        and (TPMLVideoCapability.CursorShape in FSystem.Capabilities);
+end;
+
+procedure TPMLCursorSystem.SetSystemCursor(AValue: TPMLSystemCursor);
+begin
+  CheckMainThread;
+  if FKind = AValue then
+    Exit;
+  FSystem.Require(TPMLVideoCapability.CursorShape, 'System cursor shapes');
+  FKind := AValue;
+  FBackend.SetSystemCursor(AValue);
+end;
+
+{ 表示 / 非表示は cursor-shape-v1 を必要としない。wl_pointer.set_cursor だけで済む。 }
+procedure TPMLCursorSystem.SetVisible(AValue: Boolean);
+begin
+  CheckMainThread;
+  if FVisible = AValue then
+    Exit;
+  if FBackend = nil then
+    raise EPMLUnsupported.CreateNative(
+      'Cursor visibility is not supported by this video backend', 0,
+      FSystem.BackendName);
+  FVisible := AValue;
+  FBackend.SetVisible(AValue);
+end;
+
 { TPMLVideoSystem }
 
 constructor TPMLVideoSystem.Create(AContextRef: TObject; AOwner: TPMLObject;
@@ -521,6 +595,8 @@ begin
     raise EPMLVideoError.Create('no video backend could be selected');
 
   RefreshDisplays;
+  // カーソル部品はバックエンドが Connect のときに用意する。無い場合もある。
+  FCursors := TPMLCursorSystem.Create(Self, FBackend.Cursors);
   FQueue.RegisterPumpSource(Self as IPMLEventPumpSource);
 end;
 
@@ -538,6 +614,8 @@ begin
   for I := High(FDisplays) downto 0 do
     FDisplays[I].Free;
   SetLength(FDisplays, 0);
+  // 公開窓口はバックエンドの部品を借りているので、切断より先に捨てる。
+  FreeAndNil(FCursors);
   if Assigned(FBackend) then
   begin
     FBackend.Disconnect;

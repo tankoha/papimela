@@ -34,6 +34,11 @@ support is expressed as a `nil` function pointer that every caller must check.
 
 ```mermaid
 classDiagram
+    class TPMLCursorSystem {
+        +SystemCursor
+        +Visible
+        +CanChooseShape
+    }
     class TPMLVideoSystem {
         +CreateWindow()
         +WindowFromID()
@@ -68,6 +73,15 @@ classDiagram
         +WaitEvents()
         +WakeEventLoop()
         +Capabilities
+    }
+    class TPMLCursorBackend {
+        <<abstract>>
+        +SetSystemCursor()
+        +SetVisible()
+    }
+    class TPMLWaylandCursorBackend {
+        +Kind
+        +Visible
     }
     class TPMLDisplayBackend {
         <<abstract>>
@@ -106,6 +120,7 @@ classDiagram
     }
     class TPMLWaylandVideoBackend {
         +Connection
+        +Seats
     }
     class TPMLWaylandDisplayBackend {
         +GetDesktopMode()
@@ -133,6 +148,7 @@ classDiagram
     TPMLVideoBackend <|-- TPMLWaylandVideoBackend
     TPMLDisplayBackend <|-- TPMLWaylandDisplayBackend
     TPMLWindowBackend <|-- TPMLWaylandWindowBackend
+    TPMLCursorBackend <|-- TPMLWaylandCursorBackend
     Twl_registry_listener <|-- TPMLWaylandConnection
 
     IPMLVideoSink <|.. TPMLVideoSystem
@@ -140,6 +156,9 @@ classDiagram
 
     TPMLVideoSystem *-- TPMLVideoBackend : owns
     TPMLWaylandVideoBackend *-- TPMLWaylandConnection : owns
+    TPMLVideoBackend *-- TPMLCursorBackend : owns (nil when absent)
+    TPMLVideoSystem *-- TPMLCursorSystem : owns
+    TPMLCursorSystem --> TPMLCursorBackend : borrows
     TPMLVideoBackend ..> IPMLVideoSink : notifies
     TPMLVideoBackend ..> TPMLDisplayBackend : creates
     TPMLVideoBackend ..> TPMLWindowBackend : creates
@@ -152,7 +171,8 @@ classDiagram
   not know `TPMLWindow`. This one-way dependency (public → abstract → implementation) is what made
   splitting the god object possible.
 - §3.2 also gives `TPMLVideoBackend` eight optional parts (GL, Vulkan, Clipboard, Cursors,
-  ScreenSaver, MessageBox, SystemMenu, ScreenKeyboard). None are implemented, so none are drawn.
+  ScreenSaver, MessageBox, SystemMenu, ScreenKeyboard). Only `Cursors` exists so far, so only that
+  one is drawn. A part the compositor cannot support stays nil, and the capability set says so.
 - The 22 methods on `TPMLWindowBackend` correspond to the window-operation slice of SDL's 44.
   The remaining 22 (fullscreen, opacity, shape, icon, keyboard grab, hit-testing) are not
   implemented. The three pointer-constraint methods only record a request: the constraint object

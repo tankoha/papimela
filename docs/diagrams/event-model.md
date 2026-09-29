@@ -17,8 +17,9 @@ fields in front of the variant part**. FPC cannot place managed types inside a `
 place them before it. Ref-counting then handles text, clause arrays and candidate lists; ring
 buffer overwrite releases them automatically.
 
-`SizeOf(TPMLEvent)` is **72 bytes** on x86_64 (measured; `test/test_fcitx_textinput` reports it on
-every run). Key and window events allocate nothing.
+`SizeOf(TPMLEvent)` is **80 bytes** on x86_64 (measured; `test/test_fcitx_textinput` reports it on
+every run). It was 72 until touch landed: `TPMLTouchFingerData` is the widest variant at 28 bytes.
+Key, mouse, touch and window events allocate nothing.
 
 ---
 
@@ -38,6 +39,10 @@ classDiagram
         +DeleteSurrounding TPMLDeleteSurroundingData
         +Window TPMLWindowEventData
         +UserData TPMLUserEventData
+        +Motion TPMLMouseMotionData
+        +Button TPMLMouseButtonData
+        +Wheel TPMLMouseWheelData
+        +Finger TPMLTouchFingerData
     }
     class TPMLKeyEventData {
         +Keysym LongWord
@@ -69,18 +74,52 @@ classDiagram
         +Data1 Pointer
         +Data2 Pointer
     }
+    class TPMLMouseMotionData {
+        +MouseID LongWord
+        +ButtonState LongWord
+        +X Single
+        +Y Single
+        +XRel Single
+        +YRel Single
+    }
+    class TPMLMouseButtonData {
+        +MouseID LongWord
+        +Button LongWord
+        +Clicks Byte
+        +X Single
+        +Y Single
+    }
+    class TPMLMouseWheelData {
+        +MouseID LongWord
+        +X Single
+        +Y Single
+        +Flipped Boolean
+    }
+    class TPMLTouchFingerData {
+        +DeviceID LongWord
+        +FingerID Int32
+        +X Single
+        +Y Single
+        +DX Single
+        +DY Single
+        +Pressure Single
+    }
 
     TPMLEvent *-- TPMLKeyEventData : variant 0
     TPMLEvent *-- TPMLTextEditingData : variant 1
     TPMLEvent *-- TPMLDeleteSurroundingData : variant 2
     TPMLEvent *-- TPMLWindowEventData : variant 3
     TPMLEvent *-- TPMLUserEventData : variant 4
+    TPMLEvent *-- TPMLMouseMotionData : variant 5
+    TPMLEvent *-- TPMLMouseButtonData : variant 6
+    TPMLEvent *-- TPMLMouseWheelData : variant 7
+    TPMLEvent *-- TPMLTouchFingerData : variant 8
 ```
 
-The first six fields are common to every event; the last five are alternatives sharing storage.
-`TPMLEventKind` currently has 85 members, but only the five payload shapes above exist — the rest
+The first six fields are common to every event; the last nine are alternatives sharing storage.
+`TPMLEventKind` currently has 85 members, but only the nine payload shapes above exist — the rest
 of the subsystems will add variants as they land, and adding a variant does not disturb existing
-code.
+code. Adding `TPMLTouchFingerData` is what took the record from 72 to 80 bytes.
 
 ---
 
@@ -130,6 +169,13 @@ classDiagram
         +FocusedWindow
         +ConsumedCount
     }
+    class TPMLTouchState {
+        +SendDown()
+        +SendMotion()
+        +SendUp()
+        +SendCancel()
+        +FingerCount
+    }
     class TPMLMouseState {
         +SendMotion()
         +SendRelativeMotion()
@@ -154,6 +200,7 @@ classDiagram
     TPMLContext *-- TPMLEventQueue : owns
     TPMLEventQueue *-- TPMLKeyboardState : owns
     TPMLEventQueue *-- TPMLMouseState : owns
+    TPMLEventQueue *-- TPMLTouchState : owns
     TPMLEventQueue o-- IPMLEventPumpSource : pumps in registration order
     TPMLEventQueue o-- IPMLEventWatch : filters on push
     TPMLEventQueue o-- IPMLKeyFilter : routes keys to the IME
@@ -162,6 +209,7 @@ classDiagram
     IPMLKeyFilter <|.. TPMLTextInputSystem
     TPMLWaylandSeat ..> TPMLKeyboardState : SendKey
     TPMLWaylandSeat ..> TPMLMouseState : SendMotion
+    TPMLWaylandSeat ..> TPMLTouchState : SendDown
     TPMLWaylandSeat *-- TPMLWaylandPointerGrab : owns per wl_pointer
     TPMLWaylandPointerGrab ..> TPMLMouseState : SendRelativeMotion
     TPMLKeyboardState ..> IPMLKeyFilter : asks first
@@ -206,5 +254,5 @@ with `XRel` / `YRel` set and `X` / `Y` frozen.
 | unified `poll(2)` over several file descriptors | not built. Only D-Bus and Wayland contribute descriptors today and each waits on its own; §6.3 wants one `poll` set once that stops being enough |
 | `WakeUp` via `eventfd` | currently a flag checked by the wait loop |
 | mutex | `SyncObjs.TCriticalSection`; will move to `TPMLMutex` when `PaPiMeLa.Threading` (#8) exists |
-| `TPMLTouchState` | not implemented. `TPMLKeyboardState` and `TPMLMouseState` landed with seats (#37); touch is the remaining piece |
+| touch hardware verification | `TPMLTouchState` is implemented and covered by `test/test_touch_cursor` with synthetic input, but no touch panel was available: the `wl_touch` path itself is unverified. `shape` and `orientation` (contact size and angle) are not read |
 | `Finalize` cost measurement for nil managed fields | size measured, benchmark not run (§10 item 9) |
