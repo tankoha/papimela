@@ -55,6 +55,11 @@ jobs:
             fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib "$f"
           done
 
+      # 図と実装の乖離検査。英日の Mermaid ブロックの同一性と、図に出てくる型が
+      # 実装に存在することを確認する。速いので lint より先に置く。
+      - name: Check diagrams
+        run: ./tools/check-diagrams.sh
+
       # --fail-on=warning が激辛モード。診断が 1 件でもあれば終了コード 1。
       # --format=github で GitHub Actions のワークフローコマンド形式にし、
       # 該当行へインライン注釈を付ける。

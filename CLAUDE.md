@@ -12,6 +12,7 @@ SDL3 を Free Pascal (FPC) の Object Pascal で書き直す再実装プロジ�
 | `spikes/RESULTS.md` | 実測済みの事実（Wayland varargs、fcitx5 の文節取得） |
 | `docs/TEST-LOG.md` | テスト実行一覧。未検証項目もここに列挙してある |
 | `docs/DEFECTS.md` | 不具合一覧（修正済みも含む全件）。同じ罠を踏まないために読む |
+| `docs/diagrams/` | クラス図5枚（Mermaid）。英語版が正、`_jp` が日本語版。`tools/check-diagrams.sh` が CI で整合性を検査する |
 
 ## 常に効く前提
 

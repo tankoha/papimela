@@ -189,6 +189,8 @@ FPC のドット付きユニット名で `PaPiMeLa.<Layer>.<Name>` とする。�
 
 ### 2.4 初期化と所有グラフ — グローバルシングルトンを使わない
 
+図: `docs/diagrams/ownership-graph.md`（Mermaid。日本語版は `ownership-graph_jp.md`）
+
 SDL の `SDL_Init()` と `static SDL_VideoDevice *_this` に相当するものは作らない。代わりに **アプリケーションが `TPMLContext` を明示的に生成し、それがすべてのサブシステムを所有する**。
 
 ```pascal
@@ -294,7 +296,7 @@ SDL の `SDL_VideoDevice` を、**責務ごとの抽象クラスに分解し、�
 
 ### 3.2 ビデオ軸の抽象クラス群
 
-実装済み部分のクラス図は `docs/diagrams/backend-abstraction.md`（Mermaid、GitHub 上でそのまま描画される）。
+図: `docs/diagrams/backend-abstraction.md`（Mermaid。日本語版は `backend-abstraction_jp.md`）
 
 ```
 TPMLVideoBackend（デバイス単位。1 Context に 1 つ）
@@ -452,6 +454,8 @@ type
 ## 4. クラス階層と公開 API
 
 ### 4.1 基底クラス
+
+図: `docs/diagrams/base-classes.md`（Mermaid。日本語版は `base-classes_jp.md`）
 
 v1 の `TSDLObject` / `TSDLHandleObject<T>` / `OwnsHandle` / `CreateFromHandle` / ハンドル逆引きは**すべて廃止**する。再実装では不透明ハンドルが存在せず、オブジェクトそれ自体が実装本体である。残るのは所有グラフの規約（2.4）を型で表す最小の基底だけ:
 
@@ -651,6 +655,8 @@ C の SDL コードは 3 種類の `false` を返している。移植担当は�
 
 ## 6. イベントシステム
 
+図: `docs/diagrams/event-model.md`（Mermaid。日本語版は `event-model_jp.md`）
+
 ### 6.1 要件
 
 1. ゲームループでの**ゼロアロケーション**ポーリング（v1 4.1 を維持）。
@@ -840,6 +846,8 @@ SDL の現状: text-input-v3 の `set_surrounding_text` を一度も呼ばず、
 - text-input-v3 は「IBus / Fcitx が使えない環境（例: 別の IME フレームワーク、sandbox 内で D-Bus が無い、コンポジタ内蔵 IME）でのフォールバック」として位置付け、文節無しの単一範囲で動く。
 
 ### 7.3 公開モデル（アプリが見るもの）
+
+図: `docs/diagrams/ime-model.md`（Mermaid。日本語版は `ime-model_jp.md`）
 
 ```pascal
 type

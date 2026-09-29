@@ -30,6 +30,7 @@ papimela で実行したテストの記録。日時は実測値（ファイル�
 | C-02 | `tools/wlscan-pas` | 2026-09-28 22:24 | **PASS** | — |
 | C-03 | 生成プロトコル 21 ユニット（9230 行） | 2026-09-28 22:24 | **PASS 21 / 21** | 初回は 9 / 21 が失敗（D-10〜D-12）。§9.2 が挙げる XML のうち、`reference/SDL/wayland-protocols/` にあるものすべて |
 | C-04 | **rawpaco 静的解析（激辛モード `--fail-on=warning`）** — `src` / `src/generated` / `test` / `spikes` / `tools` の全 Pascal ファイル | 2026-09-29 | **PASS 指摘 0 件** | 導入初回は 2 件の指摘（D-20）。修正後は 0 件。`.github/workflows/lint.yml` で push / pull_request ごとに走る |
+| C-05 | **図と実装の整合性検査**（`tools/check-diagrams.sh`） — 英日の Mermaid ブロック同一性、図に出てくる型 38 個の実在 | 2026-09-29 | **PASS 不整合 0 件** | `.github/workflows/lint.yml` で push ごとに走る |
 
 ## 3. アサーションを置いていない項目
 
