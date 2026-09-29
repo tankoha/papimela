@@ -57,8 +57,6 @@ type
   TPMLTextInputHint = (Multiline, AutoCorrect, AutoCapitalize, Sensitive, EmbedCandidates);
   TPMLTextInputHints = set of TPMLTextInputHint;
 
-  TPMLKeyFilterResult = (Consumed, PassThrough, Deferred);
-
   { アプリが実装する契約。papimela が必要なときに呼ぶ。 }
   IPMLTextInputClient = interface
     ['{4A2E8F10-7C3B-4D62-9E15-B8A0D6F23C71}']
@@ -140,7 +138,7 @@ type
     CORBA インターフェースは参照カウントしないので、バックエンドの実体を
     FBackendObject で保持して破棄する責任を持つ。 }
   TPMLTextInputSystem = class sealed(TPMLSystemObject,
-    IPMLTextInputSink, IPMLEventPumpSource)
+    IPMLTextInputSink, IPMLEventPumpSource, IPMLKeyFilter)
   strict private
     FQueue        : TPMLEventQueue;
     FBackend      : IPMLTextInputBackend;
@@ -158,7 +156,8 @@ type
       AType: TPMLTextInputType = TPMLTextInputType.Text;
       AHints: TPMLTextInputHints = []): TPMLTextInputSession;
     procedure Stop;
-    // キーを IME に通す。Consumed なら KeyDown / KeyUp を積んではならない。
+    // IPMLKeyFilter。キーを IME に通す。Consumed なら KeyDown / KeyUp を積んではならない。
+    function  KeyFilterActive: Boolean;
     function  FilterKey(const AKey: TPMLKeyEventData; AIsRelease: Boolean): TPMLKeyFilterResult;
 
     // IPMLEventPumpSource
@@ -338,6 +337,12 @@ procedure TPMLTextInputSystem.PushSurroundingText;
 begin
   if Assigned(FSession) then
     FSession.NotifyTextChanged;
+end;
+
+function TPMLTextInputSystem.KeyFilterActive: Boolean;
+begin
+  Result := Assigned(FSession) and Assigned(FBackend)
+    and (TPMLTextInputCapability.KeyFilter in FBackend.Capabilities);
 end;
 
 function TPMLTextInputSystem.FilterKey(const AKey: TPMLKeyEventData;

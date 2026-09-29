@@ -46,7 +46,11 @@ uses
   PaPiMeLa.Video.Backend,
   PaPiMeLa.Video.Wayland.Types,
   PaPiMeLa.Video.Wayland.Window,
-  PaPiMeLa.Platform.Wayland.Client;
+  PaPiMeLa.Video.Wayland.Seat,
+  PaPiMeLa.Events,
+  PaPiMeLa.Platform.XKB,
+  PaPiMeLa.Platform.Wayland.Client,
+  PaPiMeLa.Platform.Wayland.Protocols.Wayland;
 
 type
   TPMLWaylandDisplayBackend = class(TPMLDisplayBackend)
@@ -63,10 +67,15 @@ type
 
   TPMLWaylandVideoBackend = class(TPMLVideoBackend)
   strict private
-    FConn: TPMLWaylandConnection;
+    FConn : TPMLWaylandConnection;
+    FQueue: TPMLEventQueue;
+    FSeats: TPMLWaylandSeats;
     procedure CheckConnectionAlive;
+    procedure HandleSeatBound(ASeat: Pwl_seat);
+    procedure DestroySeats;
   public
-    constructor Create(AContextRef: TObject; AOwner: TPMLObject);
+    constructor Create(AContextRef: TObject; AOwner: TPMLObject;
+      AQueue: TPMLEventQueue);
     destructor Destroy; override;
 
     function  BackendName: String; override;
@@ -127,14 +136,17 @@ end;
 
 { TPMLWaylandVideoBackend }
 
-constructor TPMLWaylandVideoBackend.Create(AContextRef: TObject; AOwner: TPMLObject);
+constructor TPMLWaylandVideoBackend.Create(AContextRef: TObject; AOwner: TPMLObject;
+  AQueue: TPMLEventQueue);
 begin
   inherited Create(AContextRef, AOwner);
+  FQueue := AQueue;
   FConn := TPMLWaylandConnection.Create;
 end;
 
 destructor TPMLWaylandVideoBackend.Destroy;
 begin
+  DestroySeats;
   FreeAndNil(FConn);
   inherited Destroy;
 end;
@@ -146,6 +158,10 @@ end;
 
 function TPMLWaylandVideoBackend.Connect(ASink: IPMLVideoSink): Boolean;
 begin
+  // xkb が無ければキーは扱えないが、ウィンドウ表示自体は成立するので
+  // 失敗しても接続は続ける（シートを作らないだけ）。
+  if PMLXKBLoad then
+    FConn.OnSeatBound := @HandleSeatBound;
   Result := FConn.Connect;
   if not Result then
     Exit;
@@ -155,8 +171,31 @@ end;
 
 procedure TPMLWaylandVideoBackend.Disconnect;
 begin
+  DestroySeats;
   FConn.Disconnect;
   inherited Disconnect;
+end;
+
+{ レジストリが wl_seat を束縛した瞬間に呼ばれる。
+
+  ここでリスナーを付けないと、Connect の中の roundtrip が capabilities を
+  配送してしまい、キーボードを取り出す機会を失う（不具合 D-21）。 }
+procedure TPMLWaylandVideoBackend.HandleSeatBound(ASeat: Pwl_seat);
+begin
+  SetLength(FSeats, Length(FSeats) + 1);
+  FSeats[High(FSeats)] := TPMLWaylandSeat.Create(FQueue, ASeat);
+end;
+
+procedure TPMLWaylandVideoBackend.DestroySeats;
+var
+  I: Integer;
+begin
+  if Length(FSeats) = 0 then
+    Exit;
+  for I := 0 to High(FSeats) do
+    FSeats[I].Free;
+  SetLength(FSeats, 0);
+  PMLXKBUnload;
 end;
 
 function TPMLWaylandVideoBackend.EnumerateDisplays: TPMLDisplayBackends;
@@ -207,9 +246,22 @@ var
   FDS: TFDSet;
   PFD: TPollFd;
   R  : LongInt;
+  I, M, RepeatMs: Integer;
 begin
   if FConn.Display = nil then
     Exit;
+
+  // キーリピートの期限が近ければ、その分だけ待ちを短くする。
+  // そうしないとリピートが poll のタイムアウトまで遅れる。
+  RepeatMs := -1;
+  for I := 0 to High(FSeats) do
+  begin
+    M := FSeats[I].MillisecondsUntilRepeat;
+    if (M >= 0) and ((RepeatMs < 0) or (M < RepeatMs)) then
+      RepeatMs := M;
+  end;
+  if (RepeatMs >= 0) and ((ATimeoutMs < 0) or (RepeatMs < ATimeoutMs)) then
+    ATimeoutMs := RepeatMs;
 
   while wl_display_prepare_read(FConn.Display) <> 0 do
     wl_display_dispatch_pending(FConn.Display);
@@ -233,6 +285,11 @@ begin
     wl_display_cancel_read(FConn.Display);
 
   wl_display_dispatch_pending(FConn.Display);
+
+  // 期限の来たキーリピートを発火させる。
+  for I := 0 to High(FSeats) do
+    FSeats[I].ProcessRepeat;
+
   CheckConnectionAlive;
 end;
 

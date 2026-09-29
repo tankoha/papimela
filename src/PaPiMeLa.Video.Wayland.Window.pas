@@ -181,6 +181,10 @@ begin
   if FSurface = nil then
     raise EPMLVideoError.CreateNative('wl_compositor.create_surface failed', 0, 'wayland');
 
+  // Seat がサーフェスからウィンドウを引けるようにする。wl_surface には
+  // リスナーを付けていないので user_data は空いている。
+  wl_proxy_set_user_data(Pwl_proxy(FSurface), Self);
+
   FXdgSurface := xdg_wm_base_get_xdg_surface(FConn.WmBase, FSurface);
   FXsFwd := TPMLXdgSurfaceForwarder.Create(Self);
   xdg_surface_add_listener_object(FXdgSurface, FXsFwd);

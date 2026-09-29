@@ -448,7 +448,7 @@ begin
   if Wanted = '' then
     Wanted := LowerCase(Trim(GetEnvironmentVariable('PAPIMELA_VIDEO')));
 
-  if not TryBackend(TPMLWaylandVideoBackend.Create(AContextRef, Self)) then
+  if not TryBackend(TPMLWaylandVideoBackend.Create(AContextRef, Self, AQueue)) then
     raise EPMLVideoError.Create('no video backend could be selected');
 
   RefreshDisplays;

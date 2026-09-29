@@ -85,6 +85,11 @@ type
     property ScaleFactor: Integer read FScale;
   end;
   TPMLWaylandOutputs = array of TPMLWaylandOutput;
+  TPMLWaylandSeatHandles = array of Pwl_seat;
+
+  // wl_seat を束縛した瞬間に呼ばれる。リスナーはここで付けないと、
+  // 直後の roundtrip で capabilities が配送されて取りこぼす。
+  TPMLWaylandSeatBoundProc = procedure(ASeat: Pwl_seat) of object;
 
   { xdg_wm_base の ping に応答する。 }
   TPMLWaylandWmBaseWatcher = class(Txdg_wm_base_listener)
@@ -99,7 +104,8 @@ type
     FRegistry  : Pwl_registry;
     FWmWatcher : TPMLWaylandWmBaseWatcher;
     FOutputs   : TPMLWaylandOutputs;
-    FSeats     : array of Pwl_seat;
+    FSeats     : TPMLWaylandSeatHandles;
+    FOnSeatBound: TPMLWaylandSeatBoundProc;
     procedure BindGlobal(AName: LongWord; const AInterface: String; AVersion: LongWord);
   public
     // 束縛したグローバル（nil = そのコンポジタに無い）
@@ -126,6 +132,10 @@ type
 
     property Display: Pwl_display read FDisplay;
     property Outputs: TPMLWaylandOutputs read FOutputs;
+    // シートの生成は Video.Wayland が行う（Seat ユニットを参照すると循環するため）。
+    property Seats  : TPMLWaylandSeatHandles read FSeats;
+    // Connect の前に設定すること。束縛時に呼ばれる。
+    property OnSeatBound: TPMLWaylandSeatBoundProc read FOnSeatBound write FOnSeatBound;
   end;
 
 implementation
@@ -309,6 +319,9 @@ begin
         Seat := Pwl_seat(B(wl_seat_interface, 9));
         SetLength(FSeats, Length(FSeats) + 1);
         FSeats[High(FSeats)] := Seat;
+        // リスナーを今ここで付ける。roundtrip を待つと capabilities を取りこぼす。
+        if Assigned(FOnSeatBound) then
+          FOnSeatBound(Seat);
       end;
   end;
 end;

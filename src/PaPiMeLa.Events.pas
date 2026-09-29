@@ -91,6 +91,26 @@ type
     Data1, Data2: Int32;
   end;
 
+  TPMLMouseMotionData = record
+    MouseID    : LongWord;
+    ButtonState: LongWord;    // ビットマスク。bit0 = 左、bit1 = 右、bit2 = 中
+    X, Y       : Single;      // ウィンドウ座標
+    XRel, YRel : Single;
+  end;
+
+  TPMLMouseButtonData = record
+    MouseID: LongWord;
+    Button : LongWord;        // 1 = 左、2 = 右、3 = 中
+    Clicks : Byte;
+    X, Y   : Single;
+  end;
+
+  TPMLMouseWheelData = record
+    MouseID: LongWord;
+    X, Y   : Single;          // 正 = 右 / 上
+    Flipped: Boolean;
+  end;
+
   TPMLUserEventData = record
     Code        : Int32;
     Data1, Data2: Pointer;
@@ -112,7 +132,10 @@ type
       2: (DeleteSurrounding: TPMLDeleteSurroundingData);
       3: (Window           : TPMLWindowEventData);
       4: (UserData         : TPMLUserEventData);
-      // Motion / Button / Wheel / Display / JAxis / ... は各サブシステム着手時に追加する。
+      5: (Motion           : TPMLMouseMotionData);
+      6: (Button           : TPMLMouseButtonData);
+      7: (Wheel            : TPMLMouseWheelData);
+      // Display / JAxis / GAxis / Finger ... は各サブシステム着手時に追加する。
       // 可変部への追加は既存コードに影響しない。
   end;
 
@@ -130,6 +153,61 @@ type
     function OnEventPushed(const AEvent: TPMLEvent): Boolean;
   end;
 
+  { キーを IME に通すための契約。TPMLTextInputSystem が実装する。
+
+    Events が PaPiMeLa.TextInput を参照すると循環するため、インターフェースで
+    受け取る。Context が TextInput を生成したあとにキューへ差し込む。 }
+  IPMLKeyFilter = interface
+    ['{A31F7D50-6C82-4E19-B074-29D5E8A6F3C1}']
+    // セッションが開いていて IME にキーを流すべきなら True。
+    function KeyFilterActive: Boolean;
+    function FilterKey(const AKey: TPMLKeyEventData;
+      AIsRelease: Boolean): TPMLKeyFilterResult;
+  end;
+
+  TPMLEventQueue = class;
+
+  { キーボードの状態機械。バックエンドは Push を直接呼ばず、ここを通す（§6.3）。
+
+    IME への転送（§7.5）もここで行う。IME が消費したキーは KeyDown も
+    TextInput も発生させない。 }
+  TPMLKeyboardState = class sealed(TPMLSystemObject)
+  strict private
+    FQueue     : TPMLEventQueue;
+    FModifiers : TPMLKeyModifiers;
+    FFocusedWindow: TPMLWindowID;
+    FConsumed  : Integer;
+  public
+    constructor Create(AContextRef: TObject; AQueue: TPMLEventQueue);
+    // バックエンドが呼ぶ唯一の入口。AText は xkb が求めた確定文字列（無ければ空）。
+    procedure SendKey(AWindowID: TPMLWindowID; const AKey: TPMLKeyEventData;
+      ADown: Boolean; const AText: String);
+    procedure SendModifiers(AModifiers: TPMLKeyModifiers);
+    procedure SendFocus(AWindowID: TPMLWindowID; AGained: Boolean);
+    property Modifiers    : TPMLKeyModifiers read FModifiers;
+    property FocusedWindow: TPMLWindowID read FFocusedWindow;
+    // IME が消費したキーの累計。テストと診断用。
+    property ConsumedCount: Integer read FConsumed;
+  end;
+
+  { マウスの状態機械。 }
+  TPMLMouseState = class sealed(TPMLSystemObject)
+  strict private
+    FQueue      : TPMLEventQueue;
+    FX, FY      : Single;
+    FButtonState: LongWord;
+    FFocusedWindow: TPMLWindowID;
+  public
+    constructor Create(AContextRef: TObject; AQueue: TPMLEventQueue);
+    procedure SendMotion(AWindowID: TPMLWindowID; AX, AY: Single);
+    procedure SendButton(AWindowID: TPMLWindowID; AButton: LongWord; ADown: Boolean);
+    procedure SendWheel(AWindowID: TPMLWindowID; AX, AY: Single);
+    procedure SendFocus(AWindowID: TPMLWindowID; AEntered: Boolean);
+    property X: Single read FX;
+    property Y: Single read FY;
+    property ButtonState: LongWord read FButtonState;
+  end;
+
   TPMLEventQueue = class sealed(TPMLSystemObject)
   strict private
     FLock      : TCriticalSection;
@@ -142,6 +220,9 @@ type
     FWokenUp   : Boolean;
     FDroppedLog: Integer;
     FNextUser  : Integer;
+    FKeyboard  : TPMLKeyboardState;
+    FMouse     : TPMLMouseState;
+    FKeyFilter : IPMLKeyFilter;
     function  TakeLocked(out AEvent: TPMLEvent): Boolean;
     function  NotifyWatches(const AEvent: TPMLEvent): Boolean;
   public
@@ -177,6 +258,12 @@ type
     property Enabled[AKind: TPMLEventKind]: Boolean read GetEnabled write SetEnabled;
     property PendingCount: Integer read FCount;
     property DroppedCount: Integer read FDroppedLog;
+
+    // 状態機械。バックエンドはこれを通してイベントを流す（§6.3）。
+    property Keyboard: TPMLKeyboardState read FKeyboard;
+    property Mouse   : TPMLMouseState read FMouse;
+    // Context が TextInput を生成したあとに差し込む。nil なら IME 転送なし。
+    property KeyFilter: IPMLKeyFilter read FKeyFilter write FKeyFilter;
   end;
 
 // 現在時刻（ナノ秒）。TPMLTimerService ができたらそちらへ委譲する。
@@ -217,10 +304,15 @@ begin
   for K := Low(TPMLEventKind) to High(TPMLEventKind) do
     FEnabled[K] := True;
   FNextUser := 0;
+  FKeyboard := TPMLKeyboardState.Create(AContextRef, Self);
+  FMouse := TPMLMouseState.Create(AContextRef, Self);
 end;
 
 destructor TPMLEventQueue.Destroy;
 begin
+  FKeyFilter := nil;
+  FreeAndNil(FKeyboard);
+  FreeAndNil(FMouse);
   SetLength(FSources, 0);
   SetLength(FWatches, 0);
   SetLength(FRing, 0);
@@ -479,6 +571,181 @@ end;
 procedure TPMLEventQueue.WakeUp;
 begin
   FWokenUp := True;
+end;
+
+{ TPMLKeyboardState }
+
+constructor TPMLKeyboardState.Create(AContextRef: TObject; AQueue: TPMLEventQueue);
+begin
+  inherited Create(AContextRef, AQueue);
+  FQueue := AQueue;
+end;
+
+procedure TPMLKeyboardState.SendModifiers(AModifiers: TPMLKeyModifiers);
+begin
+  FModifiers := AModifiers;
+end;
+
+procedure TPMLKeyboardState.SendFocus(AWindowID: TPMLWindowID; AGained: Boolean);
+begin
+  if AGained then
+  begin
+    FFocusedWindow := AWindowID;
+    FQueue.PushSimple(TPMLEventKind.WindowFocusGained, AWindowID);
+  end
+  else
+  begin
+    if FFocusedWindow = AWindowID then
+      FFocusedWindow := 0;
+    FQueue.PushSimple(TPMLEventKind.WindowFocusLost, AWindowID);
+  end;
+end;
+
+{ §7.5 の経路。
+
+  1. IME が有効なら、押下も解放も IME に通す（修飾キー単独押下もエンジンが
+     モード切替に使うため通す）
+  2. Consumed なら KeyDown も TextInput も出さずに終わる
+  3. PassThrough なら通常どおり KeyDown / KeyUp を出し、xkb が文字を求めていれば
+     TextInput も出す
+
+  Deferred（非同期返信待ち）は現在のバックエンドが返さないので、保留キューは
+  実装していない。IBus の非同期化（§10 項目 3）と同時に入れる。 }
+procedure TPMLKeyboardState.SendKey(AWindowID: TPMLWindowID;
+  const AKey: TPMLKeyEventData; ADown: Boolean; const AText: String);
+var
+  Ev: TPMLEvent;
+  Filtered: TPMLKeyFilterResult;
+begin
+  FModifiers := AKey.Modifiers;
+
+  if Assigned(FQueue.KeyFilter) and FQueue.KeyFilter.KeyFilterActive then
+  begin
+    Filtered := FQueue.KeyFilter.FilterKey(AKey, not ADown);
+    if Filtered = TPMLKeyFilterResult.Consumed then
+    begin
+      Inc(FConsumed);
+      Exit;
+    end;
+  end;
+
+  FillChar(Ev.Key, SizeOf(Ev.Key), 0);
+  if ADown then
+    Ev.Kind := TPMLEventKind.KeyDown
+  else
+    Ev.Kind := TPMLEventKind.KeyUp;
+  Ev.Timestamp := PMLNowNS;
+  Ev.WindowID := AWindowID;
+  Ev.Text := '';
+  Ev.Segments := nil;
+  Ev.Strings := nil;
+  Ev.Key := AKey;
+  FQueue.Push(Ev);
+
+  // IME が受け取らなかった印字可能キーは、こちらで確定文字列にする。
+  if ADown and (AText <> '') then
+  begin
+    FillChar(Ev.Key, SizeOf(Ev.Key), 0);
+    Ev.Kind := TPMLEventKind.TextInput;
+    Ev.Timestamp := PMLNowNS;
+    Ev.WindowID := AWindowID;
+    Ev.Text := AText;
+    Ev.Segments := nil;
+    Ev.Strings := nil;
+    FQueue.Push(Ev);
+  end;
+end;
+
+{ TPMLMouseState }
+
+constructor TPMLMouseState.Create(AContextRef: TObject; AQueue: TPMLEventQueue);
+begin
+  inherited Create(AContextRef, AQueue);
+  FQueue := AQueue;
+end;
+
+procedure TPMLMouseState.SendMotion(AWindowID: TPMLWindowID; AX, AY: Single);
+var
+  Ev: TPMLEvent;
+begin
+  FillChar(Ev.Motion, SizeOf(Ev.Motion), 0);
+  Ev.Kind := TPMLEventKind.MouseMotion;
+  Ev.Timestamp := PMLNowNS;
+  Ev.WindowID := AWindowID;
+  Ev.Text := '';
+  Ev.Segments := nil;
+  Ev.Strings := nil;
+  Ev.Motion.ButtonState := FButtonState;
+  Ev.Motion.X := AX;
+  Ev.Motion.Y := AY;
+  Ev.Motion.XRel := AX - FX;
+  Ev.Motion.YRel := AY - FY;
+  FX := AX;
+  FY := AY;
+  FQueue.Push(Ev);
+end;
+
+procedure TPMLMouseState.SendButton(AWindowID: TPMLWindowID;
+  AButton: LongWord; ADown: Boolean);
+var
+  Ev: TPMLEvent;
+  Mask: LongWord;
+begin
+  if AButton = 0 then
+    Exit;
+  Mask := LongWord(1) shl (AButton - 1);
+  if ADown then
+    FButtonState := FButtonState or Mask
+  else
+    FButtonState := FButtonState and not Mask;
+
+  FillChar(Ev.Button, SizeOf(Ev.Button), 0);
+  if ADown then
+    Ev.Kind := TPMLEventKind.MouseButtonDown
+  else
+    Ev.Kind := TPMLEventKind.MouseButtonUp;
+  Ev.Timestamp := PMLNowNS;
+  Ev.WindowID := AWindowID;
+  Ev.Text := '';
+  Ev.Segments := nil;
+  Ev.Strings := nil;
+  Ev.Button.Button := AButton;
+  Ev.Button.Clicks := 1;
+  Ev.Button.X := FX;
+  Ev.Button.Y := FY;
+  FQueue.Push(Ev);
+end;
+
+procedure TPMLMouseState.SendWheel(AWindowID: TPMLWindowID; AX, AY: Single);
+var
+  Ev: TPMLEvent;
+begin
+  FillChar(Ev.Wheel, SizeOf(Ev.Wheel), 0);
+  Ev.Kind := TPMLEventKind.MouseWheel;
+  Ev.Timestamp := PMLNowNS;
+  Ev.WindowID := AWindowID;
+  Ev.Text := '';
+  Ev.Segments := nil;
+  Ev.Strings := nil;
+  Ev.Wheel.X := AX;
+  Ev.Wheel.Y := AY;
+  FQueue.Push(Ev);
+end;
+
+procedure TPMLMouseState.SendFocus(AWindowID: TPMLWindowID; AEntered: Boolean);
+begin
+  if AEntered then
+  begin
+    FFocusedWindow := AWindowID;
+    FQueue.PushSimple(TPMLEventKind.WindowMouseEnter, AWindowID);
+  end
+  else
+  begin
+    if FFocusedWindow = AWindowID then
+      FFocusedWindow := 0;
+    FButtonState := 0;
+    FQueue.PushSimple(TPMLEventKind.WindowMouseLeave, AWindowID);
+  end;
 end;
 
 end.

@@ -150,6 +150,7 @@ begin
     begin
       FTextInput := TPMLTextInputSystem.Create(Self, Self, FEvents,
         Opts.PreferredTextInput);
+      FEvents.KeyFilter := FTextInput as IPMLKeyFilter;
       LogFmt(TPMLLogLevel.Info, 'text input backend: %s', [FTextInput.BackendName]);
     end;
   finally
@@ -161,6 +162,8 @@ end;
 destructor TPMLContext.Destroy;
 begin
   // §2.4 の破棄順序: TextInput → Joystick → Audio → Video → Timer → Events
+  if Assigned(FEvents) then
+    FEvents.KeyFilter := nil;
   FreeAndNil(FTextInput);
   FreeAndNil(FVideo);
   FreeAndNil(FTimer);

@@ -20,3 +20,6 @@ tools/wlscan-pas
 test/test_wayland_protocols
 
 test/test_wayland_window
+
+test/test_key_routing
+test/demo_japanese_input

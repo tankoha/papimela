@@ -116,18 +116,54 @@ classDiagram
         <<interface>>
         +OnEventPushed()
     }
+    class IPMLKeyFilter {
+        <<interface>>
+        +KeyFilterActive()
+        +FilterKey()
+    }
+    class TPMLKeyboardState {
+        +SendKey()
+        +SendModifiers()
+        +SendFocus()
+        +Modifiers
+        +FocusedWindow
+        +ConsumedCount
+    }
+    class TPMLMouseState {
+        +SendMotion()
+        +SendButton()
+        +SendWheel()
+        +SendFocus()
+        +ButtonState
+    }
     class TPMLVideoSystem
     class TPMLTextInputSystem
     class TPMLContext
+    class TPMLWaylandSeat
 
     TPMLContext *-- TPMLEventQueue : owns
+    TPMLEventQueue *-- TPMLKeyboardState : owns
+    TPMLEventQueue *-- TPMLMouseState : owns
     TPMLEventQueue o-- IPMLEventPumpSource : pumps in registration order
     TPMLEventQueue o-- IPMLEventWatch : filters on push
+    TPMLEventQueue o-- IPMLKeyFilter : routes keys to the IME
     IPMLEventPumpSource <|.. TPMLVideoSystem
     IPMLEventPumpSource <|.. TPMLTextInputSystem
+    IPMLKeyFilter <|.. TPMLTextInputSystem
+    TPMLWaylandSeat ..> TPMLKeyboardState : SendKey
+    TPMLWaylandSeat ..> TPMLMouseState : SendMotion
+    TPMLKeyboardState ..> IPMLKeyFilter : asks first
+    TPMLKeyboardState ..> TPMLEventQueue : Push
     TPMLVideoSystem ..> TPMLEventQueue : Push
     TPMLTextInputSystem ..> TPMLEventQueue : Push
 ```
+
+**キーの経路（§7.5）。** バックエンドはキーについて Push を呼ばない。`TPMLWaylandSeat` は
+押下も解放も、修飾キーも含めてすべて `TPMLKeyboardState.SendKey` に渡し、そこでまず IME に尋ねる。
+IME が `Consumed` と答えたら `KeyDown` も `TextInput` も一切出さない（文字は後から IME 自身の
+経路で `TextEditing` / `TextInput` として届く）。`PassThrough` なら通常の `KeyDown` になり、
+xkb が印字可能な文字を求めていれば `TextInput` も出す。`Deferred`（IME の非同期返信待ち）は
+定義してあるが、返すバックエンドはまだ無い。
 
 **規約。**
 

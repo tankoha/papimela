@@ -48,6 +48,9 @@ type
   TPMLKeyModifier = (Shift, Ctrl, Alt, Super, CapsLock, NumLock);
   TPMLKeyModifiers = set of TPMLKeyModifier;
 
+  // IME にキーを通したときの判定。Deferred は非同期返信待ち（§7.5）。
+  TPMLKeyFilterResult = (Consumed, PassThrough, Deferred);
+
   // ---- IME（§7.3）
 
   // 文節の状態。かな漢字変換の下線表示を描き分けるために使う。

@@ -117,18 +117,54 @@ classDiagram
         <<interface>>
         +OnEventPushed()
     }
+    class IPMLKeyFilter {
+        <<interface>>
+        +KeyFilterActive()
+        +FilterKey()
+    }
+    class TPMLKeyboardState {
+        +SendKey()
+        +SendModifiers()
+        +SendFocus()
+        +Modifiers
+        +FocusedWindow
+        +ConsumedCount
+    }
+    class TPMLMouseState {
+        +SendMotion()
+        +SendButton()
+        +SendWheel()
+        +SendFocus()
+        +ButtonState
+    }
     class TPMLVideoSystem
     class TPMLTextInputSystem
     class TPMLContext
+    class TPMLWaylandSeat
 
     TPMLContext *-- TPMLEventQueue : owns
+    TPMLEventQueue *-- TPMLKeyboardState : owns
+    TPMLEventQueue *-- TPMLMouseState : owns
     TPMLEventQueue o-- IPMLEventPumpSource : pumps in registration order
     TPMLEventQueue o-- IPMLEventWatch : filters on push
+    TPMLEventQueue o-- IPMLKeyFilter : routes keys to the IME
     IPMLEventPumpSource <|.. TPMLVideoSystem
     IPMLEventPumpSource <|.. TPMLTextInputSystem
+    IPMLKeyFilter <|.. TPMLTextInputSystem
+    TPMLWaylandSeat ..> TPMLKeyboardState : SendKey
+    TPMLWaylandSeat ..> TPMLMouseState : SendMotion
+    TPMLKeyboardState ..> IPMLKeyFilter : asks first
+    TPMLKeyboardState ..> TPMLEventQueue : Push
     TPMLVideoSystem ..> TPMLEventQueue : Push
     TPMLTextInputSystem ..> TPMLEventQueue : Push
 ```
+
+**The key path (§7.5).** A backend never calls `Push` for keys. `TPMLWaylandSeat` hands every key —
+press *and* release, modifiers included — to `TPMLKeyboardState.SendKey`, which asks the IME first.
+If the IME answers `Consumed`, no `KeyDown` and no `TextInput` is emitted at all; the text will
+arrive later as `TextEditing` / `TextInput` from the IME's own path. If it answers `PassThrough`,
+the key becomes a normal `KeyDown`, plus a `TextInput` when xkb produced printable text.
+`Deferred` (awaiting an async IME reply) is defined but no backend returns it yet.
 
 **Rules.**
 
