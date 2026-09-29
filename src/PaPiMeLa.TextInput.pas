@@ -145,6 +145,7 @@ type
     FBackendObject: TObject;
     FSession      : TPMLTextInputSession;
     FSelectedName : String;
+    FFocused      : Boolean;
     procedure PushSurroundingText;
     procedure PushComposition(const AComposition: TPMLComposition);
   public
@@ -159,6 +160,7 @@ type
     // IPMLKeyFilter。キーを IME に通す。Consumed なら KeyDown / KeyUp を積んではならない。
     function  KeyFilterActive: Boolean;
     function  FilterKey(const AKey: TPMLKeyEventData; AIsRelease: Boolean): TPMLKeyFilterResult;
+    procedure NotifyFocus(AWindowID: TPMLWindowID; AGained: Boolean);
 
     // IPMLEventPumpSource
     function  PumpSourceName: String;
@@ -321,6 +323,7 @@ begin
     Stop;
   FSession := TPMLTextInputSession.Create(Self, AWindow, AClient, AType, AHints);
   FBackend.Activate(AType, AHints);
+  FFocused := True;
   PushSurroundingText;
   Result := FSession;
 end;
@@ -330,6 +333,7 @@ begin
   if not Assigned(FSession) then
     Exit;
   FBackend.Deactivate;
+  FFocused := False;
   FreeAndNil(FSession);
 end;
 
@@ -337,6 +341,32 @@ procedure TPMLTextInputSystem.PushSurroundingText;
 begin
   if Assigned(FSession) then
     FSession.NotifyTextChanged;
+end;
+
+{ ウィンドウのフォーカス変化を IME へ伝える。
+
+  これを送らないと、別アプリへ移っても fcitx5 はこちらの入力コンテキストを
+  注目したままになり、2 つのクライアントが同時にフォーカスを持つ状態になる。
+  変換中テキストもフォーカスをまたいで残る。
+
+  セッションのウィンドウと一致するフォーカス変化だけを通す。Start / Stop でも
+  Activate / Deactivate を呼ぶので、二重呼び出しを FFocused で防ぐ。 }
+procedure TPMLTextInputSystem.NotifyFocus(AWindowID: TPMLWindowID; AGained: Boolean);
+begin
+  if not Assigned(FSession) or not Assigned(FBackend) then
+    Exit;
+  if Assigned(FSession.Window) and (FSession.Window.ID <> AWindowID) then
+    Exit;
+  if AGained = FFocused then
+    Exit;
+  FFocused := AGained;
+  if AGained then
+  begin
+    FBackend.Activate(FSession.InputType, FSession.Hints);
+    PushSurroundingText;
+  end
+  else
+    FBackend.Deactivate;
 end;
 
 function TPMLTextInputSystem.KeyFilterActive: Boolean;

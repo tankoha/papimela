@@ -163,6 +163,9 @@ type
     function KeyFilterActive: Boolean;
     function FilterKey(const AKey: TPMLKeyEventData;
       AIsRelease: Boolean): TPMLKeyFilterResult;
+    // ウィンドウのキーボードフォーカスが変わったことを IME に伝える。
+    // これを送らないと、他のアプリへ移っても IME はこちらを注目したままになる。
+    procedure NotifyFocus(AWindowID: TPMLWindowID; AGained: Boolean);
   end;
 
   TPMLEventQueue = class;
@@ -588,6 +591,11 @@ end;
 
 procedure TPMLKeyboardState.SendFocus(AWindowID: TPMLWindowID; AGained: Boolean);
 begin
+  // IME にも伝える。フォーカスを失ったまま IME がこちらを注目し続けると、
+  // 別アプリと二重にフォーカスを持つ状態になる。
+  if Assigned(FQueue.KeyFilter) then
+    FQueue.KeyFilter.NotifyFocus(AWindowID, AGained);
+
   if AGained then
   begin
     FFocusedWindow := AWindowID;

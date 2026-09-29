@@ -183,11 +183,13 @@ begin
       TPMLEventKind.KeyDown:
         begin
           Inc(KeyCount);
+          // IME を素通りしたキー。何が素通りしたのか分かるよう keysym を出す。
+          WriteLn(Format('  KeyDown 素通り keysym=$%x keycode=%d',
+            [Ev.Key.Keysym, Ev.Key.Keycode]));
           case Ev.Key.Keysym of
             XKB_KEY_Escape   : Running := False;
             XKB_KEY_BackSpace: begin Editor.Backspace;
                                  WriteLn('  Backspace → バッファ: ' + Editor.Buffer); end;
-            XKB_KEY_Return   : WriteLn('  Enter');
           end;
         end;
       TPMLEventKind.MouseButtonDown:
@@ -209,6 +211,8 @@ begin
   WriteLn;
   WriteLn('  ウィンドウをクリックしてフォーカスし、日本語を入力してください。');
   WriteLn('  変換中は [注目文節] <変換済> 未変換 の形で表示します。');
+  WriteLn('  ローマ字を打ったあと Space を押すと漢字変換され、複数文節になります。');
+  WriteLn('  例: nihongowomusubu → Space → [日本語を]<結ぶ> のように分かれます。');
   WriteLn(Format('  Escape か閉じるボタンで終了。%d 秒で自動終了します。', [Seconds]));
   WriteLn;
 
