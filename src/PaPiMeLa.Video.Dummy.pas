@@ -39,6 +39,7 @@ uses
   PaPiMeLa.Types,
   PaPiMeLa.Errors,
   PaPiMeLa.Core.Base,
+  PaPiMeLa.Pixels,
   PaPiMeLa.Video.Backend;
 
 type
@@ -66,6 +67,8 @@ type
     FVisible: Boolean;
     FPixels: Pointer;
     FPixelBytes: PtrUInt;
+    FPresentCount: Integer;
+    FVSync: Integer;
     procedure FreePixels;
     // 現在の状態フラグを Sink へ通知する。Maximize / Minimize / Restore が使う。
     procedure ReportState(const AAdd, ARemove: TPMLWindowFlags);
@@ -83,13 +86,18 @@ type
     procedure Minimize; override;
     procedure Restore; override;
     procedure GetSizeInPixels(out AWidth, AHeight: Integer); override;
-    function  CreateFramebuffer(out APixels: Pointer; out APitch: Integer): Boolean; override;
+    function  CreateFramebuffer(out APixels: Pointer; out APitch: Integer;
+      out AFormat: TPMLPixelFormat): Boolean; override;
     procedure UpdateFramebuffer; override;
     procedure DestroyFramebuffer; override;
+    function  SetFramebufferVSync(AInterval: Integer): Boolean; override;
 
     property Title  : String read FTitle;
     property Visible: Boolean read FVisible;
     property Flags  : TPMLWindowFlags read FFlags;
+    // 検査用。UpdateFramebuffer が呼ばれた回数と、最後に設定された VSync。
+    property PresentCount: Integer read FPresentCount;
+    property VSync: Integer read FVSync;
   end;
 
   TPMLDummyVideoBackend = class(TPMLVideoBackend)
@@ -236,12 +244,13 @@ begin
 end;
 
 function TPMLDummyWindowBackend.CreateFramebuffer(out APixels: Pointer;
-  out APitch: Integer): Boolean;
+  out APitch: Integer; out AFormat: TPMLPixelFormat): Boolean;
 var
   Needed: PtrUInt;
 begin
   APixels := nil;
   APitch := 0;
+  AFormat := PML_PIXELFORMAT_XRGB8888;
   Needed := PtrUInt(FWidth) * PtrUInt(FHeight) * 4;
   if Needed = 0 then
     Exit(False);
@@ -260,7 +269,16 @@ end;
 
 procedure TPMLDummyWindowBackend.UpdateFramebuffer;
 begin
-  // 表示先が無いので何もしない
+  // 表示先が無いので数えるだけ
+  Inc(FPresentCount);
+end;
+
+// 待つ相手が無いので、値を覚えるだけで常に受け付ける。
+function TPMLDummyWindowBackend.SetFramebufferVSync(AInterval: Integer): Boolean;
+begin
+  Result := AInterval >= 0;
+  if Result then
+    FVSync := AInterval;
 end;
 
 procedure TPMLDummyWindowBackend.DestroyFramebuffer;

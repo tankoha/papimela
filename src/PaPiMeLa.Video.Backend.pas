@@ -42,7 +42,8 @@ uses
   SysUtils,
   PaPiMeLa.Types,
   PaPiMeLa.Errors,
-  PaPiMeLa.Core.Base;
+  PaPiMeLa.Core.Base,
+  PaPiMeLa.Pixels;
 
 type
   TPMLVideoCapability = (
@@ -141,9 +142,15 @@ type
     function  GetDisplayScale: Single; virtual;
 
     // ソフトウェアフレームバッファ。SoftwareFramebuffer 能力があるときだけ呼ばれる。
-    function  CreateFramebuffer(out APixels: Pointer; out APitch: Integer): Boolean; virtual;
+    // 同じ大きさのあいだは同じ APixels を返す。大きさが変わったら作り直してよい。
+    // UpdateFramebuffer は中身を画面へ出す。出した後も中身は保たれる。
+    function  CreateFramebuffer(out APixels: Pointer; out APitch: Integer;
+      out AFormat: TPMLPixelFormat): Boolean; virtual;
     procedure UpdateFramebuffer; virtual;
     procedure DestroyFramebuffer; virtual;
+    // UpdateFramebuffer を画面の更新に合わせるか。0 = 合わせない、1 = 毎回待つ。
+    // 対応しない値なら False を返し、設定は変えない。
+    function  SetFramebufferVSync(AInterval: Integer): Boolean; virtual;
 
     function  NativeHandles: TPMLNativeWindowHandles; virtual;
 
@@ -274,10 +281,11 @@ begin
 end;
 
 function TPMLWindowBackend.CreateFramebuffer(out APixels: Pointer;
-  out APitch: Integer): Boolean;
+  out APitch: Integer; out AFormat: TPMLPixelFormat): Boolean;
 begin
   APixels := nil;
   APitch := 0;
+  AFormat := PML_PIXELFORMAT_UNKNOWN;
   Result := False;
 end;
 
@@ -287,6 +295,11 @@ end;
 
 procedure TPMLWindowBackend.DestroyFramebuffer;
 begin
+end;
+
+function TPMLWindowBackend.SetFramebufferVSync(AInterval: Integer): Boolean;
+begin
+  Result := AInterval = 0;
 end;
 
 function TPMLWindowBackend.NativeHandles: TPMLNativeWindowHandles;

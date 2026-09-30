@@ -96,6 +96,8 @@ var
   wl_proxy_get_id      : function(proxy: Pwl_proxy): LongWord; cdecl = nil;
   wl_proxy_get_class   : function(proxy: Pwl_proxy): PAnsiChar; cdecl = nil;
   wl_proxy_set_queue   : procedure(proxy: Pwl_proxy; queue: Pwl_event_queue); cdecl = nil;
+  wl_proxy_create_wrapper : function(proxy: Pointer): Pointer; cdecl = nil;
+  wl_proxy_wrapper_destroy: procedure(wrapper: Pointer); cdecl = nil;
 
   // ---- wl_display
   wl_display_connect        : function(name: PAnsiChar): Pwl_display; cdecl = nil;
@@ -117,6 +119,10 @@ var
   wl_display_dispatch_queue    : function(display: Pwl_display;
     queue: Pwl_event_queue): LongInt; cdecl = nil;
   wl_display_roundtrip_queue   : function(display: Pwl_display;
+    queue: Pwl_event_queue): LongInt; cdecl = nil;
+  wl_display_dispatch_queue_pending: function(display: Pwl_display;
+    queue: Pwl_event_queue): LongInt; cdecl = nil;
+  wl_display_prepare_read_queue: function(display: Pwl_display;
     queue: Pwl_event_queue): LongInt; cdecl = nil;
 
 // libwayland-client をロードする。既にロード済みなら参照カウントを増やすだけ。
@@ -171,6 +177,8 @@ begin
   Bind(wl_proxy_get_id,        'wl_proxy_get_id');
   Bind(wl_proxy_get_class,     'wl_proxy_get_class');
   Bind(wl_proxy_set_queue,     'wl_proxy_set_queue');
+  Bind(wl_proxy_create_wrapper, 'wl_proxy_create_wrapper');
+  Bind(wl_proxy_wrapper_destroy,'wl_proxy_wrapper_destroy');
 
   Bind(wl_display_connect,         'wl_display_connect');
   Bind(wl_display_connect_to_fd,   'wl_display_connect_to_fd');
@@ -189,6 +197,8 @@ begin
   Bind(wl_display_create_queue,   'wl_display_create_queue');
   Bind(wl_display_dispatch_queue, 'wl_display_dispatch_queue');
   Bind(wl_display_roundtrip_queue,'wl_display_roundtrip_queue');
+  Bind(wl_display_dispatch_queue_pending, 'wl_display_dispatch_queue_pending');
+  Bind(wl_display_prepare_read_queue,     'wl_display_prepare_read_queue');
 end;
 
 function PMLWaylandClientLoad: Boolean;

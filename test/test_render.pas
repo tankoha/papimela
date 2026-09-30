@@ -488,13 +488,17 @@ begin
     Check(SameColor(Target.ReadPixel(22, 22), TPMLColor.Black),
       'ビューポートの 1 つ外は塗られない');
 
-    // Clear はクリップを無視してビューポート全体を塗る（SDL と同じ）。
+    // Clear はビューポートもクリップも無視して描画先の全体を塗る
+    // （SDL_RenderClear の契約。D-35）。
     R.ClipRect := TPMLRect.Make(2, 2, 3, 3);
     R.DrawColor := TPMLColor.Make(0, 0, 255, 255);
     R.Clear;
     R.Present;
     Check(SameColor(Target.ReadPixel(10, 10), TPMLColor.Make(0, 0, 255, 255)),
       'Clear はクリップ矩形を無視する');
+    Check(SameColor(Target.ReadPixel(0, 0), TPMLColor.Make(0, 0, 255, 255))
+      and SameColor(Target.ReadPixel(31, 31), TPMLColor.Make(0, 0, 255, 255)),
+      'Clear はビューポートも無視して全体を塗る');
 
     R.DrawColor := TPMLColor.Make(255, 0, 0, 255);
     R.FillRect(TPMLFRect.Make(0, 0, 12, 12));

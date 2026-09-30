@@ -21,8 +21,9 @@
       TPMLVideoSystem の破棄に任せてもよい
 
   NOT RESOLVED:
-    - GL / Vulkan / Renderer / Clipboard / Cursors は未実装（#33、#39、#41、#38）
-    - フルスクリーン、ウィンドウ位置、不透明度、グラブ、ヒットテストは
+    - GL / Vulkan / Clipboard は未実装（#33、#39、#38）。カーソルはシステム
+      カーソルの選択と表示切り替えだけ
+    - フルスクリーン、ウィンドウ位置、不透明度、ヒットテストは
       対応する能力と一緒に追加する
     - ディスプレイの hotplug は DisplaysChanged で列挙をやり直すだけ。
       個々の DisplayAdded / DisplayRemoved イベントは未実装
@@ -42,10 +43,23 @@ uses
   PaPiMeLa.Errors,
   PaPiMeLa.Core.Base,
   PaPiMeLa.Events,
+  PaPiMeLa.Pixels,
   PaPiMeLa.Video.Backend;
 
 type
   TPMLVideoSystem = class;
+  TPMLWindow = class;
+
+  { ウィンドウに付いて生き、ウィンドウより先に畳まれるもの（レンダラ）。
+
+    WHY:
+      レンダラはウィンドウのフレームバッファを借りて描く。ウィンドウが先に
+      消えると借りた領域が無くなる。TPMLOwnedObject.OwnerDestroying は
+      protected で、別のユニットのウィンドウからは呼べないため、この窓口を通す。
+      受け手は WindowDestroying の中で自分を Free してよい。 }
+  IPMLWindowDependent = interface
+    procedure WindowDestroying(AWindow: TPMLWindow);
+  end;
 
   TPMLWindowOptions = record
     Title        : String;
@@ -94,6 +108,7 @@ type
     FMouseGrab      : Boolean;
     FRelativeMouseMode: Boolean;
     FMouseRect      : TPMLRect;
+    FDependents     : array of IPMLWindowDependent;
     procedure SetTitle(const AValue: String);
     procedure SetMouseGrab(AValue: Boolean);
     procedure SetRelativeMouseMode(AValue: Boolean);
@@ -125,8 +140,20 @@ type
     procedure SetMaximumSize(AWidth, AHeight: Integer);
 
     // ソフトウェアフレームバッファ。SoftwareFramebuffer 能力が必要。
-    function  LockFramebuffer(out APixels: Pointer; out APitch: Integer): Boolean;
+    // 同じ大きさのあいだは同じ領域が返る。Update の後も中身は保たれる。
+    function  LockFramebuffer(out APixels: Pointer; out APitch: Integer): Boolean; overload;
+    function  LockFramebuffer(out APixels: Pointer; out APitch: Integer;
+      out AFormat: TPMLPixelFormat): Boolean; overload;
     procedure UpdateFramebuffer;
+    // UpdateFramebuffer を画面の更新に合わせる（1）か、合わせない（0）か。
+    // バックエンドが受け付けない値なら False。
+    function  SetFramebufferVSync(AInterval: Integer): Boolean;
+
+    // ウィンドウより先に畳まれるものを登録する。Destroy の最初に、登録と逆順で
+    // WindowDestroying が呼ばれる。受け手が自分で先に消えるときは RemoveDependent。
+    procedure AddDependent(const ADependent: IPMLWindowDependent);
+    procedure RemoveDependent(const ADependent: IPMLWindowDependent);
+    function  DependentCount: Integer;
 
     function  NativeHandles: TPMLNativeWindowHandles;
 
@@ -337,7 +364,17 @@ begin
 end;
 
 destructor TPMLWindow.Destroy;
+var
+  D: IPMLWindowDependent;
 begin
+  // 依存するもの（レンダラ）を先に畳む。受け手は WindowDestroying の中で
+  // RemoveDependent を呼ぶかもしれないので、先に一覧から外してから呼ぶ。
+  while Length(FDependents) > 0 do
+  begin
+    D := FDependents[High(FDependents)];
+    SetLength(FDependents, Length(FDependents) - 1);
+    D.WindowDestroying(Self);
+  end;
   if Assigned(FSystem) then
     FSystem.RemoveWindow(Self);
   FreeAndNil(FBackend);
@@ -504,14 +541,55 @@ begin
 end;
 
 function TPMLWindow.LockFramebuffer(out APixels: Pointer; out APitch: Integer): Boolean;
+var
+  Format: TPMLPixelFormat;
+begin
+  Result := LockFramebuffer(APixels, APitch, Format);
+end;
+
+function TPMLWindow.LockFramebuffer(out APixels: Pointer; out APitch: Integer;
+  out AFormat: TPMLPixelFormat): Boolean;
 begin
   FSystem.Require(TPMLVideoCapability.SoftwareFramebuffer, 'software framebuffer');
-  Result := FBackend.CreateFramebuffer(APixels, APitch);
+  Result := FBackend.CreateFramebuffer(APixels, APitch, AFormat);
 end;
 
 procedure TPMLWindow.UpdateFramebuffer;
 begin
   FBackend.UpdateFramebuffer;
+end;
+
+function TPMLWindow.SetFramebufferVSync(AInterval: Integer): Boolean;
+begin
+  FSystem.Require(TPMLVideoCapability.SoftwareFramebuffer, 'software framebuffer');
+  Result := FBackend.SetFramebufferVSync(AInterval);
+end;
+
+procedure TPMLWindow.AddDependent(const ADependent: IPMLWindowDependent);
+begin
+  if ADependent = nil then
+    Exit;
+  SetLength(FDependents, Length(FDependents) + 1);
+  FDependents[High(FDependents)] := ADependent;
+end;
+
+procedure TPMLWindow.RemoveDependent(const ADependent: IPMLWindowDependent);
+var
+  I, J: Integer;
+begin
+  for I := High(FDependents) downto 0 do
+    if FDependents[I] = ADependent then
+    begin
+      for J := I to High(FDependents) - 1 do
+        FDependents[J] := FDependents[J + 1];
+      SetLength(FDependents, Length(FDependents) - 1);
+      Exit;
+    end;
+end;
+
+function TPMLWindow.DependentCount: Integer;
+begin
+  Result := Length(FDependents);
 end;
 
 function TPMLWindow.NativeHandles: TPMLNativeWindowHandles;

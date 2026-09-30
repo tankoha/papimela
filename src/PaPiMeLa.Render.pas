@@ -32,13 +32,18 @@
       それを呼ぶだけ。ドライバは条件つきで既定へ戻すときにこれを直接呼べる
     - 直前のコマンドと種類と状態が同じで、積み荷が末尾で連続していれば、
       新しいコマンドを作らず直前のものを伸ばす（SDL のバッチと同じ）
+    - ウィンドウへ描くレンダラは CreateForWindow で作る。設計（§4.3）では
+      TPMLWindow.CreateRenderer だったが、それだと PaPiMeLa.Video が
+      PaPiMeLa.Render に依存し、描画を使わないアプリにもレンダラが付いてくる。
+      依存の向きを Render → Video の一方向に保つため、レンダラ側に置いた
+    - ウィンドウへ描くレンダラの所有者はウィンドウ。ウィンドウが先に消えると
+      IPMLWindowDependent 経由でレンダラも消える（テクスチャも一緒に消える）
 
   NOT RESOLVED:
     - 論理解像度（LogicalPresentation）、描画先テクスチャ（SetRenderTarget）、
       回転（RenderTextureRotated）、9-grid / タイル、DebugText、VSync は未実装
     - パレットと YUV のテクスチャは未実装
-    - ウィンドウを描画先にするレンダラ（TPMLWindow.CreateRenderer）は未実装。
-      今はサーフェスを描画先にするソフトウェアレンダラだけ
+    - ウィンドウへ描くドライバはソフトウェアだけ（GLES2 は #43）
 
   Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
   Copyright (C) 2026 papimela contributors
@@ -56,7 +61,8 @@ uses
   PaPiMeLa.Errors,
   PaPiMeLa.Core.Base,
   PaPiMeLa.Pixels,
-  PaPiMeLa.Surface;
+  PaPiMeLa.Surface,
+  PaPiMeLa.Video;
 
 type
   TPMLRenderer = class;
@@ -168,6 +174,8 @@ type
     // 描画先の画素を読む。呼び出し側が Free する。
     function  ReadPixels(const ARect: TPMLRect): TPMLSurface; virtual; abstract;
     procedure Present; virtual; abstract;
+    // Present を画面の更新に合わせるか。既定は 0（合わせない）だけを受け付ける。
+    function  SetVSync(AInterval: Integer): Boolean; virtual;
   end;
 
   TPMLTextureAccess = (Static, Streaming);
@@ -214,9 +222,11 @@ type
 
     描画の呼び出しはその場では描かず、コマンドとして積む。Present / Flush /
     ReadPixels のときにドライバがまとめて実行する。 }
-  TPMLRenderer = class(TPMLOwnedObject)
+  TPMLRenderer = class(TPMLOwnedObject, IPMLWindowDependent)
   strict private
     FDriver     : TPMLRenderDriver;
+    FWindow     : TPMLWindow;         // 描画先のウィンドウ（所有者）。無ければ nil
+    FVSync      : Integer;
     FQueue      : TPMLRenderQueue;
     FTextures   : TPMLTextures;
     FDrawColor  : TPMLFColor;
@@ -237,14 +247,23 @@ type
     function  GetDriverName: String;
     procedure QueueStateIfChanged;
     function  NewDrawCommand(AKind: TPMLRenderCommandKind): TPMLRenderCommand;
+    procedure SetVSync(AValue: Integer);
   private
     procedure RemoveTexture(ATexture: TPMLTexture);
+  protected
+    procedure DetachFromOwner; override;
+    // IPMLWindowDependent。ウィンドウが消える直前に呼ばれ、自分を Free する。
+    procedure WindowDestroying(AWindow: TPMLWindow);
   public
     { ドライバを受け取って所有する。 }
     constructor Create(ADriver: TPMLRenderDriver);
     { サーフェスを描画先にするソフトウェアレンダラを作る。
       サーフェスは借りるだけで、所有しない。 }
     class function CreateSoftware(ATarget: TPMLSurface): TPMLRenderer;
+    { ウィンドウへ描くレンダラを作る。所有者はウィンドウ。
+      ADriverName が空ならドライバを選ぶ。今あるのは 'software' だけで、
+      ウィンドウの SoftwareFramebuffer 能力が要る。 }
+    constructor CreateForWindow(AWindow: TPMLWindow; const ADriverName: String = '');
     destructor Destroy; override;
 
     function  CreateTexture(AFormat: TPMLPixelFormat; AAccess: TPMLTextureAccess;
@@ -282,6 +301,10 @@ type
     property ClipRect   : TPMLRect read FClipRect write SetClipRect;
     property ClipEnabled: Boolean read FClipEnabled write FClipEnabled;
     property Driver     : TPMLRenderDriver read FDriver;
+    property Window     : TPMLWindow read FWindow;
+    // 0 = Present は待たない、1 = 画面の更新を待つ。ドライバが受け付けなければ
+    // EPMLUnsupported。
+    property VSync      : Integer read FVSync write SetVSync;
     property DriverName : String read GetDriverName;
     property Queue      : TPMLRenderQueue read FQueue;
     property Textures   : TPMLTextures read FTextures;
@@ -402,6 +425,11 @@ end;
 function TPMLRenderDriver.SupportsBlendMode(AMode: TPMLBlendMode): Boolean;
 begin
   Result := True;
+end;
+
+function TPMLRenderDriver.SetVSync(AInterval: Integer): Boolean;
+begin
+  Result := AInterval = 0;
 end;
 
 { 矩形 1 つを三角形 2 枚にする。
@@ -602,6 +630,24 @@ begin
   FBlendMode := TPMLBlendMode.None;
 end;
 
+constructor TPMLRenderer.CreateForWindow(AWindow: TPMLWindow;
+  const ADriverName: String);
+begin
+  if AWindow = nil then
+    raise EPMLArgument.Create('CreateForWindow needs a window');
+  if (ADriverName <> '') and not SameText(ADriverName, 'software') then
+    raise EPMLUnsupported.CreateNative(
+      Format('render driver "%s" is not available', [ADriverName]), 0, 'render');
+  inherited Create(AWindow.ContextRef, AWindow);
+  FQueue := TPMLRenderQueue.Create;
+  FDrawColor := TPMLFColor.Make(0, 0, 0, 1);
+  FBlendMode := TPMLBlendMode.None;
+  FDriver := TPMLWindowSoftwareRenderDriver.Create(AWindow);
+  // 登録は最後。ここまでで例外が出たら Destroy が走るが、まだ登録していない。
+  FWindow := AWindow;
+  AWindow.AddDependent(Self);
+end;
+
 class function TPMLRenderer.CreateSoftware(ATarget: TPMLSurface): TPMLRenderer;
 begin
   if ATarget = nil then
@@ -621,6 +667,32 @@ begin
   FreeAndNil(FQueue);
   FreeAndNil(FDriver);
   inherited Destroy;
+end;
+
+procedure TPMLRenderer.DetachFromOwner;
+begin
+  // アプリが先に Free した。ウィンドウの一覧から外れる。
+  if FWindow <> nil then
+    FWindow.RemoveDependent(Self);
+  FWindow := nil;
+  inherited DetachFromOwner;
+end;
+
+procedure TPMLRenderer.WindowDestroying(AWindow: TPMLWindow);
+begin
+  // ウィンドウは一覧から外してから呼んでいる。
+  FWindow := nil;
+  OwnerDestroying;
+end;
+
+procedure TPMLRenderer.SetVSync(AValue: Integer);
+begin
+  if AValue = FVSync then
+    Exit;
+  if not FDriver.SetVSync(AValue) then
+    raise EPMLUnsupported.CreateNative(
+      Format('driver %s does not support VSync %d', [FDriver.Name, AValue]), 0, 'render');
+  FVSync := AValue;
 end;
 
 procedure TPMLRenderer.RemoveTexture(ATexture: TPMLTexture);

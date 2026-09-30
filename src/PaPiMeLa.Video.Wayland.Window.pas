@@ -2,16 +2,17 @@
   PaPiMeLa.Video.Wayland.Window — xdg-shell によるウィンドウと wl_shm バッファ
 
   Origin : partially ported from SDL (src/video/wayland/SDL_waylandwindow.c,
-           src/video/wayland/SDL_waylandshmbuffer.c)
+           src/video/wayland/SDL_waylandopengles.c)
            Scope: configure / ack_configure の順序制約、最初の configure より前に
-           バッファを attach してはならないという規約、shm プールの作り方。
+           バッファを attach してはならないという規約、フレームコールバックを
+           専用のイベントキューで待つ手順と、その待ちの上限（1/20 秒）。
            構造とクラス分割は本設計に従う。
            SDL revision: see docs/ORIGIN.md
   Design : docs/DESIGN.md §3.2、§11 #36、#39
 
   WHAT:
     wl_surface + xdg_surface + xdg_toplevel の状態機械と、wl_shm による
-    ソフトウェアフレームバッファ。
+    ソフトウェアフレームバッファ（VSync つき）。
 
   WHY:
     ウィンドウが可視になるには、最初の xdg_surface.configure に ack_configure で
@@ -23,14 +24,22 @@
       両方を継承できない。転送用の内部クラスを 2 つ置いて実体へ委譲する
     - サイズは xdg_toplevel.configure が 0x0 を送ることがある（コンポジタが
       アプリに任せる意味）。その場合は要求サイズを維持する
-    - shm ファイルは XDG_RUNTIME_DIR に作って即 unlink する。fd だけを
-      コンポジタへ渡す
+    - フレームバッファは 2 段にする。アプリが描くのはただのメモリ（FBacking）で、
+      UpdateFramebuffer が「コンポジタが読んでいない」shm バッファへ写して出す。
+      shm バッファへ直接描かせると、コンポジタが読んでいる最中に次の絵を
+      書き込むことになる。写す分の手間（1920x1080 で 8 MB）と引き換えに、
+      アプリから見た領域は大きさが変わるまで同じで、出した後も中身が残る
+    - shm バッファは最大 3 枚まで使い回す。release が来ていないものは使わない
+    - VSync は SDL の GLES 経路と同じく、前のフレームのフレームコールバックを
+      専用のイベントキューで待ってから次を出す。待つのは最大 1/20 秒。
+      隠れたウィンドウにはコールバックが来ないので、上限が無いと止まる
+    - 専用のキューを使うのは、待っている間に入力イベントを配送しないため。
+      読み出した入力イベントは既定のキューに残り、次の PumpEvents で配られる
 
   NOT RESOLVED:
     - フルスクリーン・最大化の往復、装飾（libdecor）、ヒットテスト、グラブは未実装
     - HiDPI は wl_surface.set_buffer_scale を呼んでいない（scale 1 固定）
-    - フレームコールバック（wl_surface.frame）による描画同期は未実装。
-      UpdateFramebuffer は即 commit する
+    - VSync は 0 と 1 だけ。2 以上（間引き）と -1（適応）は受け付けない
 
   Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
   Copyright (C) 2026 papimela contributors
@@ -43,12 +52,14 @@ unit PaPiMeLa.Video.Wayland.Window;
 interface
 
 uses
-  SysUtils, BaseUnix,
+  SysUtils, BaseUnix, Unix,
   PaPiMeLa.Types,
   PaPiMeLa.Errors,
   PaPiMeLa.Core.Base,
   PaPiMeLa.Video.Backend,
+  PaPiMeLa.Pixels,
   PaPiMeLa.Video.Wayland.Types,
+  PaPiMeLa.Video.Wayland.Shm,
   PaPiMeLa.Platform.Wayland.Client,
   PaPiMeLa.Platform.Wayland.Protocols.Wayland,
   PaPiMeLa.Platform.Wayland.Protocols.XdgShell,
@@ -75,6 +86,14 @@ type
     procedure close(AProxy: Pxdg_toplevel); override;
   end;
 
+  TPMLFrameCallbackForwarder = class(Twl_callback_listener)
+  strict private
+    FOwner: TPMLWaylandWindowBackend;
+  public
+    constructor Create(AOwner: TPMLWaylandWindowBackend);
+    procedure done(AProxy: Pwl_callback; callback_data: LongWord); override;
+  end;
+
   TPMLWaylandWindowBackend = class(TPMLWindowBackend)
   strict private
     FConn      : TPMLWaylandConnection;
@@ -91,25 +110,38 @@ type
     FVisible     : Boolean;
     FStates      : TPMLWindowFlags;
 
-    // shm フレームバッファ
-    FShmPool  : Pwl_shm_pool;
-    FBuffer   : Pwl_buffer;
-    FMap      : Pointer;
-    FMapSize  : PtrUInt;
-    FBufW, FBufH: Integer;
+    // フレームバッファ。アプリが描くのは FBacking、画面へ出すのは FShmBuffers。
+    FBacking   : Pointer;
+    FBackW, FBackH: Integer;
+    FShmBuffers: array of TPMLWaylandShmBuffer;
+    FVSync     : Integer;
+    FPresentCount: Integer;
+    FBuffersCreated: Integer;
+    FFrameTimeouts: Integer;
+
+    // フレームコールバックと release は専用のキューで受ける。
+    FQueue         : Pwl_event_queue;
+    FSurfaceWrapper: Pointer;         // FSurface を FQueue に向けた代理
+    FFrameCallback : Pwl_callback;    // nil = 待っているフレームは無い
+    FFrameFwd      : TPMLFrameCallbackForwarder;
 
     // ポインタ拘束の「要求」。実際に拘束を張るのはシート（TPMLWaylandPointerGrab）。
     FMouseGrabbed : Boolean;
     FRelativeMouse: Boolean;
     FMouseRect    : TPMLRect;
 
-    procedure DestroyBuffer;
-    function  EnsureBuffer: Boolean;
+    procedure DestroyBuffers;
+    procedure EnsureBacking;
+    function  PumpPrivateQueue(ATimeoutMs: Integer): Boolean;
+    procedure WaitForFrame;
+    function  AcquireShmBuffer: TPMLWaylandShmBuffer;
+    procedure PresentBacking(AWaitForFrame: Boolean);
     procedure PresentFirstFrame;
   private
     procedure HandleSurfaceConfigure(ASerial: LongWord);
     procedure HandleToplevelConfigure(AWidth, AHeight: Integer; AStates: Pwl_array);
     procedure HandleClose;
+    procedure HandleFrameDone(ACallback: Pwl_callback);
   public
     constructor Create(AContextRef: TObject; AOwner: TPMLObject;
       AConn: TPMLWaylandConnection; ASink: IPMLVideoSink;
@@ -130,12 +162,20 @@ type
     procedure SetMouseRect(const ARect: TPMLRect); override;
     procedure SetRelativeMouseMode(AEnabled: Boolean); override;
     procedure GetSizeInPixels(out AWidth, AHeight: Integer); override;
-    function  CreateFramebuffer(out APixels: Pointer; out APitch: Integer): Boolean; override;
+    function  CreateFramebuffer(out APixels: Pointer; out APitch: Integer;
+      out AFormat: TPMLPixelFormat): Boolean; override;
     procedure UpdateFramebuffer; override;
     procedure DestroyFramebuffer; override;
+    function  SetFramebufferVSync(AInterval: Integer): Boolean; override;
     function  NativeHandles: TPMLNativeWindowHandles; override;
 
     property Configured: Boolean read FConfigured;
+
+    // 検査・デモ用の数。出した回数、作った shm バッファの累計、VSync の待ちが
+    // 上限で打ち切られた回数。
+    property PresentCount: Integer read FPresentCount;
+    property BuffersCreated: Integer read FBuffersCreated;
+    property FrameTimeouts: Integer read FFrameTimeouts;
 
     // シートが拘束を張るために読む。
     property Surface: Pwl_surface read FSurface;
@@ -176,6 +216,17 @@ begin
   FOwner.HandleClose;
 end;
 
+constructor TPMLFrameCallbackForwarder.Create(AOwner: TPMLWaylandWindowBackend);
+begin
+  inherited Create;
+  FOwner := AOwner;
+end;
+
+procedure TPMLFrameCallbackForwarder.done(AProxy: Pwl_callback; callback_data: LongWord);
+begin
+  FOwner.HandleFrameDone(AProxy);
+end;
+
 { TPMLWaylandWindowBackend }
 
 constructor TPMLWaylandWindowBackend.Create(AContextRef: TObject; AOwner: TPMLObject;
@@ -198,6 +249,13 @@ begin
   // Seat がサーフェスからウィンドウを引けるようにする。wl_surface には
   // リスナーを付けていないので user_data は空いている。
   wl_proxy_set_user_data(Pwl_proxy(FSurface), Self);
+
+  // フレームコールバックと release を受ける専用のキュー。wl_surface.frame は
+  // この代理から出すので、done は既定のキューではなくここへ届く。
+  FQueue := wl_display_create_queue(FConn.Display);
+  FSurfaceWrapper := wl_proxy_create_wrapper(FSurface);
+  wl_proxy_set_queue(Pwl_proxy(FSurfaceWrapper), FQueue);
+  FFrameFwd := TPMLFrameCallbackForwarder.Create(Self);
 
   FXdgSurface := xdg_wm_base_get_xdg_surface(FConn.WmBase, FSurface);
   FXsFwd := TPMLXdgSurfaceForwarder.Create(Self);
@@ -232,7 +290,12 @@ end;
 
 destructor TPMLWaylandWindowBackend.Destroy;
 begin
-  DestroyBuffer;
+  DestroyFramebuffer;
+  if FFrameCallback <> nil then
+    wl_proxy_destroy(Pwl_proxy(FFrameCallback));
+  FFrameCallback := nil;
+  if FSurfaceWrapper <> nil then
+    wl_proxy_wrapper_destroy(FSurfaceWrapper);
   if FDecoration <> nil then
     zxdg_toplevel_decoration_v1_destroy(FDecoration);
   if FToplevel <> nil then
@@ -245,6 +308,11 @@ begin
     wl_display_flush(FConn.Display);
   FreeAndNil(FXsFwd);
   FreeAndNil(FTlFwd);
+  FreeAndNil(FFrameFwd);
+  // キューは、そこへ向いた代理（バッファ・コールバック・代理のサーフェス）を
+  // すべて壊してから壊す。
+  if FQueue <> nil then
+    wl_event_queue_destroy(FQueue);
   FSink := nil;
   inherited Destroy;
 end;
@@ -310,91 +378,199 @@ begin
     FSink.WindowCloseRequested(FWindowID);
 end;
 
-{ ---- wl_shm フレームバッファ ---- }
+{ ---- フレームバッファ ---- }
 
-procedure TPMLWaylandWindowBackend.DestroyBuffer;
+procedure TPMLWaylandWindowBackend.DestroyBuffers;
+var
+  I: Integer;
 begin
-  if FBuffer <> nil then
-  begin
-    wl_buffer_destroy(FBuffer);
-    FBuffer := nil;
-  end;
-  if FShmPool <> nil then
-  begin
-    wl_shm_pool_destroy(FShmPool);
-    FShmPool := nil;
-  end;
-  if (FMap <> nil) and (FMapSize > 0) then
-  begin
-    Fpmunmap(FMap, FMapSize);
-    FMap := nil;
-    FMapSize := 0;
-  end;
-  FBufW := 0;
-  FBufH := 0;
+  for I := 0 to High(FShmBuffers) do
+    FShmBuffers[I].Free;
+  SetLength(FShmBuffers, 0);
 end;
 
-function TPMLWaylandWindowBackend.EnsureBuffer: Boolean;
+procedure TPMLWaylandWindowBackend.EnsureBacking;
 var
-  Stride, Size: PtrUInt;
-  Dir, Path: String;
-  FD: cint;
-  Attempt: Integer;
+  Size: PtrUInt;
 begin
-  Result := False;
-  if FConn.Shm = nil then
+  if (FBacking <> nil) and (FBackW = FWidth) and (FBackH = FHeight) then
     Exit;
-  if (FBuffer <> nil) and (FBufW = FWidth) and (FBufH = FHeight) then
-    Exit(True);
-
-  DestroyBuffer;
-  Stride := PtrUInt(FWidth) * 4;
-  Size := Stride * PtrUInt(FHeight);
+  if FBacking <> nil then
+    FreeMem(FBacking);
+  FBacking := nil;
+  FBackW := 0;
+  FBackH := 0;
+  Size := PtrUInt(FWidth) * PtrUInt(FHeight) * 4;
   if Size = 0 then
     Exit;
+  FBacking := AllocMem(Size);   // 0 で埋まる（XRGB の黒）
+  FBackW := FWidth;
+  FBackH := FHeight;
+end;
 
-  Dir := GetEnvironmentVariable('XDG_RUNTIME_DIR');
-  if Dir = '' then
-    Dir := '/tmp';
+{ 専用キューの届いている分を配り、無ければ最大 ATimeoutMs だけ待って読む。
+  何か配ったら True。
 
-  // 作って即 unlink し、fd だけをコンポジタへ渡す。
-  FD := -1;
-  for Attempt := 0 to 15 do
+  PORT-NOTE: SDL の Wayland_GLES_SwapWindow の待ちループの 1 周分。
+  prepare_read_queue が 0 以外なら、キューにもう届いているので配るだけでよい。
+  0 なら「読む権利」を取ったので、read_events か cancel_read のどちらかを
+  必ず呼ぶ。 }
+function TPMLWaylandWindowBackend.PumpPrivateQueue(ATimeoutMs: Integer): Boolean;
+var
+  PFD: TPollFd;
+begin
+  wl_display_flush(FConn.Display);
+  if wl_display_prepare_read_queue(FConn.Display, FQueue) <> 0 then
   begin
-    Path := Format('%s/papimela-shm-%d-%d', [Dir, FpGetpid, Random(1000000)]);
-    FD := FpOpen(PAnsiChar(Path), O_RDWR or O_CREAT or O_EXCL, &600);
-    if FD >= 0 then
+    wl_display_dispatch_queue_pending(FConn.Display, FQueue);
+    Exit(True);
+  end;
+  PFD.fd := wl_display_get_fd(FConn.Display);
+  PFD.events := POLLIN;
+  PFD.revents := 0;
+  if (fppoll(@PFD, 1, ATimeoutMs) > 0) and ((PFD.revents and POLLIN) <> 0) then
+  begin
+    // 他のキュー宛ての分（入力など）も読まれるが、それぞれのキューに残る。
+    wl_display_read_events(FConn.Display);
+    Result := wl_display_dispatch_queue_pending(FConn.Display, FQueue) > 0;
+  end
+  else
+  begin
+    wl_display_cancel_read(FConn.Display);
+    Result := False;
+  end;
+end;
+
+{ 前に出したフレームのコールバックを待つ。最大 1/20 秒。
+
+  PORT-NOTE: 上限は SDL と同じ（「止められても 20Hz では進む」）。打ち切ったら
+  待っていたコールバックは捨てる。隠れたウィンドウでは来ないままなので、
+  残しておくと次からも毎回上限まで待つことになる。 }
+procedure TPMLWaylandWindowBackend.WaitForFrame;
+var
+  Deadline, Now: QWord;
+begin
+  if FFrameCallback = nil then
+    Exit;
+  Deadline := GetTickCount64 + 50;
+  while FFrameCallback <> nil do
+  begin
+    Now := GetTickCount64;
+    if Now >= Deadline then
       Break;
+    PumpPrivateQueue(Integer(Deadline - Now));
   end;
-  if FD < 0 then
-    raise EPMLVideoError.CreateNative('failed to create a shm file', FpGetErrno, 'wayland');
-  FpUnlink(PAnsiChar(Path));
-
-  if FpFtruncate(FD, Size) <> 0 then
+  if FFrameCallback <> nil then
   begin
-    FpClose(FD);
-    raise EPMLVideoError.CreateNative('ftruncate on the shm file failed',
-      FpGetErrno, 'wayland');
+    wl_proxy_destroy(Pwl_proxy(FFrameCallback));
+    FFrameCallback := nil;
+    Inc(FFrameTimeouts);
   end;
+end;
 
-  FMap := Fpmmap(nil, Size, PROT_READ or PROT_WRITE, MAP_SHARED, FD, 0);
-  if (FMap = nil) or (FMap = Pointer(-1)) then
+procedure TPMLWaylandWindowBackend.HandleFrameDone(ACallback: Pwl_callback);
+begin
+  if ACallback <> FFrameCallback then
+    Exit;
+  wl_proxy_destroy(Pwl_proxy(FFrameCallback));
+  FFrameCallback := nil;
+end;
+
+{ コンポジタが読んでいない、今の大きさの shm バッファを 1 枚返す。
+
+  使い回すのは最大 3 枚（表示中・次に表示・描き込み中）。全部読まれている
+  ときは release を最大 1/20 秒待ち、それでも来なければ 1 枚足す。
+  足すのは 6 枚までで、それを超えたら nil（このフレームは出さない）。 }
+function TPMLWaylandWindowBackend.AcquireShmBuffer: TPMLWaylandShmBuffer;
+const
+  PreferredCount = 3;
+  MaxCount = 6;
+var
+  I, J: Integer;
+  Deadline, Now: QWord;
+
+  function FindFree: TPMLWaylandShmBuffer;
+  var
+    K: Integer;
   begin
-    FMap := nil;
-    FpClose(FD);
-    raise EPMLVideoError.CreateNative('mmap on the shm file failed',
-      FpGetErrno, 'wayland');
+    for K := 0 to High(FShmBuffers) do
+      if not FShmBuffers[K].Busy then
+        Exit(FShmBuffers[K]);
+    Result := nil;
   end;
-  FMapSize := Size;
 
-  FShmPool := wl_shm_create_pool(FConn.Shm, FD, LongInt(Size));
-  FBuffer := wl_shm_pool_create_buffer(FShmPool, 0, FWidth, FHeight,
-    LongInt(Stride), WL_SHM_FORMAT_XRGB8888);
-  FpClose(FD);   // プールが fd を保持するので閉じてよい
+  function AddBuffer: TPMLWaylandShmBuffer;
+  begin
+    Result := TPMLWaylandShmBuffer.Create(FConn.Shm, FBackW, FBackH, FQueue);
+    SetLength(FShmBuffers, Length(FShmBuffers) + 1);
+    FShmBuffers[High(FShmBuffers)] := Result;
+    Inc(FBuffersCreated);
+  end;
 
-  FBufW := FWidth;
-  FBufH := FHeight;
-  Result := FBuffer <> nil;
+begin
+  // 届いている release を先に配る。
+  PumpPrivateQueue(0);
+
+  // 大きさの違うものは、読まれていなければ捨てる。読まれているものは
+  // release が来てから捨てる。
+  for I := High(FShmBuffers) downto 0 do
+    if (not FShmBuffers[I].Busy)
+    and ((FShmBuffers[I].Width <> FBackW) or (FShmBuffers[I].Height <> FBackH)) then
+    begin
+      FShmBuffers[I].Free;
+      for J := I to High(FShmBuffers) - 1 do
+        FShmBuffers[J] := FShmBuffers[J + 1];
+      SetLength(FShmBuffers, Length(FShmBuffers) - 1);
+    end;
+
+  Result := FindFree;
+  if Result <> nil then
+    Exit;
+  if Length(FShmBuffers) < PreferredCount then
+    Exit(AddBuffer);
+
+  Deadline := GetTickCount64 + 50;
+  repeat
+    Now := GetTickCount64;
+    if Now >= Deadline then
+      Break;
+    PumpPrivateQueue(Integer(Deadline - Now));
+    Result := FindFree;
+  until Result <> nil;
+  if Result <> nil then
+    Exit;
+  if Length(FShmBuffers) < MaxCount then
+    Exit(AddBuffer);
+  Result := nil;
+end;
+
+{ FBacking の中身を shm バッファへ写して出す。 }
+procedure TPMLWaylandWindowBackend.PresentBacking(AWaitForFrame: Boolean);
+var
+  Buf: TPMLWaylandShmBuffer;
+begin
+  if (FBacking = nil) or (FConn.Shm = nil) then
+    Exit;
+  if AWaitForFrame then
+    WaitForFrame;
+  Buf := AcquireShmBuffer;
+  if Buf = nil then
+    Exit;
+  // 大きさが同じなので行の幅も同じ。1 回で写せる。
+  Move(FBacking^, Buf.Pixels^, PtrUInt(Buf.Stride) * PtrUInt(Buf.Height));
+  Buf.MarkBusy;
+  wl_surface_attach(FSurface, Buf.Buffer, 0, 0);
+  wl_surface_damage_buffer(FSurface, 0, 0, Buf.Width, Buf.Height);
+  // 次のフレームの合図を頼む。代理は FQueue を向いているので、done は
+  // 専用キューへ届く。まだ前の合図を待っているなら頼み直さない。
+  if FFrameCallback = nil then
+  begin
+    FFrameCallback := wl_surface_frame(Pwl_surface(FSurfaceWrapper));
+    wl_callback_add_listener_object(FFrameCallback, FFrameFwd);
+  end;
+  wl_surface_commit(FSurface);
+  wl_display_flush(FConn.Display);
+  Inc(FPresentCount);
 end;
 
 // 最初の configure に応答した直後に 1 枚出す。これでサーフェスがマップされる。
@@ -402,40 +578,48 @@ procedure TPMLWaylandWindowBackend.PresentFirstFrame;
 begin
   if not FVisible then
     Exit;
-  if not EnsureBuffer then
-    Exit;
-  FillChar(FMap^, FMapSize, 0);
-  wl_surface_attach(FSurface, FBuffer, 0, 0);
-  wl_surface_damage_buffer(FSurface, 0, 0, FWidth, FHeight);
-  wl_surface_commit(FSurface);
-  wl_display_flush(FConn.Display);
+  EnsureBacking;
+  PresentBacking(False);
 end;
 
 function TPMLWaylandWindowBackend.CreateFramebuffer(out APixels: Pointer;
-  out APitch: Integer): Boolean;
+  out APitch: Integer; out AFormat: TPMLPixelFormat): Boolean;
 begin
   APixels := nil;
   APitch := 0;
-  if not EnsureBuffer then
+  AFormat := PML_PIXELFORMAT_XRGB8888;
+  if FConn.Shm = nil then
     Exit(False);
-  APixels := FMap;
-  APitch := FWidth * 4;
+  EnsureBacking;
+  if FBacking = nil then
+    Exit(False);
+  APixels := FBacking;
+  APitch := FBackW * 4;
   Result := True;
 end;
 
 procedure TPMLWaylandWindowBackend.UpdateFramebuffer;
 begin
-  if (FBuffer = nil) or not FConfigured then
+  if not (FConfigured and FVisible) then
     Exit;
-  wl_surface_attach(FSurface, FBuffer, 0, 0);
-  wl_surface_damage_buffer(FSurface, 0, 0, FWidth, FHeight);
-  wl_surface_commit(FSurface);
-  wl_display_flush(FConn.Display);
+  PresentBacking(FVSync > 0);
 end;
 
 procedure TPMLWaylandWindowBackend.DestroyFramebuffer;
 begin
-  DestroyBuffer;
+  DestroyBuffers;
+  if FBacking <> nil then
+    FreeMem(FBacking);
+  FBacking := nil;
+  FBackW := 0;
+  FBackH := 0;
+end;
+
+function TPMLWaylandWindowBackend.SetFramebufferVSync(AInterval: Integer): Boolean;
+begin
+  Result := (AInterval = 0) or (AInterval = 1);
+  if Result then
+    FVSync := AInterval;
 end;
 
 { ---- ウィンドウ操作 ---- }
@@ -483,6 +667,12 @@ end;
 procedure TPMLWaylandWindowBackend.Hide;
 begin
   FVisible := False;
+  // アンマップしたサーフェスにはフレームコールバックが来ない。待ちを捨てておく。
+  if FFrameCallback <> nil then
+  begin
+    wl_proxy_destroy(Pwl_proxy(FFrameCallback));
+    FFrameCallback := nil;
+  end;
   // nil バッファを attach するとサーフェスはアンマップされる。
   wl_surface_attach(FSurface, nil, 0, 0);
   wl_surface_commit(FSurface);

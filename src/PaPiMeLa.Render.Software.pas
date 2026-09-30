@@ -4,13 +4,15 @@
   Origin : ported from SDL (src/render/software/SDL_render_sw.c,
            SDL_drawline.c, SDL_drawpoint.c, SDL_blendfillrect.c)
            Scope: コマンドの実行順、ビューポートとクリップ矩形の重ね方、
-           ブレゼンハムの線の端点の扱い、合成つきの矩形塗り。
+           ブレゼンハムの線の端点の扱い、合成つきの矩形塗り、
+           ウィンドウの大きさが変わったら描画先を取り直すこと。
            SDL revision: see docs/ORIGIN.md
   Design : docs/DESIGN.md §4.3、§11 #42
 
   WHAT:
     TPMLRenderDriver の最初の実装。描画先は TPMLSurface で、テクスチャの中身も
-    TPMLSurface として持つ。
+    TPMLSurface として持つ。TPMLWindowSoftwareRenderDriver はその派生で、
+    ウィンドウのフレームバッファへ描いて Present で画面へ出す。
 
   WHY:
     GL が無くても描けるレンダラが 1 つ要る。ヘッドレスの検査はここで描いて
@@ -21,9 +23,11 @@
     - 描画座標はビューポートの原点からの相対。クリップ矩形もビューポートからの
       相対で、実際に塗る範囲は「ビューポート ∩ クリップ矩形」になる（SDL と同じ）
     - 描画先サーフェスは借りるだけで、所有しない
+    - ウィンドウへ描くときの描画先は、ウィンドウのフレームバッファを借りた
+      サーフェス。VSync はウィンドウのフレームバッファの VSync に任せる
+      （SDL の SW_SetVSync → SDL_SetWindowSurfaceVSync と同じ）
 
   NOT RESOLVED:
-    - ウィンドウのフレームバッファへ出す経路は無い。Present は何もしない
     - 回転転送（RenderTextureRotated）は未実装
 
   Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
@@ -44,6 +48,7 @@ uses
   PaPiMeLa.Pixels,
   PaPiMeLa.Surface,
   PaPiMeLa.Surface.Blit,
+  PaPiMeLa.Video,
   PaPiMeLa.Render;
 
 type
@@ -61,6 +66,10 @@ type
     procedure ExecCopy(AQueue: TPMLRenderQueue; const ACmd: TPMLRenderCommand);
     procedure ExecGeometry(AQueue: TPMLRenderQueue; const ACmd: TPMLRenderCommand);
     procedure PutPixel(AX, AY: Integer; const AColor: TPMLColor; ABlend: TPMLBlendMode);
+  protected
+    { 描画先を差し替える。ウィンドウの大きさが変わったときに派生クラスが呼ぶ。
+      ビューポートは次の実行で SetViewport コマンドが入れ直す。 }
+    procedure SetTarget(ATarget: TPMLSurface);
   public
     constructor Create(ATarget: TPMLSurface);
 
@@ -90,6 +99,34 @@ type
     property Target: TPMLSurface read FTarget;
   end;
 
+  { ウィンドウのフレームバッファへ描くソフトウェアドライバ。
+
+    PORT-NOTE: SDL_render_sw.c の SW_ActivateRenderer / SW_WindowEvent /
+    SW_RenderPresent にあたる。SDL は PIXEL_SIZE_CHANGED のイベントで描画先を
+    捨て、次の描画でウィンドウのサーフェスを取り直す。papimela は描くたびに
+    フレームバッファを取り、領域か大きさが変わっていたら描画先を差し替える。
+    イベントを見逃しても、アプリがイベントを回していなくても、古い領域へ
+    描くことが起きない。
+
+    描画そのものは基底クラスのまま。違うのは描画先の出どころと Present だけ
+    なので、継承で足りる。 }
+  TPMLWindowSoftwareRenderDriver = class(TPMLSoftwareRenderDriver)
+  strict private
+    FWindow: TPMLWindow;      // 借りている。レンダラはウィンドウより先に畳まれる
+    FFrame : TPMLSurface;     // フレームバッファを借りたサーフェス。これは所有する
+    class function WrapFramebuffer(AWindow: TPMLWindow): TPMLSurface; static;
+    procedure Activate;
+  public
+    constructor Create(AWindow: TPMLWindow);
+    destructor Destroy; override;
+
+    function  GetOutputSize(out AWidth, AHeight: Integer): Boolean; override;
+    procedure RunCommandQueue(AQueue: TPMLRenderQueue); override;
+    function  ReadPixels(const ARect: TPMLRect): TPMLSurface; override;
+    procedure Present; override;
+    function  SetVSync(AInterval: Integer): Boolean; override;
+  end;
+
 implementation
 
 uses
@@ -108,6 +145,12 @@ end;
 constructor TPMLSoftwareRenderDriver.Create(ATarget: TPMLSurface);
 begin
   inherited Create(nil, nil);
+  FTarget := ATarget;
+  FViewport := TPMLRect.Make(0, 0, ATarget.Width, ATarget.Height);
+end;
+
+procedure TPMLSoftwareRenderDriver.SetTarget(ATarget: TPMLSurface);
+begin
   FTarget := ATarget;
   FViewport := TPMLRect.Make(0, 0, ATarget.Width, ATarget.Height);
 end;
@@ -269,13 +312,19 @@ begin
 end;
 
 { 画面全体を塗る。クリップ矩形は無視し、ビューポートだけに従う（SDL と同じ）。 }
+{ 描画先の全体を塗る。ビューポートもクリップ矩形も無視する。
+
+  PORT-NOTE: SDL_RenderClear の契約（SDL_render.h）で、SDL_render_sw.c も
+  クリップを外して矩形 NULL（全体）で塗る。最初の版はビューポートの内側だけを
+  塗っていた（D-35）。 }
 procedure TPMLSoftwareRenderDriver.ExecClear(const ACmd: TPMLRenderCommand);
 var
-  Saved: TPMLRect;
+  Saved, Full: TPMLRect;
 begin
   Saved := FTarget.ClipRect;
-  FTarget.ClipRect := FViewport;
-  PMLFillRect(FTarget, FViewport, ACmd.Color.ToColor);
+  Full := TPMLRect.Make(0, 0, FTarget.Width, FTarget.Height);
+  FTarget.ClipRect := Full;
+  PMLFillRect(FTarget, Full, ACmd.Color.ToColor);
   FTarget.ClipRect := Saved;
 end;
 
@@ -463,6 +512,86 @@ end;
 // 描画先はサーフェスなので、見せる先が無い。
 procedure TPMLSoftwareRenderDriver.Present;
 begin
+end;
+
+{ TPMLWindowSoftwareRenderDriver }
+
+class function TPMLWindowSoftwareRenderDriver.WrapFramebuffer(
+  AWindow: TPMLWindow): TPMLSurface;
+var
+  P: Pointer;
+  Pitch: Integer;
+  Format: TPMLPixelFormat;
+  Size: TPMLRect;
+begin
+  if not AWindow.LockFramebuffer(P, Pitch, Format) then
+    raise EPMLRenderError.Create('the window framebuffer is not available');
+  Size := AWindow.SizeInPixels;
+  Result := TPMLSurface.CreateFrom(P, Size.W, Size.H, Pitch, Format);
+end;
+
+constructor TPMLWindowSoftwareRenderDriver.Create(AWindow: TPMLWindow);
+begin
+  FWindow := AWindow;
+  FFrame := WrapFramebuffer(AWindow);
+  inherited Create(FFrame);
+end;
+
+destructor TPMLWindowSoftwareRenderDriver.Destroy;
+begin
+  FreeAndNil(FFrame);
+  inherited Destroy;
+end;
+
+{ 今のフレームバッファを描画先にする。領域・大きさ・行の幅のどれかが
+  変わっていたら借り直す。変わっていなければ何もしない。 }
+procedure TPMLWindowSoftwareRenderDriver.Activate;
+var
+  P: Pointer;
+  Pitch: Integer;
+  Format: TPMLPixelFormat;
+  Size: TPMLRect;
+  Fresh: TPMLSurface;
+begin
+  if not FWindow.LockFramebuffer(P, Pitch, Format) then
+    raise EPMLRenderError.Create('the window framebuffer is not available');
+  Size := FWindow.SizeInPixels;
+  if (P = FFrame.Pixels) and (Pitch = FFrame.Pitch) and (Format = FFrame.Format)
+  and (Size.W = FFrame.Width) and (Size.H = FFrame.Height) then
+    Exit;
+  Fresh := TPMLSurface.CreateFrom(P, Size.W, Size.H, Pitch, Format);
+  SetTarget(Fresh);
+  FFrame.Free;
+  FFrame := Fresh;
+end;
+
+function TPMLWindowSoftwareRenderDriver.GetOutputSize(out AWidth,
+  AHeight: Integer): Boolean;
+begin
+  Activate;
+  Result := inherited GetOutputSize(AWidth, AHeight);
+end;
+
+procedure TPMLWindowSoftwareRenderDriver.RunCommandQueue(AQueue: TPMLRenderQueue);
+begin
+  Activate;
+  inherited RunCommandQueue(AQueue);
+end;
+
+function TPMLWindowSoftwareRenderDriver.ReadPixels(const ARect: TPMLRect): TPMLSurface;
+begin
+  Activate;
+  Result := inherited ReadPixels(ARect);
+end;
+
+procedure TPMLWindowSoftwareRenderDriver.Present;
+begin
+  FWindow.UpdateFramebuffer;
+end;
+
+function TPMLWindowSoftwareRenderDriver.SetVSync(AInterval: Integer): Boolean;
+begin
+  Result := FWindow.SetFramebufferVSync(AInterval);
 end;
 
 end.
