@@ -67,6 +67,8 @@ begin
     WriteLn('  [FAIL] ', ALabel);
     Inc(Failures);
   end;
+  // パイプへの出力は FPC がためるので、止まったときに場所が分かるよう毎回吐き出す。
+  Flush(Output);
 end;
 
 function FR(AX, AY, AW, AH: Single): TPMLFRect; inline;
@@ -293,6 +295,8 @@ var
   Target, GS, CS: TPMLSurface;
   X, Y, D, MaxD, Bad, FirstX, FirstY: Integer;
 begin
+  WriteLn('  ... ', AName);
+  Flush(Output);
   Target := TPMLSurface.Create(W, H, PML_PIXELFORMAT_ARGB8888);
   C := TPMLRenderer.CreateSoftware(Target);
   G := NewGPU;
@@ -364,6 +368,7 @@ var
   M: TPMLBlendMode;
 begin
   WriteLn('1. オフスクリーン（ソフトウェアのドライバと比べる）');
+  Flush(Output);
   try
     G := NewGPU;
   except

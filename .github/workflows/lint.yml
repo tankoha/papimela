@@ -11,6 +11,9 @@ jobs:
   rawpaco:
     name: rawpaco (激辛モード)
     runs-on: ubuntu-latest
+    # どこかで止まっても 6 時間待たされないように（GLES2 の検査が CI で 4 時間半
+    # 止まったことがある）。
+    timeout-minutes: 60
     steps:
       - name: Checkout papimela
         uses: actions/checkout@v7
@@ -94,6 +97,10 @@ jobs:
       # GPU のドライバをソフトウェアのドライバと画素で比べる。CI に GPU は無いので
       # Mesa の llvmpipe で描く。ウィンドウの区間は Wayland が無いので飛ばされる。
       - name: Compare the GLES2 render driver with the software one (llvmpipe)
+        timeout-minutes: 5
+        env:
+          # Mesa の EGL の記録を stderr へ出す。止まった場所を調べるため。
+          EGL_LOG_LEVEL: debug
         run: |
           set -eu
           fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_render_gles2 test/test_render_gles2.pas
