@@ -31,3 +31,4 @@ test/test_pixels
 test/test_io
 test/test_surface
 test/test_blit
+test/test_render

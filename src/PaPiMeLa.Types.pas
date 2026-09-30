@@ -87,6 +87,25 @@ type
   // 拡大縮小の補間。
   TPMLScaleMode = (Nearest, Linear);
 
+
+  { 浮動小数点の点と矩形。レンダラの座標はすべてこちら。
+
+    整数の TPMLRect はサーフェスの画素位置に使う。レンダラは拡大縮小と
+    論理解像度を挟むので、描く前の座標は小数を持つ。 }
+  TPMLFPoint = record
+    X, Y: Single;
+    class function Make(AX, AY: Single): TPMLFPoint; static; inline;
+  end;
+  TPMLFPoints = array of TPMLFPoint;
+
+  TPMLFRect = record
+    X, Y, W, H: Single;
+    class function Make(AX, AY, AW, AH: Single): TPMLFRect; static; inline;
+    class function FromRect(const ARect: TPMLRect): TPMLFRect; static; inline;
+    function IsEmpty: Boolean; inline;
+  end;
+  TPMLFRects = array of TPMLFRect;
+
   TPMLKeyModifier = (Shift, Ctrl, Alt, Super, CapsLock, NumLock);
   TPMLKeyModifiers = set of TPMLKeyModifier;
 
@@ -289,6 +308,38 @@ begin
   Result.G := Clamp8(G);
   Result.B := Clamp8(B);
   Result.A := Clamp8(A);
+end;
+
+
+{ TPMLFPoint }
+
+class function TPMLFPoint.Make(AX, AY: Single): TPMLFPoint;
+begin
+  Result.X := AX;
+  Result.Y := AY;
+end;
+
+{ TPMLFRect }
+
+class function TPMLFRect.Make(AX, AY, AW, AH: Single): TPMLFRect;
+begin
+  Result.X := AX;
+  Result.Y := AY;
+  Result.W := AW;
+  Result.H := AH;
+end;
+
+class function TPMLFRect.FromRect(const ARect: TPMLRect): TPMLFRect;
+begin
+  Result.X := ARect.X;
+  Result.Y := ARect.Y;
+  Result.W := ARect.W;
+  Result.H := ARect.H;
+end;
+
+function TPMLFRect.IsEmpty: Boolean;
+begin
+  Result := (W <= 0) or (H <= 0);
 end;
 
 end.

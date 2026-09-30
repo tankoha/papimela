@@ -1262,8 +1262,8 @@ wayland-scanner の Pascal 版。C の `wayland-scanner` が生成する `*-clie
 | 38 | `PaPiMeLa.Video.Wayland.Data` | `SDL_waylanddatamanager.c` (847)、`SDL_waylandclipboard.c` (217) | 中 | 35 | P2 | 移植 | Medium | Sonnet | `TPMLClipboardBackend` 実装、primary selection、D&D 受信（パイプ読み取り） |
 | 39 | `PaPiMeLa.Video.Wayland.EGL`、`.Wayland.Shm` | `SDL_waylandopengles.c` (228)、`SDL_waylandshmbuffer.c` (214) | 小 | 33, 35 | P1 | 移植 | Medium | Sonnet | `TPMLEGLBackend` 派生 4 メソッド、`wl_shm` バッファプール（カーソル・ソフトウェアレンダラの表示用） |
 | 40 | `PaPiMeLa.Video.Wayland.MessageBox` | `SDL_waylandmessagebox.c` (42)、`dialog/unix/SDL_zenitymessagebox.c` | 小 | 35 | P3 | 移植 | Low | qwen | zenity 子プロセス。`TProcess`（FCL）を使う |
-| 41 | `PaPiMeLa.Render.Backend`、`PaPiMeLa.Render`（公開 API） | `render/SDL_render.c` (6372)、`SDL_sysrender.h` | 大 | 32, 28 | P1 | 移植 | **High** | Opus | `TPMLRenderDriver`（35 メソッド）、コマンドキューとバッチ、論理プレゼンテーション、`TPMLTexture` 所有。全レンダラドライバの土台 |
-| 42 | `PaPiMeLa.Render.Software` | `render/software/` (5175)、`SDL_yuv_sw.c` (486) | 大 | 41, 29 | P1 | 移植 | Low | qwen | 三角形ラスタライザ、回転ブリット。#41 の最初のドライバ実装例 |
+| 41 | `PaPiMeLa.Render`（公開 API とドライバの抽象。設計時の `.Render.Backend` はここへ統合） | `render/SDL_render.c` (6372)、`SDL_sysrender.h` | 大 | 32, 28 | P1 | 移植 | **High** | Opus | `TPMLRenderDriver`（35 メソッド）、コマンドキューとバッチ、論理プレゼンテーション、`TPMLTexture` 所有。全レンダラドライバの土台 |
+| 42 | `PaPiMeLa.Render.Software`、`.Render.Software.Raster` | `render/software/` (5175)、`SDL_yuv_sw.c` (486) | 大 | 41, 29 | P1 | 移植 | Low | qwen | 三角形ラスタライザ、回転ブリット。#41 の最初のドライバ実装例 |
 | 43 | `PaPiMeLa.Render.GLES2` | `render/opengles2/` (3256) | 大 | 41, 33, 17 | P1 | 移植 | Medium | Sonnet | シェーダソース（GLSL ES）を Pascal 文字列定数に、YUV シェーダ、シェーダキャッシュ、コンテキスト喪失 |
 | 44 | `PaPiMeLa.Render.GL` | `render/opengl/` (3401) | 大 | 41, 33, 17 | P3 | 移植 | Low | qwen | #43 を手本に。OpenGL 2.1 / 3.x コア |
 | 45 | `PaPiMeLa.App`、`PaPiMeLa.Backends`、`PaPiMeLa`（アンブレラ） | `main/` (234) | 小 | 全部 | P1 | クリーンルーム | Medium | Sonnet | 6.5 の `TPMLApplication`、バックエンド登録、型エイリアス再エクスポート |
