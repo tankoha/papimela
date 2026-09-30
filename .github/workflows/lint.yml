@@ -33,6 +33,9 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y fpc
+          # GPU のドライバ（GLES2）の検査に、Mesa のソフトウェア実装（llvmpipe）と
+          # 窓の無い EGL（surfaceless）を使う。
+          sudo apt-get install -y libegl1 libgles2 libegl-mesa0 libgl1-mesa-dri
 
       - name: Build rawpaco
         working-directory: .rawpaco
@@ -87,6 +90,14 @@ jobs:
           set -eu
           fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -oexamples/pong examples/pong.pas
           ./examples/pong --selftest
+
+      # GPU のドライバをソフトウェアのドライバと画素で比べる。CI に GPU は無いので
+      # Mesa の llvmpipe で描く。ウィンドウの区間は Wayland が無いので飛ばされる。
+      - name: Compare the GLES2 render driver with the software one (llvmpipe)
+        run: |
+          set -eu
+          fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_render_gles2 test/test_render_gles2.pas
+          LIBGL_ALWAYS_SOFTWARE=1 ./test/test_render_gles2
 
       # 図と実装の乖離検査。英日の Mermaid ブロックの同一性と、図に出てくる型が
       # 実装に存在することを確認する。速いので lint より先に置く。

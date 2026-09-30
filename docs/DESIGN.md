@@ -1264,7 +1264,7 @@ wayland-scanner の Pascal 版。C の `wayland-scanner` が生成する `*-clie
 | 40 | `PaPiMeLa.Video.Wayland.MessageBox` | `SDL_waylandmessagebox.c` (42)、`dialog/unix/SDL_zenitymessagebox.c` | 小 | 35 | P3 | 移植 | Low | qwen | zenity 子プロセス。`TProcess`（FCL）を使う |
 | 41 | `PaPiMeLa.Render`（公開 API とドライバの抽象。設計時の `.Render.Backend` はここへ統合） | `render/SDL_render.c` (6372)、`SDL_sysrender.h` | 大 | 32, 28 | P1 | 移植 | **High** | Opus | `TPMLRenderDriver`（35 メソッド）、コマンドキューとバッチ、論理プレゼンテーション、`TPMLTexture` 所有。全レンダラドライバの土台 |
 | 42 | `PaPiMeLa.Render.Software`、`.Render.Software.Raster` | `render/software/` (5175)、`SDL_yuv_sw.c` (486) | 大 | 41, 29 | P1 | 移植 | Low | qwen | 三角形ラスタライザ、回転ブリット。#41 の最初のドライバ実装例 |
-| 43 | `PaPiMeLa.Render.GLES2` | `render/opengles2/` (3256) | 大 | 41, 33, 17 | P1 | 移植 | Medium | Sonnet | シェーダソース（GLSL ES）を Pascal 文字列定数に、YUV シェーダ、シェーダキャッシュ、コンテキスト喪失 |
+| 43 | `PaPiMeLa.Render.GLES2` | `render/opengles2/` (3256) | 大 | 41, 33, 17 | P1 | 移植 | Medium | Sonnet | シェーダソース（GLSL ES）を Pascal 文字列定数に、YUV シェーダ、シェーダキャッシュ、コンテキスト喪失。**実装済み（Sonnet、受け入れ検査 T-22）**: 矩形と転送は上書きせず三角形の既定の経路（SDL と同じ）。窓の無い GL（Mesa surfaceless）のオフスクリーンでも描け、CI では llvmpipe で比べる。線の端の延ばし量（SDL の 1/4 → 0.75 画素）とテクセルの境目の寄せは、ソフトウェアのドライバと画素を揃えるための実測に基づく逸脱。YUV・パレット・描画先テクスチャ・コンテキスト喪失は未実装 |
 | 44 | `PaPiMeLa.Render.GL` | `render/opengl/` (3401) | 大 | 41, 33, 17 | P3 | 移植 | Low | qwen | #43 を手本に。OpenGL 2.1 / 3.x コア |
 | 45 | `PaPiMeLa.App`、`PaPiMeLa.Backends`、`PaPiMeLa`（アンブレラ） | `main/` (234) | 小 | 全部 | P1 | クリーンルーム | Medium | Sonnet | 6.5 の `TPMLApplication`、バックエンド登録、型エイリアス再エクスポート |
 | 46 | `PaPiMeLa.TextInput`（公開モデル、`TPMLTextInputSystem`、`TPMLTextInputSession`、バックエンド選択） | — | 中 | 2, 4, 22, 24 | P1 | クリーンルーム | **High** | Opus | 7.3 / 7.6。`IPMLTextInputClient` の呼び出しタイミング、周辺削除→確定の順序保証、`IPMLFocusObserver`。**本プロジェクトの中核** |

@@ -43,7 +43,7 @@
     - 論理解像度（LogicalPresentation）、描画先テクスチャ（SetRenderTarget）、
       回転（RenderTextureRotated）、9-grid / タイル、DebugText、VSync は未実装
     - パレットと YUV のテクスチャは未実装
-    - ウィンドウへ描くドライバはソフトウェアだけ（GLES2 は #43）
+    - GPU のドライバは OpenGL ES 2.0（#43）だけ。デスクトップ GL（#44）は未着手
 
   Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
   Copyright (C) 2026 papimela contributors
@@ -149,6 +149,10 @@ type
     function  Name: String; virtual; abstract;
     function  GetOutputSize(out AWidth, AHeight: Integer): Boolean; virtual; abstract;
     function  SupportsBlendMode(AMode: TPMLBlendMode): Boolean; virtual;
+    // このドライバがテクスチャとして直接持てる形式か。既定は True。
+    // False の形式は、CreateTextureFromSurface が ARGB8888 へ変換してから渡す。
+    // ARGB8888 はどのドライバも持てなければならない。
+    function  SupportsTextureFormat(AFormat: TPMLPixelFormat): Boolean; virtual;
 
     function  CreateTexture(ATexture: TPMLTexture): Boolean; virtual; abstract;
     function  UpdateTexture(ATexture: TPMLTexture; const ARect: TPMLRect;
@@ -316,7 +320,9 @@ function PMLSameDrawState(const A, B: TPMLRenderCommand): Boolean;
 implementation
 
 uses
-  PaPiMeLa.Render.Software;
+  PaPiMeLa.Render.Software,
+  PaPiMeLa.Render.GLES2,
+  PaPiMeLa.Video.Backend;
 
 { ---- 補助 ---- }
 
@@ -430,6 +436,11 @@ end;
 function TPMLRenderDriver.SetVSync(AInterval: Integer): Boolean;
 begin
   Result := AInterval = 0;
+end;
+
+function TPMLRenderDriver.SupportsTextureFormat(AFormat: TPMLPixelFormat): Boolean;
+begin
+  Result := True;
 end;
 
 { 矩形 1 つを三角形 2 枚にする。
@@ -584,6 +595,10 @@ destructor TPMLTexture.Destroy;
 begin
   if FRenderer <> nil then
   begin
+    // 積んだ描画がこのテクスチャを指しているかもしれない。消す前に吐き出す
+    // （SDL_DestroyTexture の FlushRenderCommandsIfTextureNeeded。D-39）。
+    // 吐き出さないと、Present のときに解放済みのテクスチャを読む。
+    FRenderer.Flush;
     FRenderer.Driver.DestroyTexture(Self);
     FRenderer.RemoveTexture(Self);
   end;
@@ -635,14 +650,21 @@ constructor TPMLRenderer.CreateForWindow(AWindow: TPMLWindow;
 begin
   if AWindow = nil then
     raise EPMLArgument.Create('CreateForWindow needs a window');
-  if (ADriverName <> '') and not SameText(ADriverName, 'software') then
+  if (ADriverName <> '') and not SameText(ADriverName, 'software')
+    and not SameText(ADriverName, 'gles2') then
     raise EPMLUnsupported.CreateNative(
       Format('render driver "%s" is not available', [ADriverName]), 0, 'render');
   inherited Create(AWindow.ContextRef, AWindow);
   FQueue := TPMLRenderQueue.Create;
   FDrawColor := TPMLFColor.Make(0, 0, 0, 1);
   FBlendMode := TPMLBlendMode.None;
-  FDriver := TPMLWindowSoftwareRenderDriver.Create(AWindow);
+  // 名前が無ければ、GL で作ったウィンドウには GPU のドライバを選ぶ（SDL も
+  // 既定では GPU のレンダラを優先する）。
+  if SameText(ADriverName, 'gles2')
+    or ((ADriverName = '') and (TPMLWindowFlag.OpenGL in AWindow.Flags)) then
+    FDriver := TPMLGLES2RenderDriver.CreateForWindow(AWindow)
+  else
+    FDriver := TPMLWindowSoftwareRenderDriver.Create(AWindow);
   // 登録は最後。ここまでで例外が出たら Destroy が走るが、まだ登録していない。
   FWindow := AWindow;
   AWindow.AddDependent(Self);
@@ -982,12 +1004,23 @@ begin
 end;
 
 function TPMLRenderer.CreateTextureFromSurface(ASurface: TPMLSurface): TPMLTexture;
+var
+  Src: TPMLSurface;
 begin
   if ASurface = nil then
     raise EPMLArgument.Create('CreateTextureFromSurface needs a surface');
-  Result := CreateTexture(ASurface.Format, TPMLTextureAccess.Static,
-    ASurface.Width, ASurface.Height);
-  Result.Update(TPMLRect.Make(0, 0, 0, 0), ASurface.Pixels, ASurface.Pitch);
+  // ドライバが直接持てない形式は ARGB8888 に変換する（SDL も対応形式へ変換する）。
+  if FDriver.SupportsTextureFormat(ASurface.Format) then
+    Src := ASurface
+  else
+    Src := ASurface.Convert(PML_PIXELFORMAT_ARGB8888);
+  try
+    Result := CreateTexture(Src.Format, TPMLTextureAccess.Static, Src.Width, Src.Height);
+    Result.Update(TPMLRect.Make(0, 0, 0, 0), Src.Pixels, Src.Pitch);
+  finally
+    if Src <> ASurface then
+      Src.Free;
+  end;
   // SDL と同じく、アルファを持つサーフェスから作ったテクスチャは Blend にする。
   if ASurface.Details.HasAlpha then
     Result.BlendMode := TPMLBlendMode.Blend;

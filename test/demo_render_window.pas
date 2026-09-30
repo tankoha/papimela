@@ -16,8 +16,9 @@
     VSync が効いていれば、フレームレートは画面のリフレッシュレートに揃う。
 
   使い方:
-    ./test/demo_render_window [秒数] [vsync|novsync] [幅x高さ]
-      既定は 10 秒、VSync あり、640x400
+    ./test/demo_render_window [秒数] [vsync|novsync] [幅x高さ] [software|gles2]
+      既定は 10 秒、VSync あり、640x400、ソフトウェアのドライバ
+      gles2 を選ぶと GL のウィンドウを作って GPU で描く（shm バッファの数は 0 のまま）
       VSync を確かめるときは、描画が画面のリフレッシュより速く終わる小さな
       ウィンドウにする。描画が追いつかない大きさでは待つ前に次の合図が来ているので、
       VSync の有無で差が出ない（200Hz の画面で 640x400 は約 157 fps だった）
@@ -181,6 +182,7 @@ var
   OutPath  : String;
   VB       : TPMLWaylandVideoBackend;
   SizeArg  : String;
+  DriverArg: String = 'software';
   Sep      : Integer;
   WinW     : Integer = 640;
   WinH     : Integer = 400;
@@ -190,6 +192,8 @@ begin
     Seconds := StrToIntDef(ParamStr(1), 10);
   if (ParamCount >= 2) and SameText(ParamStr(2), 'novsync') then
     VSyncOn := False;
+  if ParamCount >= 4 then
+    DriverArg := LowerCase(ParamStr(4));
   if ParamCount >= 3 then
   begin
     SizeArg := LowerCase(ParamStr(3));
@@ -215,10 +219,14 @@ begin
     VB := TPMLWaylandVideoBackend(Ctx.Video.Backend);
     Mode := Ctx.Video.PrimaryDisplay.DesktopMode;
     WriteLn(Format('  画面: %dx%d  %.2f Hz', [Mode.Width, Mode.Height, Mode.RefreshRate]));
-    Win := Ctx.Video.CreateWindow(
-      TPMLWindowOptions.Make('papimela — render window', WinW, WinH).Resizable);
+    if SameText(DriverArg, 'gles2') then
+      Win := Ctx.Video.CreateWindow(
+        TPMLWindowOptions.Make('papimela — render window', WinW, WinH).Resizable.OpenGL)
+    else
+      Win := Ctx.Video.CreateWindow(
+        TPMLWindowOptions.Make('papimela — render window', WinW, WinH).Resizable);
     WB := Win.Backend as TPMLWaylandWindowBackend;
-    R := TPMLRenderer.CreateForWindow(Win);
+    R := TPMLRenderer.CreateForWindow(Win, DriverArg);
     R.VSync := Ord(VSyncOn);
     Checker := MakeChecker;
     WriteLn(Format('  ドライバ: %s  VSync: %s', [R.DriverName, BoolToStr(VSyncOn, True)]));

@@ -3,7 +3,7 @@
 papimela で実行したテストの記録。日時は実測値（ファイルの mtime と git のコミット時刻、
 および最終一括実行の時刻）に基づく。
 
-最終一括実行: **2026-09-30**（自動テスト 18 本すべて成功、アサーション 550 件・失敗 0 件）。
+最終一括実行: **2026-09-30**（自動テスト 19 本すべて成功、アサーション 584 件・失敗 0 件）。
 対話テスト T-07 / T-09 と、実機での計測 T-18 も同日に別途実行し、観測項目をすべて確認した。
 
 ## 1. 実行可能テスト
@@ -25,12 +25,13 @@ papimela で実行したテストの記録。日時は実測値（ファイル�
 | T-13 | `test/test_io` | ストリーム。ファイルの往復、型付き読み書きのバイト順、既存メモリの参照、**小刻みにしか返さない相手からの読み切り** | 2026-09-30 | **PASS 31 / 0** | **表示サーバ不要。CI で走る。** 1 回 7 バイトしか返さないストリームを自前で用意して噛ませる。普通のファイルは要求どおり返すので、これが無いと SDL から引き継いだ回避策を通せない。D-32 はこの検査で見つかった |
 | T-14 | `test/test_surface` | サーフェスの生成・所有・画素・変換・反転、共有の opt-in、BMP の往復 | 2026-09-30 | **PASS 45 / 0** | **表示サーバ不要。CI で走る。** BMP は書いて読み直して一致するかを見る。幅 13 の 24 ビット（行に詰め物が要る）と 32 ビットのアルファ付きの両方。加えて手で組んだ 8 ビットパレット BMP を読ませ、他のソフトが書いた並びも解けることを確認する |
 | T-15 | `test/test_blit` | ブリッタ群。等倍転送・クリップ・合成モード・カラーキー・変調・拡大縮小・塗りつぶし | 2026-09-30 | **PASS 27 / 0** | **表示サーバ不要。CI で走る。** テスト側に独立した参照実装を書いて突き合わせる。転送はクリップ規則ごと別に書き下ろし、合成は浮動小数点で計算して ±1 まで許す。実装は「形式が同じなら行ごとに Move、違えば 1 画素ずつ」と分岐するので、**どちらの経路でも同じ絵になること**を見るのが要点 |
-| T-16 | `test/test_render` | レンダラ。コマンドキュー（結合・状態の重複排除）、ソフトウェアドライバの描画、三角形のラスタライザ | 2026-09-30 | **PASS 47 / 0** | **表示サーバ不要。CI で走る。** 中心の検査は「同じ絵を 2 つの経路で描いて画素が完全一致するか」。ソフトウェアドライバの速い経路（矩形・ブリット）と、既定の変換で三角形に落とした経路を、半透明の合成で描き比べる。二重塗りも塗り残しも色の違いとして出るので、top-left 規則の誤りは必ず表に出る。**実装より先に書き、空の実装に対して 13 件落ちることを確かめてから** qwen に渡した。D-33 / D-34 はこの検査で見つかった。D-35 の修正で「Clear はビューポートの外も塗る」を 1 件足した |
+| T-16 | `test/test_render` | レンダラ。コマンドキュー（結合・状態の重複排除）、ソフトウェアドライバの描画、三角形のラスタライザ | 2026-09-30 | **PASS 50 / 0** | **表示サーバ不要。CI で走る。** 中心の検査は「同じ絵を 2 つの経路で描いて画素が完全一致するか」。ソフトウェアドライバの速い経路（矩形・ブリット）と、既定の変換で三角形に落とした経路を、半透明の合成で描き比べる。二重塗りも塗り残しも色の違いとして出るので、top-left 規則の誤りは必ず表に出る。**実装より先に書き、空の実装に対して 13 件落ちることを確かめてから** qwen に渡した。D-33 / D-34 はこの検査で見つかった。D-35 の修正で「Clear はビューポートの外も塗る」を 1 件足した。D-39 の修正で「解放するとキューが空になる」など 3 件を足した |
 | T-17 | `test/test_render_window` | ウィンドウへ描くレンダラ。フレームバッファへの描画と Present、**ウィンドウの大きさが変わったときの描画先の取り直し**、VSync の受け渡し、ウィンドウとレンダラの破棄の順序 | 2026-09-30 | **PASS 30 / 0** | **表示サーバ不要。CI で走る。** ダミーのウィンドウで検査する。取り直しの検査は、取り直しを外した実装で**異常終了（終了コード 217）**することを `-B` で確かめた。縮む向きではヒープが同じ番地を返して偶然通るので、大きくなる向きで見ている。D-35 はこの検査を書いていて見つかった |
 | T-18 | `test/demo_render_window`（実機のコンポジタ。人の操作は不要） | wl_shm バッファの使い回し（release）と、フレームコールバックによる VSync が実際に効くか | 2026-09-30 | **観測項目 5 / 5** | 数字で判定する。観測内容は下表 |
 | T-19 | `examples/pong --selftest` | サンプルの Pong。コンピュータ同士の対戦を 60 秒ぶん再生し、盤面（球とパドルが盤面の外へ出ない、打ち返しと得点、サーブの回数）と描画（パドルと地の色、横長のウィンドウでの帯、一時停止の表示）を見る。キーボードのパドルが押下状態（`IsDown`）とスキャンコードで動くことも見る | 2026-09-30 | **PASS 17 / 0** | **表示サーバ不要。CI で走る。** 盤面の計算は固定の刻みと自前の乱数で決定的なので、毎回同じ試合（2 対 0、打ち返し 34 回）になる。heaptrc でリーク 0 件も確認した。書いてみて足りなかった API は `examples/README.md` の F-1〜F-8 |
 | T-20 | `test/test_keyboard` | スキャンコードとキーコード（既定の配置、名前、キーシム → Unicode）、押下状態の規則（リピート、押されていないキーの KeyUp、フォーカス喪失で全部離す）、キーマップ（AZERTY 型・ロシア語型の判定とキーイベントのキーコード）、**実際の配列 us / fr / de / ru** | 2026-09-30 | **PASS 77 / 0** | **表示サーバ不要。CI で走る。** 実際の配列は xkbcommon に名前で読ませて作るのでコンポジタが要らない（xkbcommon か xkeyboard-config が無い環境では飛ばす）。押下状態・french_numbers・D-36 の防御は、それぞれ外すと落ちることを `-B` で確かめた。heaptrc でリーク 0 件 |
 | T-21 | `test/test_gl_window` | **OpenGL ES（EGL）でウィンドウに描く**。能力と断り方、コンテキストと 57 関数の取得、塗った色の読み戻し、SwapInterval 1 / 0 の速さ、最大化での面の大きさの追従、最小化・非表示で止まらないこと、破棄の順序、プロトコル違反 | 2026-10-01 | **PASS 25 / 0** | 実機のコンポジタと GPU が要るので**手元専用**。**実装（#33 / #39、Sonnet）より先に書き**、空の実装で落ちることを確かめてから渡した。200 Hz の画面で SwapInterval 1 は 200.7 fps、0 は約 32,000 fps、最小化中は 20.9 fps（合図が来ないので 1/20 秒で打ち切る）。D-37 はこの検査で見つかった |
+| T-22 | `test/test_render_gles2` | **GPU（OpenGL ES 2.0）のドライバをソフトウェアのドライバと画素で比べる**。14 の場面（塗り、合成 5 種、12 枚の扇、頂点色、テクスチャの転送・変調・形式・部分更新、ビューポートとクリップ、点、線）と、読み戻しの向き。ウィンドウの区間では既定のドライバの選び方、VSync、最大化、破棄の順序 | 2026-10-01 | **PASS 31 / 0** | オフスクリーンの区間は窓の無い GL（Mesa の surfaceless）で描くので**コンポジタが要らない。CI でも llvmpipe で走る**。手元では **radeonsi（GPU）と llvmpipe の 2 つの実装**で通した。塗り・転送・ビューポート・点・水平垂直の線は差 0、合成・頂点色・変調も最大差 1。斜めの線も両実装で差 0。**実装（#43、Sonnet）より先に書き**、空の実装で失敗することを確かめた（最初は「GL が無ければ飛ばす」になっていて、空の実装が飛ばされて通ってしまうのを直した）。SDL から外れた 2 箇所（線の端の延ばし量、テクセルの境目の寄せ）は、SDL の値に戻すと落ちることを確かめた |
 
 ### T-04 が決定的である理由
 
@@ -86,13 +87,14 @@ papimela で実行したテストの記録。日時は実測値（ファイル�
 | **release を待ってバッファを使い回す** | VSync ありでは shm バッファは累計 1 枚（コンポジタが次のフレームまでに release を返す）。VSync なしでは 2 枚目が作られ、それ以上は増えなかった |
 | 大きさの変更 | 最大化（2560x1022）→ 復帰（200x120）で、それぞれ新しい大きさのバッファが 1 枚ずつ作られ、描画も追従した。最大化中も 199.1 fps |
 | **隠れたウィンドウで止まらない** | 最小化するとフレームコールバックが来なくなり、毎フレーム上限の 1/20 秒で打ち切って**ちょうど 20.0 fps**（1.5 秒で 30 回打ち切り）。SDL の GLES 経路と同じ振る舞い |
+| **GPU のドライバ**（`demo_render_window … gles2`） | 同じ場面を 640x400、VSync なしで: ソフトウェア 161.4 fps、**GLES2 21,807.9 fps**（約 135 倍）。VSync ありの GLES2 は 200.5 fps。Sonnet の計測では 16x16 のテクスチャ付き四角形 2,000 個を 1 フレームで約 2,700 fps（毎秒 550 万個） |
 | プロトコル違反なし | どの段階でも `wl_display_get_error` は 0 |
 
 ## 2. コンパイル検証
 
 | # | 対象 | 最終実行 | 結果 | 備考 |
 |---|---|---|---|---|
-| C-01 | `src/` の全ユニット（Types / Errors / Unicode / Core.Base / Core / Events / Events.Keymap / IO / Pixels / Platform 系 7 本 / TextInput 系 3 本 / Video 系 12 本 / Surface 系 3 本 / Render 系 3 本） | 2026-10-01 | **PASS** | 全 37 ユニット（ほかに生成したキーボードの表 2 本、C-07）。到達過程で D-03〜D-08、D-19 を修正 |
+| C-01 | `src/` の全ユニット（Types / Errors / Unicode / Core.Base / Core / Events / Events.Keymap / IO / Pixels / Platform 系 7 本 / TextInput 系 3 本 / Video 系 12 本 / Surface 系 3 本 / Render 系 4 本） | 2026-10-01 | **PASS** | 全 38 ユニット（ほかに生成したキーボードの表 2 本、C-07）。到達過程で D-03〜D-08、D-19 を修正 |
 | C-02 | `tools/wlscan-pas` | 2026-09-28 22:24 | **PASS** | — |
 | C-03 | 生成プロトコル 21 ユニット（9230 行） | 2026-09-28 22:24 | **PASS 21 / 21** | 初回は 9 / 21 が失敗（D-10〜D-12）。§9.2 が挙げる XML のうち、`reference/SDL/wayland-protocols/` にあるものすべて |
 | C-04 | **rawpaco 静的解析（激辛モード `--fail-on=warning`）** — `src` / `src/generated` / `test` / `spikes` / `tools` の全 Pascal ファイル | 2026-09-29 | **PASS 指摘 0 件** | 導入初回は 2 件の指摘（D-20）。修正後は 0 件。`.github/workflows/lint.yml` で push / pull_request ごとに走る |
@@ -115,7 +117,7 @@ papimela で実行したテストの記録。日時は実測値（ファイル�
 | **タッチパネルからの実入力** | **未検証** | `wl_touch` の受け取りと `TPMLTouchState` は実装済みで、T-10 が合成入力で検査している。検証環境にタッチパネルが無いため、`wl_touch` のイベントが実際に届く経路は通していない。`shape` / `orientation` は未対応 |
 | ポインタ拘束の自動化 | **手動のみ** | 有効化には `wl_pointer.enter` が必要で、カーソルをプログラムから動かす手段が無い。T-09（対話）で実機確認済み。CI に載せるには `weston --backend=headless` + ポインタ注入が要る（第 11 章 #70） |
 | ウィンドウのフルスクリーン / 不透明度 / アイコン / ヒットテスト / キーボードグラブ | **未実装** | 対応する能力と一緒に追加する |
-| Vulkan / GPU のレンダラ / クリップボード / 任意ピクセルのカーソル | **未実装** | 第 11 章 #38、#43、#67。**OpenGL ES（EGL）でウィンドウに描くところまでは実装済み**（T-21）。レンダラはソフトウェアのみ。`wl_shm` のバッファ（#39 の shm 側）は入ったので、任意ピクセルのカーソルはこれを使って足せる |
+| Vulkan / デスクトップ GL のレンダラ / クリップボード / 任意ピクセルのカーソル | **未実装** | 第 11 章 #38、#44、#67。**GPU のレンダラ（GLES2）は実装済み**（T-22）。レンダラはソフトウェアのみ。`wl_shm` のバッファ（#39 の shm 側）は入ったので、任意ピクセルのカーソルはこれを使って足せる |
 | `TPMLEvent` の `Finalize` コスト測定 | **未実施** | サイズは実測済み（72 バイト）。ベンチマークは残課題（設計書 §10 項目 9） |
 | CI でのヘッドレス実行 | **一部整備済み** | ダミーバックエンド（#34）で T-11 が CI で走るようになった。ただし CI で検査できるのは**バックエンドに依存しない公開 API だけ**で、Wayland のプロトコル手順（T-04/T-05/T-08/T-10）と IME（T-02/T-03/T-06）はローカル専用のまま。そこまで CI へ載せるには `weston --backend=headless` + fcitx5 の起動が要る（第 11 章 #70 の残り） |
 
@@ -160,6 +162,7 @@ fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_render               t
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_render_window        test/test_render_window.pas
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_keyboard             test/test_keyboard.pas
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_gl_window            test/test_gl_window.pas
+fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_render_gles2         test/test_render_gles2.pas
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/demo_render_window        test/demo_render_window.pas
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -oexamples/pong               examples/pong.pas
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/demo_pointer_constraints test/demo_pointer_constraints.pas
@@ -169,7 +172,7 @@ fpc -O1 -gl spikes/spike1_wayland.pas && fpc -O1 -gl spikes/spike2_fcitx.pas
 ./test/test_key_routing && ./test/test_pointer_constraints && ./test/test_touch_cursor
 ./test/test_gl_window   # GPU と EGL が要る
 
-# 表示サーバが無くても通るテスト（CI で走るのはこの 9 本）。
+# 表示サーバが無くても通るテスト（CI で走るのはこの 10 本）。
 env -u WAYLAND_DISPLAY -u DISPLAY ./test/test_dummy_video
 env -u WAYLAND_DISPLAY -u DISPLAY ./test/test_pixels
 env -u WAYLAND_DISPLAY -u DISPLAY ./test/test_io
@@ -179,6 +182,7 @@ env -u WAYLAND_DISPLAY -u DISPLAY ./test/test_render
 env -u WAYLAND_DISPLAY -u DISPLAY ./test/test_render_window
 env -u WAYLAND_DISPLAY -u DISPLAY ./test/test_keyboard
 env -u WAYLAND_DISPLAY -u DISPLAY ./examples/pong --selftest
+env -u WAYLAND_DISPLAY -u DISPLAY LIBGL_ALWAYS_SOFTWARE=1 ./test/test_render_gles2   # llvmpipe
 
 # T-18（実機のコンポジタ）。小さいウィンドウで VSync の有無を比べる。
 ./test/demo_render_window 4 vsync 160x100

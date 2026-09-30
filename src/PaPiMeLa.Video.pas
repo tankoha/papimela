@@ -209,6 +209,9 @@ type
     destructor Destroy; override;
     // このコンテキストを、作ったウィンドウに対して現在のものにする。
     procedure MakeCurrent;
+    // GL の関数の番地（TPMLVideoSystem.GLGetProcAddress と同じ）。無ければ nil。
+    // レンダラのドライバのように、ウィンドウしか持っていない側が使う。
+    function  GetProcAddress(const AName: String): Pointer;
     // 0 = 待たない、1 = 画面の更新を待つ、-1 = 間に合わなければ待たない。
     // 受け付けない値なら EPMLUnsupported。
     property SwapInterval: Integer read GetSwapInterval write SetSwapInterval;
@@ -732,6 +735,11 @@ begin
   if not FGL.MakeCurrent(FWindow.Backend, FHandle) then
     raise EPMLVideoError.CreateNative('failed to make the GL context current: ' +
       FGL.LastError, 0, '');
+end;
+
+function TPMLGLContext.GetProcAddress(const AName: String): Pointer;
+begin
+  Result := FGL.GetProcAddress(AName);
 end;
 
 function TPMLGLContext.GetSwapInterval: Integer;

@@ -231,6 +231,7 @@ end;
 
 var
   Target, Target2, Ref, Img, Shot: TPMLSurface;
+  Pixel: LongWord;
   R, R2       : TPMLRenderer;
   Tex, Tex2   : TPMLTexture;
   I, J, X, Y  : Integer;
@@ -566,6 +567,21 @@ begin
     Check(Tex.DriverData is TPMLSurface, 'ソフトウェアドライバの中身はサーフェス');
     Tex.Free;
     Check(Length(R.Textures) = 0, 'テクスチャを先に解放すると一覧から消える');
+
+    // 描いてから Present までの間にテクスチャを解放する（D-39）。積んだ描画が
+    // 解放済みのテクスチャを指したまま残らないよう、解放の前に吐き出されること。
+    // 解放済みの領域は偶然元の値を保っていることがあり、画素だけでは誤りが
+    // 見えないので、キューが空になったことで確かめる。
+    Tex := R.CreateTexture(PML_PIXELFORMAT_ARGB8888, TPMLTextureAccess.Static, 1, 1);
+    Pixel := $FF00FF00;
+    Tex.Update(TPMLRect.Make(0, 0, 0, 0), @Pixel, 4);
+    R.RenderTexture(Tex, TPMLFRect.Make(0, 0, 0, 0), TPMLFRect.Make(0, 0, 2, 2));
+    Check(R.Queue.CommandCount > 0, '転送が積まれている');
+    Tex.Free;
+    Check(R.Queue.CommandCount = 0, 'テクスチャを解放すると積んだ描画が先に実行される');
+    R.Present;
+    Check(SameColor(Target.ReadPixel(1, 1), TPMLColor.Make(0, 255, 0, 255)),
+      '解放前に積んだ転送の結果が残る');
 
     // テクスチャを残したままレンダラを解放しても落ちないこと（下の R.Free で確かめる）。
     R.CreateTexture(PML_PIXELFORMAT_ARGB8888, TPMLTextureAccess.Static, 4, 4);
