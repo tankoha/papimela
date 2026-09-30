@@ -22,7 +22,8 @@
     ./examples/pong --selftest   表示サーバ無しで、コンピュータ同士に 60 秒ぶん
                                  対戦させて盤面と描画を検査する（CI が走らせる）
   操作:
-    W / S、↑ / ↓   左のパドル（2 人対戦では左が W / S、右が ↑ / ↓）
+    W / S、↑ / ↓   左のパドル（2 人対戦では左が W / S、右が ↑ / ↓）。
+                   W / S はキーの位置で読むので、AZERTY でも同じ場所（Z / S）で動く
     2              1 人用 / 2 人対戦の切り替え
     P              一時停止
     Space          勝負がついた後に再開
@@ -39,7 +40,7 @@ uses
   PaPiMeLa.Types,
   PaPiMeLa.Errors,
   PaPiMeLa.Events,
-  PaPiMeLa.Platform.XKB,
+  PaPiMeLa.Keycodes,
   PaPiMeLa.Surface,
   PaPiMeLa.Video,
   PaPiMeLa.Render,
@@ -110,11 +111,16 @@ type
     function Decide(AGame: TPongGame; ASide: TSide): Integer; virtual; abstract;
   end;
 
-  { キーを押している間だけ動く。押下状態はイベントから自分で組み立てる
-    （papimela にはまだキーボードの状態を問い合わせる API が無い）。 }
+  { キーを押している間だけ動く。押下状態はキーボードの状態機械に問い合わせ、
+    キーは位置（スキャンコード）で指定する。配列が変わっても同じ場所で動く。 }
   TKeyboardController = class(TController)
+  strict private
+    FKeyboard: TPMLKeyboardState;
+    FUp, FDown: array of TPMLScancode;
+    function AnyDown(const AKeys: array of TPMLScancode): Boolean;
   public
-    UpHeld, DownHeld: Boolean;
+    constructor Create(AKeyboard: TPMLKeyboardState;
+      const AUp, ADown: array of TPMLScancode);
     function Decide(AGame: TPongGame; ASide: TSide): Integer; override;
   end;
 
@@ -332,9 +338,34 @@ end;
 
 { ---- コントローラ ---- }
 
+constructor TKeyboardController.Create(AKeyboard: TPMLKeyboardState;
+  const AUp, ADown: array of TPMLScancode);
+var
+  I: Integer;
+begin
+  inherited Create;
+  FKeyboard := AKeyboard;
+  SetLength(FUp, Length(AUp));
+  for I := 0 to High(AUp) do
+    FUp[I] := AUp[I];
+  SetLength(FDown, Length(ADown));
+  for I := 0 to High(ADown) do
+    FDown[I] := ADown[I];
+end;
+
+function TKeyboardController.AnyDown(const AKeys: array of TPMLScancode): Boolean;
+var
+  K: TPMLScancode;
+begin
+  for K in AKeys do
+    if FKeyboard.IsDown[K] then
+      Exit(True);
+  Result := False;
+end;
+
 function TKeyboardController.Decide(AGame: TPongGame; ASide: TSide): Integer;
 begin
-  Result := Ord(DownHeld) - Ord(UpHeld);
+  Result := Ord(AnyDown(FDown)) - Ord(AnyDown(FUp));
 end;
 
 constructor TComputerController.Create(ASeed: LongWord);
@@ -488,40 +519,24 @@ var
   R        : TPMLRenderer;
   Game     : TPongGame;
   View     : TPongView;
-  P1       : TKeyboardController;
-  P2Keys   : TKeyboardController;
+  Solo     : TKeyboardController;   // 1 人用: W / S と ↑ / ↓ のどちらでも
+  DuoLeft  : TKeyboardController;   // 2 人対戦の左: W / S
+  DuoRight : TKeyboardController;   // 2 人対戦の右: ↑ / ↓
   Computer : TComputerController;
-  Right    : TController;
+  Left, Right: TController;
   Ev       : TPMLEvent;
   Running, Paused, TwoPlayers: Boolean;
   Start, Last, Now: UInt64;
   Acc      : Double;
 
-  // 押下状態を組み立てる。リピートは無視する（押しっぱなしは KeyUp まで続く）。
-  procedure SetKey(AKeysym: LongWord; ADown: Boolean);
-  begin
-    case AKeysym of
-      Ord('w'), Ord('W'): P1.UpHeld := ADown;
-      Ord('s'), Ord('S'): P1.DownHeld := ADown;
-      XKB_KEY_Up:
-        if TwoPlayers then P2Keys.UpHeld := ADown else P1.UpHeld := ADown;
-      XKB_KEY_Down:
-        if TwoPlayers then P2Keys.DownHeld := ADown else P1.DownHeld := ADown;
-    end;
-  end;
-
-  procedure ReleaseAll;
-  begin
-    P1.UpHeld := False;
-    P1.DownHeld := False;
-    P2Keys.UpHeld := False;
-    P2Keys.DownHeld := False;
-  end;
-
 begin
   Ctx := TPMLContext.Create([TPMLSubsystem.Video]);
-  P1 := TKeyboardController.Create;
-  P2Keys := TKeyboardController.Create;
+  Solo := TKeyboardController.Create(Ctx.Events.Keyboard,
+    [TPMLScancode.W, TPMLScancode.UP], [TPMLScancode.S, TPMLScancode.DOWN]);
+  DuoLeft := TKeyboardController.Create(Ctx.Events.Keyboard,
+    [TPMLScancode.W], [TPMLScancode.S]);
+  DuoRight := TKeyboardController.Create(Ctx.Events.Keyboard,
+    [TPMLScancode.UP], [TPMLScancode.DOWN]);
   Computer := TComputerController.Create(LongWord(GetTickCount64));
   Game := TPongGame.Create(LongWord(GetTickCount64 xor $5EED));
   View := nil;
@@ -541,6 +556,7 @@ begin
     Running := True;
     Paused := False;
     TwoPlayers := False;
+    Left := Solo;
     Right := Computer;
     Acc := 0;
     Start := Ctx.Timer.TicksNS;
@@ -552,38 +568,33 @@ begin
         case Ev.Kind of
           TPMLEventKind.Quit, TPMLEventKind.WindowCloseRequested:
             Running := False;
-          TPMLEventKind.WindowFocusLost:
-            // フォーカスを失うと KeyUp が来ない。押しっぱなしのまま残さない。
-            ReleaseAll;
-          TPMLEventKind.KeyUp:
-            SetKey(Ev.Key.Keysym, False);
+          // パドルは IsDown で読むので、ここで扱うのはショートカットだけ。
+          // ショートカットはキーの意味（Key）で見る。AZERTY でも P は P。
           TPMLEventKind.KeyDown:
             if not Ev.Key.IsRepeat then
-            begin
-              SetKey(Ev.Key.Keysym, True);
-              case Ev.Key.Keysym of
-                XKB_KEY_Escape: Running := False;
-                Ord('p'), Ord('P'): Paused := not Paused;
-                Ord('2'):
+              case Ev.Key.Key of
+                PMLK_ESCAPE: Running := False;
+                PMLK_P: Paused := not Paused;
+                PMLK_2:
                   begin
                     TwoPlayers := not TwoPlayers;
-                    ReleaseAll;
                     if TwoPlayers then
                     begin
-                      Right := P2Keys;
+                      Left := DuoLeft;
+                      Right := DuoRight;
                       Win.Title := 'papimela pong — 2 人対戦';
                     end
                     else
                     begin
+                      Left := Solo;
                       Right := Computer;
                       Win.Title := 'papimela pong';
                     end;
                   end;
-                XKB_KEY_space:
+                PMLK_SPACE:
                   if Game.HasWinner then
                     Game.Reset;
               end;
-            end;
         end;
 
       Now := Ctx.Timer.TicksNS;
@@ -594,7 +605,7 @@ begin
         Acc := 0;
       while Acc >= StepSeconds do
       begin
-        Game.Step(StepSeconds, P1.Decide(Game, TSide.Left),
+        Game.Step(StepSeconds, Left.Decide(Game, TSide.Left),
           Right.Decide(Game, TSide.Right));
         Acc := Acc - StepSeconds;
       end;
@@ -608,8 +619,9 @@ begin
     View.Free;
     Game.Free;
     Computer.Free;
-    P2Keys.Free;
-    P1.Free;
+    DuoRight.Free;
+    DuoLeft.Free;
+    Solo.Free;
     Ctx.Free;
   end;
 end;
@@ -650,6 +662,17 @@ begin
   end;
 end;
 
+{ シートが届けるのと同じ形で、スキャンコードだけのキーを流す。 }
+procedure SendKey(ACtx: TPMLContext; AWin: TPMLWindow; AScancode: TPMLScancode;
+  ADown: Boolean);
+var
+  K: TPMLKeyEventData;
+begin
+  FillChar(K, SizeOf(K), 0);
+  K.Scancode := AScancode;
+  ACtx.Events.Keyboard.SendKey(AWin.ID, K, ADown, '');
+end;
+
 procedure SelfTest;
 const
   SimSeconds = 60;
@@ -662,6 +685,7 @@ var
   Game : TPongGame;
   View : TPongView;
   A, B : TComputerController;
+  Kb   : TKeyboardController;
   I, Steps, Done, OutOfField, PaddleOut, Frames, Serves: Integer;
   WasWaiting: Boolean;
   S    : TSide;
@@ -754,6 +778,24 @@ begin
       '一時停止の記号が出る');
     Check(not SameRGB(PixelAt(R, View, FieldW / 4, FieldH - 4), ColorField),
       '盤面が暗くなる');
+
+    WriteLn;
+    WriteLn('5. キーボードのパドル（キーの位置で読む）');
+    Kb := TKeyboardController.Create(Ctx.Events.Keyboard,
+      [TPMLScancode.W, TPMLScancode.UP], [TPMLScancode.S, TPMLScancode.DOWN]);
+    try
+      Check(Kb.Decide(Game, TSide.Left) = 0, '何も押していなければ止まる');
+      SendKey(Ctx, Win, TPMLScancode.S, True);
+      Check(Kb.Decide(Game, TSide.Left) = 1, 'S を押している間は下へ');
+      SendKey(Ctx, Win, TPMLScancode.S, False);
+      SendKey(Ctx, Win, TPMLScancode.UP, True);
+      Check(Kb.Decide(Game, TSide.Left) = -1, '↑ を押している間は上へ');
+      Ctx.Events.Keyboard.SendFocus(Win.ID, False);
+      Check(Kb.Decide(Game, TSide.Left) = 0,
+        'フォーカスを失ったら止まる（押しっぱなしが残らない）');
+    finally
+      Kb.Free;
+    end;
     Win.Free;
   finally
     View.Free;

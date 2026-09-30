@@ -3,7 +3,7 @@
 papimela で実行したテストの記録。日時は実測値（ファイルの mtime と git のコミット時刻、
 および最終一括実行の時刻）に基づく。
 
-最終一括実行: **2026-09-30**（自動テスト 16 本すべて成功、アサーション 442 件・失敗 0 件）。
+最終一括実行: **2026-09-30**（自動テスト 17 本すべて成功、アサーション 523 件・失敗 0 件）。
 対話テスト T-07 / T-09 と、実機での計測 T-18 も同日に別途実行し、観測項目をすべて確認した。
 
 ## 1. 実行可能テスト
@@ -28,7 +28,8 @@ papimela で実行したテストの記録。日時は実測値（ファイル�
 | T-16 | `test/test_render` | レンダラ。コマンドキュー（結合・状態の重複排除）、ソフトウェアドライバの描画、三角形のラスタライザ | 2026-09-30 | **PASS 47 / 0** | **表示サーバ不要。CI で走る。** 中心の検査は「同じ絵を 2 つの経路で描いて画素が完全一致するか」。ソフトウェアドライバの速い経路（矩形・ブリット）と、既定の変換で三角形に落とした経路を、半透明の合成で描き比べる。二重塗りも塗り残しも色の違いとして出るので、top-left 規則の誤りは必ず表に出る。**実装より先に書き、空の実装に対して 13 件落ちることを確かめてから** qwen に渡した。D-33 / D-34 はこの検査で見つかった。D-35 の修正で「Clear はビューポートの外も塗る」を 1 件足した |
 | T-17 | `test/test_render_window` | ウィンドウへ描くレンダラ。フレームバッファへの描画と Present、**ウィンドウの大きさが変わったときの描画先の取り直し**、VSync の受け渡し、ウィンドウとレンダラの破棄の順序 | 2026-09-30 | **PASS 30 / 0** | **表示サーバ不要。CI で走る。** ダミーのウィンドウで検査する。取り直しの検査は、取り直しを外した実装で**異常終了（終了コード 217）**することを `-B` で確かめた。縮む向きではヒープが同じ番地を返して偶然通るので、大きくなる向きで見ている。D-35 はこの検査を書いていて見つかった |
 | T-18 | `test/demo_render_window`（実機のコンポジタ。人の操作は不要） | wl_shm バッファの使い回し（release）と、フレームコールバックによる VSync が実際に効くか | 2026-09-30 | **観測項目 5 / 5** | 数字で判定する。観測内容は下表 |
-| T-19 | `examples/pong --selftest` | サンプルの Pong。コンピュータ同士の対戦を 60 秒ぶん再生し、盤面（球とパドルが盤面の外へ出ない、打ち返しと得点、サーブの回数）と描画（パドルと地の色、横長のウィンドウでの帯、一時停止の表示）を見る | 2026-09-30 | **PASS 13 / 0** | **表示サーバ不要。CI で走る。** 盤面の計算は固定の刻みと自前の乱数で決定的なので、毎回同じ試合（2 対 0、打ち返し 34 回）になる。heaptrc でリーク 0 件も確認した。書いてみて足りなかった API は `examples/README.md` の F-1〜F-8 |
+| T-19 | `examples/pong --selftest` | サンプルの Pong。コンピュータ同士の対戦を 60 秒ぶん再生し、盤面（球とパドルが盤面の外へ出ない、打ち返しと得点、サーブの回数）と描画（パドルと地の色、横長のウィンドウでの帯、一時停止の表示）を見る。キーボードのパドルが押下状態（`IsDown`）とスキャンコードで動くことも見る | 2026-09-30 | **PASS 17 / 0** | **表示サーバ不要。CI で走る。** 盤面の計算は固定の刻みと自前の乱数で決定的なので、毎回同じ試合（2 対 0、打ち返し 34 回）になる。heaptrc でリーク 0 件も確認した。書いてみて足りなかった API は `examples/README.md` の F-1〜F-8 |
+| T-20 | `test/test_keyboard` | スキャンコードとキーコード（既定の配置、名前、キーシム → Unicode）、押下状態の規則（リピート、押されていないキーの KeyUp、フォーカス喪失で全部離す）、キーマップ（AZERTY 型・ロシア語型の判定とキーイベントのキーコード）、**実際の配列 us / fr / de / ru** | 2026-09-30 | **PASS 77 / 0** | **表示サーバ不要。CI で走る。** 実際の配列は xkbcommon に名前で読ませて作るのでコンポジタが要らない（xkbcommon か xkeyboard-config が無い環境では飛ばす）。押下状態・french_numbers・D-36 の防御は、それぞれ外すと落ちることを `-B` で確かめた。heaptrc でリーク 0 件 |
 
 ### T-04 が決定的である理由
 
@@ -90,12 +91,13 @@ papimela で実行したテストの記録。日時は実測値（ファイル�
 
 | # | 対象 | 最終実行 | 結果 | 備考 |
 |---|---|---|---|---|
-| C-01 | `src/` の全ユニット（Types / Errors / Unicode / Core.Base / Core / Events / IO / Pixels / Platform 系 4 本 / TextInput 系 3 本 / Video 系 10 本 / Surface 系 3 本 / Render 系 3 本） | 2026-09-30 | **PASS** | 全 31 ユニット。到達過程で D-03〜D-08、D-19 を修正 |
+| C-01 | `src/` の全ユニット（Types / Errors / Unicode / Core.Base / Core / Events / Events.Keymap / IO / Pixels / Platform 系 4 本 / TextInput 系 3 本 / Video 系 10 本 / Surface 系 3 本 / Render 系 3 本） | 2026-09-30 | **PASS** | 全 32 ユニット（ほかに生成したキーボードの表 2 本、C-07）。到達過程で D-03〜D-08、D-19 を修正 |
 | C-02 | `tools/wlscan-pas` | 2026-09-28 22:24 | **PASS** | — |
 | C-03 | 生成プロトコル 21 ユニット（9230 行） | 2026-09-28 22:24 | **PASS 21 / 21** | 初回は 9 / 21 が失敗（D-10〜D-12）。§9.2 が挙げる XML のうち、`reference/SDL/wayland-protocols/` にあるものすべて |
 | C-04 | **rawpaco 静的解析（激辛モード `--fail-on=warning`）** — `src` / `src/generated` / `test` / `spikes` / `tools` の全 Pascal ファイル | 2026-09-29 | **PASS 指摘 0 件** | 導入初回は 2 件の指摘（D-20）。修正後は 0 件。`.github/workflows/lint.yml` で push / pull_request ごとに走る |
 | C-05 | **図と実装の整合性検査**（`tools/check-diagrams.sh`） — 英日の Mermaid ブロック同一性、図に出てくる型 51 個の実在 | 2026-09-29 | **PASS 不整合 0 件** | `.github/workflows/lint.yml` で push ごとに走る |
 | C-06 | **Origin 行と設計書の突き合わせ**（`tools/checkorigin.bb`） — 第11章の由来列との一致、移植部分の SDL 著作権表示の有無 | 2026-09-29 | **PASS 不一致 0 件** | 導入初回は 10 件の不一致（D-30）。`.github/workflows/lint.yml` で push ごとに走る |
+| C-07 | **キーボードの表の生成**（`tools/genscancodes.bb`） — SDL のソースから `PaPiMeLa.Keycodes` と `.Keycodes.Tables` を作る | 2026-09-30 | **PASS** | スキャンコード 249、キーコード 257（SDLK_ の定義 259 から 2 つのマスクを除く）、evdev 表 768（注釈の番号と並びを突き合わせる）、名前 247、既定キー 175、Unicode 範囲 20（1525 項目）。大文字小文字だけが違う名前が無いことも検査する（D-09 系）。**imKStoUCS.c の範囲の食い違い（D-36）を警告する**。reference/SDL が要るので CI では走らせない |
 
 ## 3. アサーションを置いていない項目
 
@@ -125,11 +127,15 @@ papimela で実行したテストの記録。日時は実測値（ファイル�
 | `varargs` を手続き変数型に付けてコンパイルできるか | 同日 | できる |
 | dlopen した関数ポインタ経由の `varargs` 呼び出しが実際に動くか | 同日 | 動く（globals 57 件を受信）。この結果により `wl_proxy_marshal_array_flags` による回避を不要と判断した |
 | `wayland-scanner` の出力との照合（シグネチャ、`types` プール配置、destructor フラグ） | 同日 | 生成器のセマンティクスを確定。`bind` の `usun`、`since` の数字接頭辞、NULL 前置の長さ算出規則を確認 |
+| SDL の `SDL_KeySymToUcs4`（imKStoUCS.c）と xkbcommon の `xkb_keysym_to_utf32` は同じか | 2026-09-30 | **違う。** C で両方を全キーシム（1〜0xFFFF と Unicode キーシム）で呼び比べ、588 個が食い違った（SDL は 0x59x のペルシア数字や 0x68x の拡張キリル文字などの古いキーシムも文字にするが、xkbcommon は 0 を返す。逆に 0xFFxx の制御キーとテンキーの 27 個は、xkbcommon だけが文字（制御文字を含む）にする）。xkbcommon で代用せず、SDL の表を移植すると決めた。この比較の途中で SDL 側が 0x58a で異常終了し、D-36 が見つかった |
+| 移植した `PMLKeysymToUcs4` は SDL の C と同じ値を返すか | 同日 | **全件一致**。1〜0xFFFF（D-36 の 6 個を除く）と Unicode キーシム 512 個、計 66,041 個で差分 0。D-36 の 6 個は 0 を返す |
 
 ## 5. 再現方法
 
 ```bash
 cd papimela
+# キーボードの表を作り直す（reference/SDL が要る。出力は src/generated/ へ）。
+./tools/genscancodes.bb
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_fcitx_textinput   test/test_fcitx_textinput.pas
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_wayland_protocols test/test_wayland_protocols.pas
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_wayland_window    test/test_wayland_window.pas
@@ -144,6 +150,7 @@ fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_surface              t
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_blit                 test/test_blit.pas
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_render               test/test_render.pas
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_render_window        test/test_render_window.pas
+fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_keyboard             test/test_keyboard.pas
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/demo_render_window        test/demo_render_window.pas
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -oexamples/pong               examples/pong.pas
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/demo_pointer_constraints test/demo_pointer_constraints.pas
@@ -152,7 +159,7 @@ fpc -O1 -gl spikes/spike1_wayland.pas && fpc -O1 -gl spikes/spike2_fcitx.pas
 ./test/test_fcitx_textinput && ./test/test_wayland_protocols && ./test/test_wayland_window
 ./test/test_key_routing && ./test/test_pointer_constraints && ./test/test_touch_cursor
 
-# 表示サーバが無くても通るテスト（CI で走るのはこの 8 本）。
+# 表示サーバが無くても通るテスト（CI で走るのはこの 9 本）。
 env -u WAYLAND_DISPLAY -u DISPLAY ./test/test_dummy_video
 env -u WAYLAND_DISPLAY -u DISPLAY ./test/test_pixels
 env -u WAYLAND_DISPLAY -u DISPLAY ./test/test_io
@@ -160,6 +167,7 @@ env -u WAYLAND_DISPLAY -u DISPLAY ./test/test_surface
 env -u WAYLAND_DISPLAY -u DISPLAY ./test/test_blit
 env -u WAYLAND_DISPLAY -u DISPLAY ./test/test_render
 env -u WAYLAND_DISPLAY -u DISPLAY ./test/test_render_window
+env -u WAYLAND_DISPLAY -u DISPLAY ./test/test_keyboard
 env -u WAYLAND_DISPLAY -u DISPLAY ./examples/pong --selftest
 
 # T-18（実機のコンポジタ）。小さいウィンドウで VSync の有無を比べる。

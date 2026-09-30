@@ -84,14 +84,15 @@ the D-Bus route is not an optimisation, it is the only way.
 
 ### State
 
-Roughly 23,000 lines across 31 hand-written units and 21 generated Wayland
+Roughly 26,000 lines across 32 hand-written units and 21 generated Wayland
 protocol units. Working: Wayland windows, the seat (keyboard with xkb, pointer,
-touch, pointer constraints, cursor shapes), the event queue, the IME path through
+touch, pointer constraints, cursor shapes), keyboard state with SDL-compatible
+scancodes and keycodes, the event queue, the IME path through
 fcitx5, pixel formats, surfaces, BMP, blitters, a software renderer that draws
 into a window with VSync, and a headless video backend so tests can run without
 a display server. There is a playable Pong in `examples/`.
 
-16 test programs, 442 assertions, all passing. CI runs a static analyser in its
+17 test programs, 523 assertions, all passing. CI runs a static analyser in its
 strictest mode (one warning fails the build), checks that the class diagrams
 still match the code, checks that every file's stated provenance matches the
 design document, and runs the tests that don't need a screen.
@@ -186,14 +187,15 @@ Wayland の `text-input-v3` ではこれは表現できない（preedit のス�
 
 ### 現状
 
-手書き 31 ユニットと生成した Wayland プロトコル 21 ユニット、およそ 2 万 3 千行。
+手書き 32 ユニットと生成した Wayland プロトコル 21 ユニット、およそ 2 万 6 千行。
 動いているのは、Wayland のウィンドウ、シート（xkb を使ったキーボード、ポインタ、
-タッチ、ポインタ拘束、カーソル形状）、イベントキュー、fcitx5 経由の IME、
+タッチ、ポインタ拘束、カーソル形状）、SDL と同じ値のスキャンコードとキーコードを
+持つキーボードの状態、イベントキュー、fcitx5 経由の IME、
 ピクセル形式、サーフェス、BMP、ブリッタ、ウィンドウへ VSync つきで描く
 ソフトウェアレンダラ、そして表示サーバ無しでテストを回すためのヘッドレス
 バックエンド。`examples/` には遊べる Pong がある。
 
-テストは 16 本、442 アサーション、全て成功。CI は静的解析を最も厳しい設定で
+テストは 17 本、523 アサーション、全て成功。CI は静的解析を最も厳しい設定で
 回し（warning 1 件でビルドが落ちる）、クラス図がコードと食い違っていないかを
 確かめ、各ファイルが名乗っている由来が設計書と一致するかを確かめ、画面の要らない
 テストを実行する。

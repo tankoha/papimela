@@ -106,7 +106,7 @@ var
 begin
   FillChar(K, SizeOf(K), 0);
   K.Keysym := AKeysym;
-  K.Keycode := AEvdevCode + 8;
+  K.Raw := AEvdevCode + 8;
   K.Modifiers := [];
   Ctx.Events.Keyboard.SendKey(1, K, True, AText);
   Ctx.Events.Keyboard.SendKey(1, K, False, '');

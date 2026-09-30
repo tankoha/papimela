@@ -16,6 +16,8 @@
   RESOLVED:
     - Wayland のキーコードは evdev 値。XKB は evdev + 8 を要求するので変換する
     - キーマップは fd で渡ってくる。mmap してヌル終端文字列として読む
+    - papimela のキーマップ（TPMLKeymap）はここで作る。押されている修飾に
+      左右されないよう、本物とは別の作業用の状態で「修飾なし」と「Shift」の段を引く
 
   NOT RESOLVED:
     - コンポーズキー（xkb_compose_*）は未対応
@@ -36,7 +38,9 @@ uses
   SysUtils,
   PaPiMeLa.Types,
   PaPiMeLa.Errors,
-  PaPiMeLa.Platform.DynLib;
+  PaPiMeLa.Platform.DynLib,
+  PaPiMeLa.Keycodes,
+  PaPiMeLa.Events.Keymap;
 
 const
   XKB_KEYMAP_FORMAT_TEXT_V1 = 1;
@@ -70,19 +74,31 @@ type
   Pxkb_state   = Pointer;
   xkb_keysym_t = LongWord;
 
+  // struct xkb_rule_names。配列を名前で指定してキーマップを作る（検査用）。
+  Txkb_rule_names = record
+    rules, model, layout, variant, options: PAnsiChar;
+  end;
+  Pxkb_rule_names = ^Txkb_rule_names;
+
   { キーマップと状態をまとめて持つ。1 つのシートに 1 つ。 }
   TPMLXKBState = class
   strict private
     FKeymap  : Pxkb_keymap;
     FState   : Pxkb_state;
+    FScratch : Pxkb_state;     // キーマップ作成用。修飾を自由に設定して段を引く
+    FGroup   : LongWord;
     FModShift, FModCtrl, FModAlt, FModSuper, FModCaps, FModNum: LongWord;
     procedure LookupModIndices;
     function  GetLoaded: Boolean;
+    function  Install(ANewKeymap: Pxkb_keymap): Boolean;
   public
     destructor Destroy; override;
 
     // コンポジタから受け取ったキーマップ文字列を読み込む。失敗なら False。
     function LoadKeymap(const AText: String): Boolean;
+    // 配列を名前で指定して読み込む（"fr"、"de" など）。コンポジタ無しで配列ごとの
+    // 振る舞いを検査するために使う。xkeyboard-config が無ければ False。
+    function LoadKeymapFromNames(const ALayout: String; const AVariant: String = ''): Boolean;
     procedure UpdateMask(ADepressed, ALatched, ALocked, AGroup: LongWord);
 
     // AEvdevCode は Wayland がそのまま送ってくる値（+8 は内部で行う）。
@@ -91,13 +107,23 @@ type
     function Repeats(AEvdevCode: LongWord): Boolean;
     function Modifiers: TPMLKeyModifiers;
 
+    // 今の配列（Group）で、修飾なし（AShifted = False）または Shift のときのキーシム。
+    // 押されている修飾キーには左右されない。
+    function KeysymAtLevel(AEvdevCode: LongWord; AShifted: Boolean): xkb_keysym_t;
+    // 今の配列から papimela のキーマップを作る。呼び出し側が所有する。
+    function BuildKeymap: TPMLKeymap;
+
     property Loaded: Boolean read GetLoaded;
+    property Group : LongWord read FGroup;
   end;
 
 function PMLXKBLoad: Boolean;
 procedure PMLXKBUnload;
 
 implementation
+
+uses
+  PaPiMeLa.Keycodes.Tables;
 
 const
   LIBXKB_NAMES: array[0..1] of String = ('libxkbcommon.so.0', 'libxkbcommon.so');
@@ -111,6 +137,8 @@ var
   xkb_context_unref : procedure(ctx: Pxkb_context); cdecl = nil;
   xkb_keymap_new_from_string: function(ctx: Pxkb_context; s: PAnsiChar;
     format: LongWord; flags: LongWord): Pxkb_keymap; cdecl = nil;
+  xkb_keymap_new_from_names: function(ctx: Pxkb_context; names: Pxkb_rule_names;
+    flags: LongWord): Pxkb_keymap; cdecl = nil;
   xkb_keymap_unref  : procedure(keymap: Pxkb_keymap); cdecl = nil;
   xkb_keymap_key_repeats: function(keymap: Pxkb_keymap; key: LongWord): LongInt; cdecl = nil;
   xkb_keymap_mod_get_index: function(keymap: Pxkb_keymap; name: PAnsiChar): LongWord; cdecl = nil;
@@ -149,6 +177,7 @@ begin
   Bind(xkb_context_new,            'xkb_context_new');
   Bind(xkb_context_unref,          'xkb_context_unref');
   Bind(xkb_keymap_new_from_string, 'xkb_keymap_new_from_string');
+  Bind(xkb_keymap_new_from_names,  'xkb_keymap_new_from_names');
   Bind(xkb_keymap_unref,           'xkb_keymap_unref');
   Bind(xkb_keymap_key_repeats,     'xkb_keymap_key_repeats');
   Bind(xkb_keymap_mod_get_index,   'xkb_keymap_mod_get_index');
@@ -188,6 +217,8 @@ end;
 
 destructor TPMLXKBState.Destroy;
 begin
+  if FScratch <> nil then
+    xkb_state_unref(FScratch);
   if FState <> nil then
     xkb_state_unref(FState);
   if FKeymap <> nil then
@@ -210,39 +241,68 @@ begin
   FModNum   := xkb_keymap_mod_get_index(FKeymap, 'Mod2');
 end;
 
-function TPMLXKBState.LoadKeymap(const AText: String): Boolean;
+{ 新しいキーマップを据える。状態を 2 つ（本物と作業用）作れなければ何も変えない。 }
+function TPMLXKBState.Install(ANewKeymap: Pxkb_keymap): Boolean;
 var
-  NewKeymap: Pxkb_keymap;
-  NewState : Pxkb_state;
+  NewState, NewScratch: Pxkb_state;
 begin
   Result := False;
-  if GContext = nil then
+  if ANewKeymap = nil then
     Exit;
-  NewKeymap := xkb_keymap_new_from_string(GContext, PAnsiChar(AText),
-    XKB_KEYMAP_FORMAT_TEXT_V1, 0);
-  if NewKeymap = nil then
-    Exit;
-  NewState := xkb_state_new(NewKeymap);
-  if NewState = nil then
+  NewState := xkb_state_new(ANewKeymap);
+  NewScratch := xkb_state_new(ANewKeymap);
+  if (NewState = nil) or (NewScratch = nil) then
   begin
-    xkb_keymap_unref(NewKeymap);
+    if NewState <> nil then
+      xkb_state_unref(NewState);
+    if NewScratch <> nil then
+      xkb_state_unref(NewScratch);
+    xkb_keymap_unref(ANewKeymap);
     Exit;
   end;
 
+  if FScratch <> nil then
+    xkb_state_unref(FScratch);
   if FState <> nil then
     xkb_state_unref(FState);
   if FKeymap <> nil then
     xkb_keymap_unref(FKeymap);
-  FKeymap := NewKeymap;
+  FKeymap := ANewKeymap;
   FState := NewState;
+  FScratch := NewScratch;
+  FGroup := 0;
   LookupModIndices;
   Result := True;
+end;
+
+function TPMLXKBState.LoadKeymap(const AText: String): Boolean;
+begin
+  if GContext = nil then
+    Exit(False);
+  Result := Install(xkb_keymap_new_from_string(GContext, PAnsiChar(AText),
+    XKB_KEYMAP_FORMAT_TEXT_V1, 0));
+end;
+
+function TPMLXKBState.LoadKeymapFromNames(const ALayout, AVariant: String): Boolean;
+var
+  Names: Txkb_rule_names;
+begin
+  if GContext = nil then
+    Exit(False);
+  FillChar(Names, SizeOf(Names), 0);
+  Names.rules := 'evdev';
+  Names.model := 'pc105';
+  Names.layout := PAnsiChar(ALayout);
+  if AVariant <> '' then
+    Names.variant := PAnsiChar(AVariant);
+  Result := Install(xkb_keymap_new_from_names(GContext, @Names, 0));
 end;
 
 procedure TPMLXKBState.UpdateMask(ADepressed, ALatched, ALocked, AGroup: LongWord);
 begin
   if FState = nil then
     Exit;
+  FGroup := AGroup;
   xkb_state_update_mask(FState, ADepressed, ALatched, ALocked, 0, 0, AGroup);
 end;
 
@@ -295,6 +355,48 @@ begin
   if Active(FModSuper) then Include(Result, TPMLKeyModifier.Super);
   if Active(FModCaps)  then Include(Result, TPMLKeyModifier.CapsLock);
   if Active(FModNum)   then Include(Result, TPMLKeyModifier.NumLock);
+end;
+
+
+function TPMLXKBState.KeysymAtLevel(AEvdevCode: LongWord; AShifted: Boolean): xkb_keysym_t;
+var
+  Mask: LongWord;
+begin
+  if FScratch = nil then
+    Exit(0);
+  Mask := 0;
+  if AShifted and (FModShift <> LongWord(-1)) then
+    Mask := LongWord(1) shl FModShift;
+  xkb_state_update_mask(FScratch, Mask, 0, 0, 0, 0, FGroup);
+  Result := xkb_state_key_get_one_sym(FScratch, AEvdevCode + XKB_EVDEV_OFFSET);
+end;
+
+{ PORT-NOTE: SDL の Wayland_KeymapIterator にあたる。SDL は xkb のキーマップの
+  段（level）を全部たどり、段ごとの修飾の組み合わせで登録する。ここでは作業用の
+  状態に「修飾なし」と「Shift」を設定して 2 段だけ引く（PaPiMeLa.Events.Keymap の
+  RESOLVED を参照）。スキャンコードは evdev の表から決まる。 }
+function TPMLXKBState.BuildKeymap: TPMLKeymap;
+var
+  Evdev: LongWord;
+  Scancode: TPMLScancode;
+  Shifted: Boolean;
+  Sym: xkb_keysym_t;
+begin
+  Result := TPMLKeymap.Create;
+  if FKeymap = nil then
+    Exit;
+  for Evdev := 0 to High(PML_LINUX_SCANCODES) do
+  begin
+    Scancode := PMLScancodeFromEvdev(Evdev);
+    if Scancode = TPMLScancode.UNKNOWN then
+      Continue;
+    for Shifted := False to True do
+    begin
+      Sym := KeysymAtLevel(Evdev, Shifted);
+      if Sym <> 0 then
+        Result.SetEntry(Scancode, Shifted, PMLKeymapKeycode(Sym, Scancode, Shifted));
+    end;
+  end;
 end;
 
 end.

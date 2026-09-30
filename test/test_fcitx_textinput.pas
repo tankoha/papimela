@@ -168,7 +168,7 @@ var
 begin
   FillChar(K, SizeOf(K), 0);
   K.Keysym := AKeysym;
-  K.Keycode := AKeycode;
+  K.Raw := AKeycode;
   K.Modifiers := [];
   // IME が消費したキーは KeyDown / KeyUp を積まない（§7.9）。
   Ctx.TextInput.FilterKey(K, False);

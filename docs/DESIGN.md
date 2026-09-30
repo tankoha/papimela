@@ -723,7 +723,7 @@ type
 
 - `SizeOf(TPMLEvent)` は 64〜96 バイト程度になる見込み。イベントキューはこれを値として持つリングバッファ（`TPMLRingBuffer<TPMLEvent>`）で、上書き時に管理型フィールドの参照カウントが自動で減る。**ヒープ確保は管理型フィールドが実際に使われるイベント（テキスト・D&D）にだけ発生**し、キー・マウス・ジョイスティックはゼロアロケーション。
 - `TPMLEvent.Text` は UTF-8 `String`。バックエンドが Wayland から受けた `PChar` を一度だけコピーし、以後はキュー → アプリまで参照カウントで渡る。
-- `TPMLKeyEventData.Keycode` / `Scancode` は `{$scopedenums}` の列挙。値の並びは SDL の `SDL_Scancode`（USB HID Usage）と同一にし、既存資料との対応を保つ。
+- `TPMLKeyEventData.Scancode` は `{$scopedenums}` の列挙で、値は SDL の `SDL_Scancode`（USB HID Usage）と同一にし、既存資料との対応を保つ。FPC は値を指定した列挙を配列の添字に使えないので、0..511 の隙間の無い列挙にして SDL の値の無いところを `UnusedNNN` で埋めた。`Key`（キーコード）は列挙にしない。印字できるキーの値は Unicode のコードポイントで範囲が開いているため、`TPMLKeycode = type LongWord` と `PMLK_*` 定数にした。旧 `Keycode`（evdev + 8）は SDL3 に合わせて `Raw` に改名した。
 
 ### 6.3 キューとディスパッチャ
 
@@ -1245,9 +1245,9 @@ wayland-scanner の Pascal 版。C の `wayland-scanner` が生成する `*-clie
 | 21 | `PaPiMeLa.Platform.PipeWire` | `audio/pipewire/SDL_pipewire.c` の冒頭 + PipeWire `spa/` ヘッダ | 中 | 10 | P2 | 一部移植 | **High** | Opus | `spa_pod_builder` の Pascal 再実装（未解決 7）。PipeWire ヘッダ（MIT）の告知 |
 | 22 | `PaPiMeLa.Events` | `events/SDL_events.c` (2090)、`SDL_eventwatch.c`、`SDL_quit.c` | 大 | 2, 7, 8, 9 | P1 | クリーンルーム | **High** | Opus | 6.2 のレコード、リングバッファ、`poll` セットの統合、`WakeUp`、`Push` のスレッド安全性、ウォッチ/フィルタ。SDL のキュー実装の回避策（センチネル、満杯時の扱い）は移植 |
 | 23 | `PaPiMeLa.Events.Dispatcher` | （v1 4.2 の設計） | 中 | 22 | P1 | クリーンルーム | Medium | Sonnet | 型別リスナーの `Supports` 検出、配信中の Add/Remove、ウィンドウ別振り分け、`of object` イベント |
-| 24 | `PaPiMeLa.Events.Keyboard`、`.Events.Keymap` | `events/SDL_keyboard.c` (969)、`SDL_keymap.c` (1231) | 大 | 22, 4 | P1 | 一部移植 | **High** | Opus | 状態機械は移植。**IME フィルタフック（7.5）と `TPMLDeferredKeyQueue` は新規**。フォーカス喪失時の全キー解放 |
+| 24 | `PaPiMeLa.Events.Keyboard`、`.Events.Keymap` | `events/SDL_keyboard.c` (969)、`SDL_keymap.c` (1231) | 大 | 22, 4 | P1 | 一部移植 | **High** | Opus | 状態機械は移植。**IME フィルタフック（7.5）と `TPMLDeferredKeyQueue` は新規**。フォーカス喪失時の全キー解放。**実装済み（Pong の F-1〜F-3）**: `.Events.Keymap` は独立したユニット、押下状態（`IsDown`）と全キー解放は `TPMLKeyboardState` として `PaPiMeLa.Events` に置いた（`.Events.Keyboard` は作らなかった）。キーマップは「修飾なし」と「Shift」の 2 段のみ |
 | 25 | `PaPiMeLa.Events.Mouse`、`.Events.Touch` | `events/SDL_mouse.c` (1991)、`SDL_touch.c` (635) | 大 | 22 | P1 | 移植 | Medium | Sonnet | 相対モード、クリック回数、二重押下抑制、`TPMLCursorBackend` との境界 |
-| 26 | `tools/genscancodes` + 表ユニット | `events/scancodes_linux.h`、`SDL_keysym_to_scancode.c` (439)、`imKStoUCS.c` (349)、`SDL_scancode_tables.c` | 中 | — | P1 | 移植 | Low | qwen | 表データを Pascal 配列へ。生成器は任意（手で写してもよい） |
+| 26 | `PaPiMeLa.Keycodes`、`.Keycodes.Tables`（`tools/genscancodes.bb` が生成） | `events/scancodes_linux.h`、`SDL_keysym_to_scancode.c` (439)、`imKStoUCS.c` (349)、`SDL_scancode_tables.c` | 中 | — | P1 | 移植 | Low | qwen | 表データを Pascal 配列へ。**手でも qwen でも写さず、生成器が SDL のソースから抜き出す**（件数を元と突き合わせる）。`imKStoUCS.c` の範囲判定に上流の不具合があり（D-36）、生成器が警告する |
 | 27 | `PaPiMeLa.Pixels` | `video/SDL_pixels.c` (1711) | 中 | 3 | P1 | 移植 | Low | qwen | フォーマット詳細、パレット、色空間、`MapRGBA` |
 | 28 | `PaPiMeLa.Surface`、`.Surface.BMP` | `video/SDL_surface.c` (3169)、`SDL_bmp.c` (945) | 大 | 27, 64 | P1 | 移植 | Medium | Sonnet | `IPMLSurface` 共有 opt-in、`TStream` での BMP 入出力、Blit 系のオーバーロード整理 |
 | 29 | `PaPiMeLa.Surface.Blit`（手書きブリッタ群） | `SDL_blit.c`、`SDL_blit_0/1/A/N/slow/copy.c`（計約 8000）、`SDL_RLEaccel.c` (1395)、`SDL_stretch.c` (950)、`SDL_rotate.c` (605)、`SDL_fillrect.c` (437) | 大 | 27 | P1 | 移植 | Low | qwen | **スカラー版のみ**。SIMD `#ifdef` は落とす。マクロ展開（`DUFFS_LOOP` 等）は素直なループに |

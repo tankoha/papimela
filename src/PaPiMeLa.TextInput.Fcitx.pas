@@ -388,7 +388,7 @@ begin
   try
     W := FConn.Writer(Msg);
     W.AddUInt32(AKey.Keysym);
-    W.AddUInt32(AKey.Keycode);
+    W.AddUInt32(AKey.Raw);
     W.AddUInt32(ModifiersToState(AKey.Modifiers));
     W.AddBoolean(AIsRelease);
     W.AddUInt32(0);   // time。0 は「不明」として扱われる

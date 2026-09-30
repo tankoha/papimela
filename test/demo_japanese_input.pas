@@ -185,7 +185,7 @@ begin
           Inc(KeyCount);
           // IME を素通りしたキー。何が素通りしたのか分かるよう keysym を出す。
           WriteLn(Format('  KeyDown 素通り keysym=$%x keycode=%d',
-            [Ev.Key.Keysym, Ev.Key.Keycode]));
+            [Ev.Key.Keysym, Ev.Key.Raw]));
           case Ev.Key.Keysym of
             XKB_KEY_Escape   : Running := False;
             XKB_KEY_BackSpace: begin Editor.Backspace;

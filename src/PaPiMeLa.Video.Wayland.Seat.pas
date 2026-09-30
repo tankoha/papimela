@@ -52,6 +52,7 @@ uses
   PaPiMeLa.Errors,
   PaPiMeLa.Core.Base,
   PaPiMeLa.Events,
+  PaPiMeLa.Events.Keymap,
   PaPiMeLa.Platform.XKB,
   PaPiMeLa.Platform.Wayland.Client,
   PaPiMeLa.Platform.Wayland.Protocols.Wayland,
@@ -547,7 +548,8 @@ begin
     Text := String(PAnsiChar(Map));
     if not FXKB.LoadKeymap(Text) then
       Exit;
-    FQueue.PushSimple(TPMLEventKind.KeymapChanged);
+    // スキャンコード → キーコードの表を作り直す。KeymapChanged はこの中で積まれる。
+    FQueue.Keyboard.SetKeymap(FXKB.BuildKeymap);
   finally
     Fpmunmap(Map, ASize);
     FpClose(AFD);
@@ -589,8 +591,10 @@ var
   Text: String;
 begin
   FillChar(K, SizeOf(K), 0);
+  K.Scancode := PMLScancodeFromEvdev(AEvdevCode);
+  // K.Key は TPMLKeyboardState が今のキーマップから決める。
   K.Keysym := FXKB.KeysymOf(AEvdevCode);
-  K.Keycode := AEvdevCode + XKB_EVDEV_OFFSET;
+  K.Raw := AEvdevCode + XKB_EVDEV_OFFSET;
   K.Modifiers := FXKB.Modifiers;
   K.IsRepeat := AIsRepeat;
 
@@ -624,8 +628,14 @@ end;
 
 procedure TPMLWaylandSeat.HandleModifiers(ADepressed, ALatched, ALocked,
   AGroup: LongWord);
+var
+  OldGroup: LongWord;
 begin
+  OldGroup := FXKB.Group;
   FXKB.UpdateMask(ADepressed, ALatched, ALocked, AGroup);
+  // 配列が切り替わった（例: us と ru を切り替えて使う設定）。キーマップを作り直す。
+  if FXKB.Group <> OldGroup then
+    FQueue.Keyboard.SetKeymap(FXKB.BuildKeymap);
   FQueue.Keyboard.SendModifiers(FXKB.Modifiers);
 end;
 
