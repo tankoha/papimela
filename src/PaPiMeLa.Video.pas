@@ -72,7 +72,12 @@ type
     function Borderless: TPMLWindowOptions;
     function HighPixelDensity: TPMLWindowOptions;
     function StartHidden: TPMLWindowOptions;
+    { GL で描くウィンドウにする（SDL_WINDOW_OPENGL）。CreateGLContext に必要。
+      Wayland では最初の絵を GL が出すので、ソフトウェアの最初の 1 枚を出さない。 }
+    function OpenGL: TPMLWindowOptions;
   end;
+
+  TPMLGLContext = class;
 
   TPMLDisplay = class sealed(TPMLSystemObject)
   strict private
@@ -109,6 +114,7 @@ type
     FRelativeMouseMode: Boolean;
     FMouseRect      : TPMLRect;
     FDependents     : array of IPMLWindowDependent;
+    FGL             : TPMLGLBackend;    // 借りている。ビデオのバックエンドが持つ
     procedure SetTitle(const AValue: String);
     procedure SetMouseGrab(AValue: Boolean);
     procedure SetRelativeMouseMode(AValue: Boolean);
@@ -155,6 +161,14 @@ type
     procedure RemoveDependent(const ADependent: IPMLWindowDependent);
     function  DependentCount: Integer;
 
+    // GL（SDL_GL_CreateContext / SDL_GL_SwapWindow）。能力 OpenGLES と、
+    // TPMLWindowOptions.OpenGL で作ったウィンドウが要る。無ければ EPMLUnsupported。
+    // 作ったコンテキストはこのウィンドウに対して現在のものになる。所有者はウィンドウ。
+    function  CreateGLContext: TPMLGLContext; overload;
+    function  CreateGLContext(const AAttrs: TPMLGLAttributes): TPMLGLContext; overload;
+    // 描いた絵を画面へ出す。待つかどうかは TPMLGLContext.SwapInterval に従う。
+    procedure SwapGL;
+
     function  NativeHandles: TPMLNativeWindowHandles;
 
     property ID      : TPMLWindowID read FID;
@@ -172,6 +186,34 @@ type
     property MouseRect: TPMLRect read FMouseRect write SetMouseRect;
     property CloseRequested: Boolean read FCloseRequested;
     property Backend : TPMLWindowBackend read FBackend;
+  end;
+
+  { GL のコンテキスト（SDL_GLContext）。TPMLWindow.CreateGLContext で作る。
+
+    所有者は作ったウィンドウ。アプリが先に Free してもよく、ウィンドウが先に
+    消えればコンテキストも消える（IPMLWindowDependent。レンダラと同じ）。
+    GL の関数は TPMLVideoSystem.GLGetProcAddress で取る。 }
+  TPMLGLContext = class sealed(TPMLOwnedObject, IPMLWindowDependent)
+  strict private
+    FWindow: TPMLWindow;
+    FGL    : TPMLGLBackend;
+    FHandle: TPMLGLContextHandle;
+    function  GetSwapInterval: Integer;
+    procedure SetSwapInterval(AValue: Integer);
+  protected
+    procedure DetachFromOwner; override;
+    procedure WindowDestroying(AWindow: TPMLWindow);
+  public
+    // TPMLWindow.CreateGLContext だけが呼ぶ。
+    constructor Create(AWindow: TPMLWindow; AGL: TPMLGLBackend; AHandle: TPMLGLContextHandle);
+    destructor Destroy; override;
+    // このコンテキストを、作ったウィンドウに対して現在のものにする。
+    procedure MakeCurrent;
+    // 0 = 待たない、1 = 画面の更新を待つ、-1 = 間に合わなければ待たない。
+    // 受け付けない値なら EPMLUnsupported。
+    property SwapInterval: Integer read GetSwapInterval write SetSwapInterval;
+    property Window: TPMLWindow read FWindow;
+    property Handle: TPMLGLContextHandle read FHandle;
   end;
 
   { カーソルの公開窓口。TPMLVideoSystem.Cursors で取る。
@@ -227,6 +269,8 @@ type
     destructor Destroy; override;
 
     function  CreateWindow(const AOptions: TPMLWindowOptions): TPMLWindow;
+    // GL の関数の番地（SDL_GL_GetProcAddress）。能力 OpenGLES が要る。無ければ nil。
+    function  GLGetProcAddress(const AName: String): Pointer;
     function  WindowFromID(AID: TPMLWindowID): TPMLWindow;
     function  PrimaryDisplay: TPMLDisplay;
     procedure Require(ACapability: TPMLVideoCapability; const AWhat: String);
@@ -287,6 +331,12 @@ function TPMLWindowOptions.Resizable: TPMLWindowOptions;
 begin
   Result := Self;
   Include(Result.Flags, TPMLWindowFlag.Resizable);
+end;
+
+function TPMLWindowOptions.OpenGL: TPMLWindowOptions;
+begin
+  Result := Self;
+  Include(Result.Flags, TPMLWindowFlag.OpenGL);
 end;
 
 function TPMLWindowOptions.Borderless: TPMLWindowOptions;
@@ -361,6 +411,7 @@ begin
   FWidth := AOptions.Width;
   FHeight := AOptions.Height;
   FFlags := AOptions.Flags;
+  FGL := ASystem.Backend.GL;
 end;
 
 destructor TPMLWindow.Destroy;
@@ -375,6 +426,10 @@ begin
     SetLength(FDependents, Length(FDependents) - 1);
     D.WindowDestroying(Self);
   end;
+  // GL の面はウィンドウのバックエンド（wl_surface）より先に畳む。FSystem が
+  // 先に消えていても部品はまだ生きている（ビデオのバックエンドはウィンドウより後に消える）。
+  if (FGL <> nil) and (FBackend <> nil) then
+    FGL.ReleaseWindow(FBackend);
   if Assigned(FSystem) then
     FSystem.RemoveWindow(Self);
   FreeAndNil(FBackend);
@@ -597,6 +652,99 @@ begin
   Result := FBackend.NativeHandles;
 end;
 
+
+{ ---- GL ---- }
+
+function TPMLWindow.CreateGLContext: TPMLGLContext;
+begin
+  Result := CreateGLContext(TPMLGLAttributes.Default);
+end;
+
+function TPMLWindow.CreateGLContext(const AAttrs: TPMLGLAttributes): TPMLGLContext;
+var
+  H: TPMLGLContextHandle;
+begin
+  CheckMainThread;
+  FSystem.Require(TPMLVideoCapability.OpenGLES, 'OpenGL ES');
+  if not (TPMLWindowFlag.OpenGL in FFlags) then
+    raise EPMLUnsupported.CreateNative(
+      'the window was not created with TPMLWindowOptions.OpenGL', 0, FSystem.BackendName);
+  H := FGL.CreateContext(FBackend, AAttrs);
+  if H = nil then
+    raise EPMLVideoError.CreateNative('failed to create a GL context: ' + FGL.LastError,
+      0, FSystem.BackendName);
+  Result := TPMLGLContext.Create(Self, FGL, H);
+end;
+
+procedure TPMLWindow.SwapGL;
+begin
+  if FGL = nil then
+    raise EPMLUnsupported.CreateNative('OpenGL ES is not available', 0, '');
+  if not FGL.SwapWindow(FBackend) then
+    raise EPMLVideoError.CreateNative('failed to swap: ' + FGL.LastError, 0, '');
+end;
+
+function TPMLVideoSystem.GLGetProcAddress(const AName: String): Pointer;
+begin
+  Require(TPMLVideoCapability.OpenGLES, 'OpenGL ES');
+  Result := FBackend.GL.GetProcAddress(AName);
+end;
+
+{ TPMLGLContext }
+
+constructor TPMLGLContext.Create(AWindow: TPMLWindow; AGL: TPMLGLBackend;
+  AHandle: TPMLGLContextHandle);
+begin
+  inherited Create(AWindow.ContextRef, AWindow);
+  FWindow := AWindow;
+  FGL := AGL;
+  FHandle := AHandle;
+  AWindow.AddDependent(Self);
+end;
+
+destructor TPMLGLContext.Destroy;
+begin
+  if FHandle <> nil then
+    FGL.DestroyContext(FHandle);
+  FHandle := nil;
+  inherited Destroy;
+end;
+
+procedure TPMLGLContext.DetachFromOwner;
+begin
+  // アプリが先に Free した。ウィンドウの一覧から外れる。
+  if FWindow <> nil then
+    FWindow.RemoveDependent(Self);
+  FWindow := nil;
+  inherited DetachFromOwner;
+end;
+
+procedure TPMLGLContext.WindowDestroying(AWindow: TPMLWindow);
+begin
+  FWindow := nil;
+  OwnerDestroying;
+end;
+
+procedure TPMLGLContext.MakeCurrent;
+begin
+  if FWindow = nil then
+    raise EPMLVideoError.CreateNative('the window of this GL context is gone', 0, '');
+  if not FGL.MakeCurrent(FWindow.Backend, FHandle) then
+    raise EPMLVideoError.CreateNative('failed to make the GL context current: ' +
+      FGL.LastError, 0, '');
+end;
+
+function TPMLGLContext.GetSwapInterval: Integer;
+begin
+  Result := FGL.GetSwapInterval;
+end;
+
+procedure TPMLGLContext.SetSwapInterval(AValue: Integer);
+begin
+  if not FGL.SetSwapInterval(AValue) then
+    raise EPMLUnsupported.CreateNative(Format('swap interval %d is not supported', [AValue]),
+      0, '');
+end;
 
 { TPMLCursorSystem }
 

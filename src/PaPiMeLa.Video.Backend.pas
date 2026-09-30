@@ -185,6 +185,67 @@ type
     procedure SetVisible(AVisible: Boolean); virtual; abstract;
   end;
 
+  TPMLGLProfile = (ES, Core, Compatibility);
+
+  { GL のコンテキストと描画先に求める性質。SDL_GL_SetAttribute の値をまとめたもの。
+
+    WHY:
+      SDL は属性を大域の gl_config に置き、ウィンドウの生成時とコンテキストの
+      生成時にそれを読む。papimela は値として CreateGLContext に渡す。大域の状態が
+      無いので、ウィンドウごとに違う属性を使える。 }
+  TPMLGLAttributes = record
+    RedSize, GreenSize, BlueSize, AlphaSize: Integer;
+    DepthSize, StencilSize: Integer;
+    MajorVersion, MinorVersion: Integer;
+    Profile: TPMLGLProfile;
+    Debug  : Boolean;
+    { SDL_GL_ResetAttributes の値（RGBA 各 8 ビット、深度 16 ビット）で、
+      OpenGL ES 2.0。 }
+    class function Default: TPMLGLAttributes; static;
+  end;
+
+  { コンテキストの識別子。中身はバックエンドが決める（EGL では EGLContext）。 }
+  TPMLGLContextHandle = Pointer;
+
+  { GL の部品。TPMLVideoBackend.GL が nil でなければ使える（能力 OpenGLES）。
+
+    SDL_VideoDevice の GL 11 個に対応する。ウィンドウに描くための面（EGL の
+    サーフェス）は部品がウィンドウごとに持ち、最初の CreateContext で作る。
+    面の属性（色の深さなど）はそのときの AAttrs で決まり、そのウィンドウでは
+    以後変わらない。
+
+    RESOLVED:
+      - 面はウィンドウより先に畳む。TPMLWindow は自分のバックエンドを壊す前に
+        ReleaseWindow を呼ぶ
+      - 例外は投げず、失敗は False / nil と LastError で返す。公開層が
+        EPMLVideoError に変える }
+  TPMLGLBackend = class abstract(TPMLSystemObject)
+  strict protected
+    FLastError: String;
+  public
+    { AName の関数の番地。見つからなければ nil。 }
+    function  GetProcAddress(const AName: String): Pointer; virtual; abstract;
+    { AWindow に描くコンテキストを作る。AWindow の面がまだ無ければ AAttrs で作る。
+      作ったコンテキストを AWindow に対して現在のコンテキストにして返す。 }
+    function  CreateContext(AWindow: TPMLWindowBackend;
+      const AAttrs: TPMLGLAttributes): TPMLGLContextHandle; virtual; abstract;
+    { AWindow と AContext を現在のものにする。両方 nil なら何も現在でなくする。 }
+    function  MakeCurrent(AWindow: TPMLWindowBackend;
+      AContext: TPMLGLContextHandle): Boolean; virtual; abstract;
+    procedure DestroyContext(AContext: TPMLGLContextHandle); virtual; abstract;
+    { 描いた絵を画面へ出す（SDL_GL_SwapWindow）。面の無いウィンドウでは False。 }
+    function  SwapWindow(AWindow: TPMLWindowBackend): Boolean; virtual; abstract;
+    { 0 = 待たない、1 = 画面の更新を待つ、-1 = 適応（間に合わなければ待たない）。
+      受け付けない値なら False。 }
+    function  SetSwapInterval(AInterval: Integer): Boolean; virtual; abstract;
+    function  GetSwapInterval: Integer; virtual; abstract;
+    { AWindow の面を畳む。面が無ければ何もしない。ウィンドウのバックエンドを
+      壊す前に必ず呼ばれる。 }
+    procedure ReleaseWindow(AWindow: TPMLWindowBackend); virtual; abstract;
+    { 直近の失敗の説明。 }
+    property  LastError: String read FLastError;
+  end;
+
   TPMLDisplayBackend = class abstract(TPMLSystemObject)
   public
     function  GetName: String; virtual; abstract;
@@ -203,6 +264,7 @@ type
     FSink        : IPMLVideoSink;
     FCapabilities: TPMLVideoCapabilities;
     FCursors     : TPMLCursorBackend;
+    FGL          : TPMLGLBackend;
   public
     function  BackendName: String; virtual; abstract;
     function  Connect(ASink: IPMLVideoSink): Boolean; virtual; abstract;
@@ -220,6 +282,7 @@ type
 
     // 部品（nil = 未搭載。能力で判定する）。所有はバックエンド。
     property Cursors     : TPMLCursorBackend read FCursors;
+    property GL          : TPMLGLBackend read FGL;
     property Capabilities: TPMLVideoCapabilities read FCapabilities;
   end;
 
@@ -300,6 +363,21 @@ end;
 function TPMLWindowBackend.SetFramebufferVSync(AInterval: Integer): Boolean;
 begin
   Result := AInterval = 0;
+end;
+
+{ TPMLGLAttributes }
+
+class function TPMLGLAttributes.Default: TPMLGLAttributes;
+begin
+  FillChar(Result, SizeOf(Result), 0);
+  Result.RedSize := 8;
+  Result.GreenSize := 8;
+  Result.BlueSize := 8;
+  Result.AlphaSize := 8;
+  Result.DepthSize := 16;
+  Result.MajorVersion := 2;
+  Result.MinorVersion := 0;
+  Result.Profile := TPMLGLProfile.ES;
 end;
 
 function TPMLWindowBackend.NativeHandles: TPMLNativeWindowHandles;

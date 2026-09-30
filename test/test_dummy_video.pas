@@ -88,6 +88,7 @@ var
   Mode    : TPMLDisplayMode;
   WB      : TPMLDummyWindowBackend;
   Opts    : TPMLContextOptions;
+  Raised  : Boolean;
 begin
   WriteLn('test_dummy_video — 表示サーバ無しでの公開 API');
   WriteLn;
@@ -139,6 +140,18 @@ begin
 
     Win.Title := 'renamed';
     Check(WB.Title = 'renamed', 'タイトルを変えられる');
+
+    // ダミーは GL を持たない。能力で断られ、落ちないこと。
+    Check(not (TPMLVideoCapability.OpenGLES in Ctx.Video.Capabilities),
+      'ダミーには能力 OpenGLES が無い');
+    Raised := False;
+    try
+      Win.CreateGLContext;
+    except
+      on E: EPMLUnsupported do
+        Raised := True;
+    end;
+    Check(Raised, 'CreateGLContext は EPMLUnsupported');
 
     WriteLn;
     WriteLn('4. フレームバッファ');

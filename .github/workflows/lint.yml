@@ -54,6 +54,9 @@ jobs:
           for f in src/generated/*.pas; do
             fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib "$f"
           done
+          # GL の検査は GPU が要るので CI では走らせないが、コンパイルだけは通す
+          # （EGL / GLES2 のユニットを壊していないことの確認）。
+          fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_gl_window test/test_gl_window.pas
 
       # Babashka は checkorigin と qwen-gen が使う。単一バイナリなので導入は速い。
       - name: Install Babashka

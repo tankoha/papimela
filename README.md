@@ -84,20 +84,20 @@ the D-Bus route is not an optimisation, it is the only way.
 
 ### State
 
-Roughly 26,000 lines across 32 hand-written units and 21 generated Wayland
+Roughly 28,000 lines across 37 hand-written units and 21 generated Wayland
 protocol units. Working: Wayland windows, the seat (keyboard with xkb, pointer,
 touch, pointer constraints, cursor shapes), keyboard state with SDL-compatible
 scancodes and keycodes, the event queue, the IME path through
 fcitx5, pixel formats, surfaces, BMP, blitters, a software renderer that draws
-into a window with VSync, and a headless video backend so tests can run without
+into a window with VSync, OpenGL ES contexts on Wayland windows through EGL, and a headless video backend so tests can run without
 a display server. There is a playable Pong in `examples/`.
 
-17 test programs, 523 assertions, all passing. CI runs a static analyser in its
+18 test programs, 550 assertions, all passing. CI runs a static analyser in its
 strictest mode (one warning fails the build), checks that the class diagrams
 still match the code, checks that every file's stated provenance matches the
 design document, and runs the tests that don't need a screen.
 
-Not done yet: a GPU renderer, GL, audio, joystick, and everything in the design
+Not done yet: the GPU render driver (GL contexts work; the GLES2 driver is next), desktop GL, audio, joystick, and everything in the design
 document's later chapters. What writing Pong showed to be missing is listed in
 `examples/README.md`.
 
@@ -187,20 +187,20 @@ Wayland の `text-input-v3` ではこれは表現できない（preedit のス�
 
 ### 現状
 
-手書き 32 ユニットと生成した Wayland プロトコル 21 ユニット、およそ 2 万 6 千行。
+手書き 37 ユニットと生成した Wayland プロトコル 21 ユニット、およそ 2 万 8 千行。
 動いているのは、Wayland のウィンドウ、シート（xkb を使ったキーボード、ポインタ、
 タッチ、ポインタ拘束、カーソル形状）、SDL と同じ値のスキャンコードとキーコードを
 持つキーボードの状態、イベントキュー、fcitx5 経由の IME、
 ピクセル形式、サーフェス、BMP、ブリッタ、ウィンドウへ VSync つきで描く
-ソフトウェアレンダラ、そして表示サーバ無しでテストを回すためのヘッドレス
+ソフトウェアレンダラ、EGL による Wayland ウィンドウ上の OpenGL ES コンテキスト、そして表示サーバ無しでテストを回すためのヘッドレス
 バックエンド。`examples/` には遊べる Pong がある。
 
-テストは 17 本、523 アサーション、全て成功。CI は静的解析を最も厳しい設定で
+テストは 18 本、550 アサーション、全て成功。CI は静的解析を最も厳しい設定で
 回し（warning 1 件でビルドが落ちる）、クラス図がコードと食い違っていないかを
 確かめ、各ファイルが名乗っている由来が設計書と一致するかを確かめ、画面の要らない
 テストを実行する。
 
-まだ無いもの: GPU のレンダラ、GL、オーディオ、ジョイスティック、設計書の
+まだ無いもの: GPU で描くレンダラのドライバ（GL のコンテキストは動く。GLES2 のドライバが次）、デスクトップ GL、オーディオ、ジョイスティック、設計書の
 後ろの章にあるもの一式。Pong を書いてみて足りなかったものは
 `examples/README.md` にまとめてある。
 

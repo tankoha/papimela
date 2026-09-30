@@ -24,7 +24,8 @@
 
   NOT RESOLVED:
     - シートはキーボード / ポインタ / タッチを実装済み。タブレット（tablet-v2）は未対応
-    - GL / Vulkan / クリップボードの部品は nil のまま（#33、#38、#39）。
+    - Vulkan / クリップボードの部品は nil のまま。GL の部品は
+      libEGL と libwayland-egl があれば作る（#33、#39。読み込みは最初のコンテキストまで遅らせる）。
       カーソル部品は cursor-shape-v1 で実装済みだが、任意ピクセルのカーソルは未対応
     - ディスプレイ hotplug は DisplaysChanged で全列挙をやり直すだけ
 
@@ -48,8 +49,10 @@ uses
   PaPiMeLa.Video.Wayland.Window,
   PaPiMeLa.Video.Wayland.Seat,
   PaPiMeLa.Video.Wayland.Cursor,
+  PaPiMeLa.Video.Wayland.EGL,
   PaPiMeLa.Events,
   PaPiMeLa.Platform.XKB,
+  PaPiMeLa.Platform.DynLib,
   PaPiMeLa.Platform.Wayland.Client,
   PaPiMeLa.Platform.Wayland.Protocols.Wayland;
 
@@ -152,6 +155,7 @@ end;
 destructor TPMLWaylandVideoBackend.Destroy;
 begin
   FreeAndNil(FCursors);
+  FreeAndNil(FGL);
   DestroySeats;
   FreeAndNil(FConn);
   inherited Destroy;
@@ -185,10 +189,22 @@ begin
 
   // カーソル部品。cursor-shape-v1 が無くても表示 / 非表示は使えるので常に作る。
   FCursors := TPMLWaylandCursorBackend.Create(ContextRef, Self, @GetSeats);
+
+  // GL の部品。両方のライブラリが開ければ能力 OpenGLES を出す。開くのは確認だけで、
+  // 読み込み（PMLEGLLoad）は最初のコンテキストまで遅らせる。
+  if TPMLDynLib.IsAvailable(['libEGL.so.1', 'libEGL.so'])
+    and TPMLDynLib.IsAvailable(['libwayland-egl.so.1', 'libwayland-egl.so']) then
+  begin
+    FGL := TPMLWaylandEGL.Create(ContextRef, Self, FConn);
+    Include(FCapabilities, TPMLVideoCapability.OpenGLES);
+  end;
 end;
 
 procedure TPMLWaylandVideoBackend.Disconnect;
 begin
+  // GL の部品は wl_display を借りている（eglTerminate が接続を使う）ので、
+  // 接続を切る前に捨てる。ウィンドウはこの時点で既に無い。
+  FreeAndNil(FGL);
   // カーソル部品はシートを触るので、シートより先に捨てる。
   FreeAndNil(FCursors);
   DestroySeats;

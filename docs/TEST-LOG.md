@@ -3,7 +3,7 @@
 papimela で実行したテストの記録。日時は実測値（ファイルの mtime と git のコミット時刻、
 および最終一括実行の時刻）に基づく。
 
-最終一括実行: **2026-09-30**（自動テスト 17 本すべて成功、アサーション 523 件・失敗 0 件）。
+最終一括実行: **2026-09-30**（自動テスト 18 本すべて成功、アサーション 550 件・失敗 0 件）。
 対話テスト T-07 / T-09 と、実機での計測 T-18 も同日に別途実行し、観測項目をすべて確認した。
 
 ## 1. 実行可能テスト
@@ -20,7 +20,7 @@ papimela で実行したテストの記録。日時は実測値（ファイル�
 | T-08 | `test/test_pointer_constraints` | ポインタ拘束。能力への写像、要求の記録、そして**拘束の張り替えがプロトコルに違反しないこと** | 2026-09-29 | **PASS 23 / 0** | ロックと閉じ込めを同じシート・同じサーフェスに同時に作ると接続が切られるので、`wl_display_get_error` が終始 0 であることが張り替え順序の証明になる。拘束が**有効になる**かはカーソル位置に依存するため観測扱い（T-09 が担当）。D-24 はこのテストで見つかった |
 | T-09 | `test/demo_pointer_constraints`（**対話・人の操作**） | カーソルをウィンドウ内に入れた状態でロック / 閉じ込め / 相対移動 / カーソル形状が実際に有効になるか | 2026-09-29 | **PASS 観測項目 5 / 5** | 人の目による確認。観測内容は下表。D-25〜D-28 はこのテストで見つかった（すべてデモ側の欠陥） |
 | T-10 | `test/test_touch_cursor` | タッチの状態機械（移動量の算出、ウィンドウの引き継ぎ、取り消し）と cursor-shape-v1 の対応表・能力・切り替え | 2026-09-29 | **PASS 41 / 0** | タッチは合成入力。Wayland は移動量を送らず motion / up にウィンドウも付けないので、そこを埋める部分がタッチ対応の実体であり、ハードウェア無しで検証できる。**実機のタッチパネルは手元に無く未検証**。カーソル形状の実際の適用はカーソル位置に依存するため T-09 が担当 |
-| T-11 | `test/test_dummy_video` | **表示サーバ無し**で公開 API（ウィンドウ生成・リサイズ・状態・フレームバッファ）が動くか | 2026-09-29 | **PASS 38 / 0** | `WAYLAND_DISPLAY` と `DISPLAY` を外して実行しても通る。**CI で走る実行テストの 1 本**。D-29 はこのテストを書いていて見つかった |
+| T-11 | `test/test_dummy_video` | **表示サーバ無し**で公開 API（ウィンドウ生成・リサイズ・状態・フレームバッファ）が動くか | 2026-09-29 | **PASS 40 / 0** | `WAYLAND_DISPLAY` と `DISPLAY` を外して実行しても通る。**CI で走る実行テストの 1 本**。D-29 はこのテストを書いていて見つかった |
 | T-12 | `test/test_pixels` | ピクセル形式の識別、マスクの導出、色 ↔ 画素値の往復 | 2026-09-29 | **PASS 52 / 0** | **表示サーバ不要。CI で走る。** マスクは SDL の 240 行の switch を「並びとレイアウトからの算出」に置き換えたので、13 形式のマスクを SDL の定義と直接比較し、さらに 8 ビット成分の 12 形式 x 6 色で往復一致を検査する。D-31 はこの往復検査で見つかった |
 | T-13 | `test/test_io` | ストリーム。ファイルの往復、型付き読み書きのバイト順、既存メモリの参照、**小刻みにしか返さない相手からの読み切り** | 2026-09-30 | **PASS 31 / 0** | **表示サーバ不要。CI で走る。** 1 回 7 バイトしか返さないストリームを自前で用意して噛ませる。普通のファイルは要求どおり返すので、これが無いと SDL から引き継いだ回避策を通せない。D-32 はこの検査で見つかった |
 | T-14 | `test/test_surface` | サーフェスの生成・所有・画素・変換・反転、共有の opt-in、BMP の往復 | 2026-09-30 | **PASS 45 / 0** | **表示サーバ不要。CI で走る。** BMP は書いて読み直して一致するかを見る。幅 13 の 24 ビット（行に詰め物が要る）と 32 ビットのアルファ付きの両方。加えて手で組んだ 8 ビットパレット BMP を読ませ、他のソフトが書いた並びも解けることを確認する |
@@ -30,6 +30,7 @@ papimela で実行したテストの記録。日時は実測値（ファイル�
 | T-18 | `test/demo_render_window`（実機のコンポジタ。人の操作は不要） | wl_shm バッファの使い回し（release）と、フレームコールバックによる VSync が実際に効くか | 2026-09-30 | **観測項目 5 / 5** | 数字で判定する。観測内容は下表 |
 | T-19 | `examples/pong --selftest` | サンプルの Pong。コンピュータ同士の対戦を 60 秒ぶん再生し、盤面（球とパドルが盤面の外へ出ない、打ち返しと得点、サーブの回数）と描画（パドルと地の色、横長のウィンドウでの帯、一時停止の表示）を見る。キーボードのパドルが押下状態（`IsDown`）とスキャンコードで動くことも見る | 2026-09-30 | **PASS 17 / 0** | **表示サーバ不要。CI で走る。** 盤面の計算は固定の刻みと自前の乱数で決定的なので、毎回同じ試合（2 対 0、打ち返し 34 回）になる。heaptrc でリーク 0 件も確認した。書いてみて足りなかった API は `examples/README.md` の F-1〜F-8 |
 | T-20 | `test/test_keyboard` | スキャンコードとキーコード（既定の配置、名前、キーシム → Unicode）、押下状態の規則（リピート、押されていないキーの KeyUp、フォーカス喪失で全部離す）、キーマップ（AZERTY 型・ロシア語型の判定とキーイベントのキーコード）、**実際の配列 us / fr / de / ru** | 2026-09-30 | **PASS 77 / 0** | **表示サーバ不要。CI で走る。** 実際の配列は xkbcommon に名前で読ませて作るのでコンポジタが要らない（xkbcommon か xkeyboard-config が無い環境では飛ばす）。押下状態・french_numbers・D-36 の防御は、それぞれ外すと落ちることを `-B` で確かめた。heaptrc でリーク 0 件 |
+| T-21 | `test/test_gl_window` | **OpenGL ES（EGL）でウィンドウに描く**。能力と断り方、コンテキストと 57 関数の取得、塗った色の読み戻し、SwapInterval 1 / 0 の速さ、最大化での面の大きさの追従、最小化・非表示で止まらないこと、破棄の順序、プロトコル違反 | 2026-10-01 | **PASS 25 / 0** | 実機のコンポジタと GPU が要るので**手元専用**。**実装（#33 / #39、Sonnet）より先に書き**、空の実装で落ちることを確かめてから渡した。200 Hz の画面で SwapInterval 1 は 200.7 fps、0 は約 32,000 fps、最小化中は 20.9 fps（合図が来ないので 1/20 秒で打ち切る）。D-37 はこの検査で見つかった |
 
 ### T-04 が決定的である理由
 
@@ -91,13 +92,14 @@ papimela で実行したテストの記録。日時は実測値（ファイル�
 
 | # | 対象 | 最終実行 | 結果 | 備考 |
 |---|---|---|---|---|
-| C-01 | `src/` の全ユニット（Types / Errors / Unicode / Core.Base / Core / Events / Events.Keymap / IO / Pixels / Platform 系 4 本 / TextInput 系 3 本 / Video 系 10 本 / Surface 系 3 本 / Render 系 3 本） | 2026-09-30 | **PASS** | 全 32 ユニット（ほかに生成したキーボードの表 2 本、C-07）。到達過程で D-03〜D-08、D-19 を修正 |
+| C-01 | `src/` の全ユニット（Types / Errors / Unicode / Core.Base / Core / Events / Events.Keymap / IO / Pixels / Platform 系 7 本 / TextInput 系 3 本 / Video 系 12 本 / Surface 系 3 本 / Render 系 3 本） | 2026-10-01 | **PASS** | 全 37 ユニット（ほかに生成したキーボードの表 2 本、C-07）。到達過程で D-03〜D-08、D-19 を修正 |
 | C-02 | `tools/wlscan-pas` | 2026-09-28 22:24 | **PASS** | — |
 | C-03 | 生成プロトコル 21 ユニット（9230 行） | 2026-09-28 22:24 | **PASS 21 / 21** | 初回は 9 / 21 が失敗（D-10〜D-12）。§9.2 が挙げる XML のうち、`reference/SDL/wayland-protocols/` にあるものすべて |
 | C-04 | **rawpaco 静的解析（激辛モード `--fail-on=warning`）** — `src` / `src/generated` / `test` / `spikes` / `tools` の全 Pascal ファイル | 2026-09-29 | **PASS 指摘 0 件** | 導入初回は 2 件の指摘（D-20）。修正後は 0 件。`.github/workflows/lint.yml` で push / pull_request ごとに走る |
 | C-05 | **図と実装の整合性検査**（`tools/check-diagrams.sh`） — 英日の Mermaid ブロック同一性、図に出てくる型 51 個の実在 | 2026-09-29 | **PASS 不整合 0 件** | `.github/workflows/lint.yml` で push ごとに走る |
 | C-06 | **Origin 行と設計書の突き合わせ**（`tools/checkorigin.bb`） — 第11章の由来列との一致、移植部分の SDL 著作権表示の有無 | 2026-09-29 | **PASS 不一致 0 件** | 導入初回は 10 件の不一致（D-30）。`.github/workflows/lint.yml` で push ごとに走る |
 | C-07 | **キーボードの表の生成**（`tools/genscancodes.bb`） — SDL のソースから `PaPiMeLa.Keycodes` と `.Keycodes.Tables` を作る | 2026-09-30 | **PASS** | スキャンコード 249、キーコード 257（SDLK_ の定義 259 から 2 つのマスクを除く）、evdev 表 768（注釈の番号と並びを突き合わせる）、名前 247、既定キー 175、Unicode 範囲 20（1525 項目）。大文字小文字だけが違う名前が無いことも検査する（D-09 系）。**imKStoUCS.c の範囲の食い違い（D-36）を警告する**。reference/SDL が要るので CI では走らせない |
+| C-08 | **EGL / GLES2 の定数の生成**（`tools/genkhronos.bb`） — Khronos のヘッダから `src/generated/egl_constants.inc` と `gles2_constants.inc` を作る | 2026-10-01 | **PASS** | egl.h の数値定数 163 と、SDL が使う eglext.h の 20、gl2.h の 303 と gl2ext.h の 4。拡張の一覧にあってヘッダに無い名前があれば止まる。大文字小文字の衝突も検査する |
 
 ## 3. アサーションを置いていない項目
 
@@ -113,7 +115,7 @@ papimela で実行したテストの記録。日時は実測値（ファイル�
 | **タッチパネルからの実入力** | **未検証** | `wl_touch` の受け取りと `TPMLTouchState` は実装済みで、T-10 が合成入力で検査している。検証環境にタッチパネルが無いため、`wl_touch` のイベントが実際に届く経路は通していない。`shape` / `orientation` は未対応 |
 | ポインタ拘束の自動化 | **手動のみ** | 有効化には `wl_pointer.enter` が必要で、カーソルをプログラムから動かす手段が無い。T-09（対話）で実機確認済み。CI に載せるには `weston --backend=headless` + ポインタ注入が要る（第 11 章 #70） |
 | ウィンドウのフルスクリーン / 不透明度 / アイコン / ヒットテスト / キーボードグラブ | **未実装** | 対応する能力と一緒に追加する |
-| GL / Vulkan / GPU のレンダラ / クリップボード / 任意ピクセルのカーソル | **未実装** | 第 11 章 #33、#38、#39 の EGL 側、#43、#67。レンダラはソフトウェアのみ。`wl_shm` のバッファ（#39 の shm 側）は入ったので、任意ピクセルのカーソルはこれを使って足せる |
+| Vulkan / GPU のレンダラ / クリップボード / 任意ピクセルのカーソル | **未実装** | 第 11 章 #38、#43、#67。**OpenGL ES（EGL）でウィンドウに描くところまでは実装済み**（T-21）。レンダラはソフトウェアのみ。`wl_shm` のバッファ（#39 の shm 側）は入ったので、任意ピクセルのカーソルはこれを使って足せる |
 | `TPMLEvent` の `Finalize` コスト測定 | **未実施** | サイズは実測済み（72 バイト）。ベンチマークは残課題（設計書 §10 項目 9） |
 | CI でのヘッドレス実行 | **一部整備済み** | ダミーバックエンド（#34）で T-11 が CI で走るようになった。ただし CI で検査できるのは**バックエンドに依存しない公開 API だけ**で、Wayland のプロトコル手順（T-04/T-05/T-08/T-10）と IME（T-02/T-03/T-06）はローカル専用のまま。そこまで CI へ載せるには `weston --backend=headless` + fcitx5 の起動が要る（第 11 章 #70 の残り） |
 
@@ -129,6 +131,10 @@ papimela で実行したテストの記録。日時は実測値（ファイル�
 | `wayland-scanner` の出力との照合（シグネチャ、`types` プール配置、destructor フラグ） | 同日 | 生成器のセマンティクスを確定。`bind` の `usun`、`since` の数字接頭辞、NULL 前置の長さ算出規則を確認 |
 | SDL の `SDL_KeySymToUcs4`（imKStoUCS.c）と xkbcommon の `xkb_keysym_to_utf32` は同じか | 2026-09-30 | **違う。** C で両方を全キーシム（1〜0xFFFF と Unicode キーシム）で呼び比べ、588 個が食い違った（SDL は 0x59x のペルシア数字や 0x68x の拡張キリル文字などの古いキーシムも文字にするが、xkbcommon は 0 を返す。逆に 0xFFxx の制御キーとテンキーの 27 個は、xkbcommon だけが文字（制御文字を含む）にする）。xkbcommon で代用せず、SDL の表を移植すると決めた。この比較の途中で SDL 側が 0x58a で異常終了し、D-36 が見つかった |
 | 移植した `PMLKeysymToUcs4` は SDL の C と同じ値を返すか | 同日 | **全件一致**。1〜0xFFFF（D-36 の 6 個を除く）と Unicode キーシム 512 個、計 66,041 個で差分 0。D-36 の 6 個は 0 を返す |
+| qwen が C の宣言から書いた GLES2 の関数表（57 個）は正しいか | 2026-10-01 | **全件一致**。型の対応表で C の戻り値と引数の型の並びを Pascal に写し、qwen の出力と突き合わせた（名前の A 接頭辞、予約語、大文字小文字の重複も見る）。検査側の歯は、引数の順序・戻り値・予約語の誤りを 1 つずつ入れて 3 件とも検出することで確かめた |
+| EGL と GLES2 の結合は動くか（コンポジタ無し） | 同日 | **動く**。Mesa の surfaceless（`EGL_PLATFORM_SURFACELESS_MESA`）でディスプレイを作り、窓の無い GLES コンテキストを現在にして 57 関数がすべて取れた。GL_RENDERER は radeonsi（内蔵 GPU）、OpenGL ES 3.2 Mesa 26.0.8。GLES2 レンダラをヘッドレスで検査する足場になる |
+| Mesa の eglGetProcAddress は無い名前に nil を返すか | 同日 | **返さない**（Sonnet の実測をこちらでも確認）。glvnd の libEGL は `gl` で始まる名前なら何でも番地を返す。そこでコア関数は libGLESv2 から直接引き、拡張の接尾辞（KHR、EXT、OES…）の付いた名前だけ eglGetProcAddress に任せた |
+| eglGetError は読むと消えるか | 同日 | **消える**。ネイティブウィンドウに nil を渡して eglCreateWindowSurface を失敗させ、1 回目 `EGL_BAD_NATIVE_WINDOW`、2 回目 `EGL_SUCCESS`。D-38 の根拠 |
 
 ## 5. 再現方法
 
@@ -136,6 +142,8 @@ papimela で実行したテストの記録。日時は実測値（ファイル�
 cd papimela
 # キーボードの表を作り直す（reference/SDL が要る。出力は src/generated/ へ）。
 ./tools/genscancodes.bb
+# EGL / GLES2 の定数を作り直す（同じく reference/SDL が要る）。
+./tools/genkhronos.bb
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_fcitx_textinput   test/test_fcitx_textinput.pas
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_wayland_protocols test/test_wayland_protocols.pas
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_wayland_window    test/test_wayland_window.pas
@@ -151,6 +159,7 @@ fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_blit                 t
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_render               test/test_render.pas
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_render_window        test/test_render_window.pas
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_keyboard             test/test_keyboard.pas
+fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_gl_window            test/test_gl_window.pas
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/demo_render_window        test/demo_render_window.pas
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -oexamples/pong               examples/pong.pas
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/demo_pointer_constraints test/demo_pointer_constraints.pas
@@ -158,6 +167,7 @@ fpc -O1 -gl spikes/spike1_wayland.pas && fpc -O1 -gl spikes/spike2_fcitx.pas
 ./spikes/spike1_wayland && ./spikes/spike2_fcitx
 ./test/test_fcitx_textinput && ./test/test_wayland_protocols && ./test/test_wayland_window
 ./test/test_key_routing && ./test/test_pointer_constraints && ./test/test_touch_cursor
+./test/test_gl_window   # GPU と EGL が要る
 
 # 表示サーバが無くても通るテスト（CI で走るのはこの 9 本）。
 env -u WAYLAND_DISPLAY -u DISPLAY ./test/test_dummy_video

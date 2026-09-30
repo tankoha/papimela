@@ -35,6 +35,12 @@
       隠れたウィンドウにはコールバックが来ないので、上限が無いと止まる
     - 専用のキューを使うのは、待っている間に入力イベントを配送しないため。
       読み出した入力イベントは既定のキューに残り、次の PumpEvents で配られる
+    - GL（TPMLWindowFlag.OpenGL）のウィンドウは最初の 1 枚を出さない。EGL の
+      最初の eglSwapBuffers がサーフェスをマップする。フレームコールバックの
+      待ちと頼み（WaitForFrame / RequestFrame）は TPMLWaylandEGL が使う
+    - Hide はアンマップなので、xdg-shell の規約どおり configure の済んだ状態を
+      捨てる（FConfigured := False）。Show がバッファ無しの commit を出し、
+      新しい configure を受けてから最初の 1 枚を出す
 
   NOT RESOLVED:
     - フルスクリーン・最大化の往復、装飾（libdecor）、ヒットテスト、グラブは未実装
@@ -61,6 +67,7 @@ uses
   PaPiMeLa.Video.Wayland.Types,
   PaPiMeLa.Video.Wayland.Shm,
   PaPiMeLa.Platform.Wayland.Client,
+  PaPiMeLa.Platform.Wayland.EGL,
   PaPiMeLa.Platform.Wayland.Protocols.Wayland,
   PaPiMeLa.Platform.Wayland.Protocols.XdgShell,
   PaPiMeLa.Platform.Wayland.Protocols.XdgDecorationUnstableV1;
@@ -125,6 +132,10 @@ type
     FFrameCallback : Pwl_callback;    // nil = 待っているフレームは無い
     FFrameFwd      : TPMLFrameCallbackForwarder;
 
+    // GL（EGL）で描くウィンドウ。wl_egl_window は TPMLWaylandEGL が作って渡す。
+    FIsGL     : Boolean;
+    FEGLWindow: Pointer;
+
     // ポインタ拘束の「要求」。実際に拘束を張るのはシート（TPMLWaylandPointerGrab）。
     FMouseGrabbed : Boolean;
     FRelativeMouse: Boolean;
@@ -133,7 +144,6 @@ type
     procedure DestroyBuffers;
     procedure EnsureBacking;
     function  PumpPrivateQueue(ATimeoutMs: Integer): Boolean;
-    procedure WaitForFrame;
     function  AcquireShmBuffer: TPMLWaylandShmBuffer;
     procedure PresentBacking(AWaitForFrame: Boolean);
     procedure PresentFirstFrame;
@@ -169,7 +179,20 @@ type
     function  SetFramebufferVSync(AInterval: Integer): Boolean; override;
     function  NativeHandles: TPMLNativeWindowHandles; override;
 
+    // 前のフレームのコールバックを待つ（最大 1/20 秒。来なければ捨てて打ち切る）。
+    // ソフトウェアの UpdateFramebuffer と、GL の SwapSurface（TPMLWaylandEGL）が使う。
+    procedure WaitForFrame;
+    // 次のフレームのコールバックを頼む。まだ前のを待っているなら頼み直さない。
+    // 頼みは次の wl_surface.commit で有効になる。GL では eglSwapBuffers の
+    // commit が有効にするので、eglSwapBuffers より前に呼ぶ。
+    procedure RequestFrame;
+
     property Configured: Boolean read FConfigured;
+    // 表示中か（Show 済みで Hide されていない）。
+    property Visible: Boolean read FVisible;
+    // wl_egl_window。TPMLWaylandEGL が作って置く。置いてあると、configure で
+    // 大きさが変わったときに wl_egl_window_resize を呼ぶ。
+    property EGLWindow: Pointer read FEGLWindow write FEGLWindow;
 
     // 検査・デモ用の数。出した回数、作った shm バッファの累計、VSync の待ちが
     // 上限で打ち切られた回数。
@@ -239,6 +262,7 @@ begin
   FWindowID := AWindowID;
   FWidth := AWidth;
   FHeight := AHeight;
+  FIsGL := TPMLWindowFlag.OpenGL in AFlags;
   if FWidth <= 0 then FWidth := 640;
   if FHeight <= 0 then FHeight := 480;
 
@@ -344,6 +368,10 @@ begin
   begin
     FWidth := AWidth;
     FHeight := AHeight;
+    // GL の面の大きさは wl_egl_window が決める。SDL も configure の中で
+    // wl_egl_window_resize を呼ぶ（SDL_waylandwindow.c の幾何の更新）。
+    if FEGLWindow <> nil then
+      wl_egl_window_resize(FEGLWindow, FWidth, FHeight, 0, 0);
     if Assigned(FSink) then
     begin
       FSink.WindowResized(FWindowID, FWidth, FHeight);
@@ -468,6 +496,16 @@ begin
   end;
 end;
 
+{ 次のフレームの合図を頼む。代理は FQueue を向いているので、done は
+  専用キューへ届く。まだ前の合図を待っているなら頼み直さない。 }
+procedure TPMLWaylandWindowBackend.RequestFrame;
+begin
+  if FFrameCallback <> nil then
+    Exit;
+  FFrameCallback := wl_surface_frame(Pwl_surface(FSurfaceWrapper));
+  wl_callback_add_listener_object(FFrameCallback, FFrameFwd);
+end;
+
 procedure TPMLWaylandWindowBackend.HandleFrameDone(ACallback: Pwl_callback);
 begin
   if ACallback <> FFrameCallback then
@@ -561,13 +599,7 @@ begin
   Buf.MarkBusy;
   wl_surface_attach(FSurface, Buf.Buffer, 0, 0);
   wl_surface_damage_buffer(FSurface, 0, 0, Buf.Width, Buf.Height);
-  // 次のフレームの合図を頼む。代理は FQueue を向いているので、done は
-  // 専用キューへ届く。まだ前の合図を待っているなら頼み直さない。
-  if FFrameCallback = nil then
-  begin
-    FFrameCallback := wl_surface_frame(Pwl_surface(FSurfaceWrapper));
-    wl_callback_add_listener_object(FFrameCallback, FFrameFwd);
-  end;
+  RequestFrame;
   wl_surface_commit(FSurface);
   wl_display_flush(FConn.Display);
   Inc(FPresentCount);
@@ -577,6 +609,10 @@ end;
 procedure TPMLWaylandWindowBackend.PresentFirstFrame;
 begin
   if not FVisible then
+    Exit;
+  // GL のウィンドウは、最初の eglSwapBuffers がサーフェスをマップする。
+  // ソフトウェアの 1 枚を先に出すと、GL の最初の絵の前に黒が 1 フレーム映る。
+  if FIsGL then
     Exit;
   EnsureBacking;
   PresentBacking(False);
@@ -636,6 +672,8 @@ begin
   // ウィンドウのサイズになるので、次の更新で反映される。
   FWidth := AWidth;
   FHeight := AHeight;
+  if FEGLWindow <> nil then
+    wl_egl_window_resize(FEGLWindow, FWidth, FHeight, 0, 0);
   if Assigned(FSink) then
     FSink.WindowResized(FWindowID, FWidth, FHeight);
 end;
@@ -673,7 +711,12 @@ begin
     wl_proxy_destroy(Pwl_proxy(FFrameCallback));
     FFrameCallback := nil;
   end;
-  // nil バッファを attach するとサーフェスはアンマップされる。
+  // nil バッファを attach するとサーフェスはアンマップされる。xdg-shell では
+  // アンマップで configure の済んだ状態も失われ、次に見せるには「バッファ無しの
+  // commit → configure → ack_configure」をやり直さなければならない（守らないと
+  // コンポジタが "xdg_surface has never been configured" で接続を切る）。
+  // Show がその commit を出し、新しい configure が FConfigured を立て直す。
+  FConfigured := False;
   wl_surface_attach(FSurface, nil, 0, 0);
   wl_surface_commit(FSurface);
   wl_display_flush(FConn.Display);
@@ -738,6 +781,7 @@ begin
   Result.WaylandSurface := FSurface;
   Result.WaylandXdgSurface := FXdgSurface;
   Result.WaylandXdgToplevel := FToplevel;
+  Result.WaylandEGLWindow := FEGLWindow;
 end;
 
 end.

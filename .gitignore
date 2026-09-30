@@ -34,5 +34,6 @@ test/test_blit
 test/test_render
 test/test_render_window
 test/test_keyboard
+test/test_gl_window
 test/demo_render_window
 examples/pong
