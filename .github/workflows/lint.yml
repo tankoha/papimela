@@ -77,6 +77,14 @@ jobs:
             ./test/$t
           done
 
+      # サンプル。ビルドが通ることと、表示サーバ無しの自己検査（コンピュータ同士の
+      # 対戦を再生して盤面と描画を見る）が通ることを確かめる。
+      - name: Build and self-test examples
+        run: |
+          set -eu
+          fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -oexamples/pong examples/pong.pas
+          ./examples/pong --selftest
+
       # 図と実装の乖離検査。英日の Mermaid ブロックの同一性と、図に出てくる型が
       # 実装に存在することを確認する。速いので lint より先に置く。
       - name: Check diagrams
@@ -97,4 +105,5 @@ jobs:
             src/generated/*.pas \
             test/*.pas \
             spikes/*.pas \
-            tools/*.pas
+            tools/*.pas \
+            examples/*.pas

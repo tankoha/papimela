@@ -95,8 +95,12 @@ begin
   WriteLn;
 
   Opts := TPMLContextOptions.Create;
-  Opts.PreferredVideo := 'dummy';
-  Ctx := TPMLContext.Create([TPMLSubsystem.Video], Opts);
+  try
+    Opts.PreferredVideo := 'dummy';
+    Ctx := TPMLContext.Create([TPMLSubsystem.Video], Opts);
+  finally
+    Opts.Free;   // 呼び出し側の持ち物。Context は保持しない
+  end;
   try
     Win := Ctx.Video.CreateWindow(
       TPMLWindowOptions.Make('render window', 64, 48).Resizable);

@@ -84,25 +84,28 @@ the D-Bus route is not an optimisation, it is the only way.
 
 ### State
 
-Roughly 20,000 lines across 27 hand-written units and 21 generated Wayland
-protocol units. Working: Wayland windows and rendering to `wl_shm`, the seat
-(keyboard with xkb, pointer, touch, pointer constraints, cursor shapes),
-the event queue, the IME path through fcitx5, pixel formats, surfaces, BMP,
-blitters, and a headless video backend so tests can run without a display
-server.
+Roughly 23,000 lines across 31 hand-written units and 21 generated Wayland
+protocol units. Working: Wayland windows, the seat (keyboard with xkb, pointer,
+touch, pointer constraints, cursor shapes), the event queue, the IME path through
+fcitx5, pixel formats, surfaces, BMP, blitters, a software renderer that draws
+into a window with VSync, and a headless video backend so tests can run without
+a display server. There is a playable Pong in `examples/`.
 
-13 test programs, 352 assertions, all passing. CI runs a static analyser in its
+16 test programs, 442 assertions, all passing. CI runs a static analyser in its
 strictest mode (one warning fails the build), checks that the class diagrams
 still match the code, checks that every file's stated provenance matches the
 design document, and runs the tests that don't need a screen.
 
-Not done yet: the renderer, GL, audio, joystick, and everything in the design
-document's later chapters.
+Not done yet: a GPU renderer, GL, audio, joystick, and everything in the design
+document's later chapters. What writing Pong showed to be missing is listed in
+`examples/README.md`.
 
 ### Building
 
 ```bash
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib src/PaPiMeLa.Core.pas
+fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -oexamples/pong examples/pong.pas
+./examples/pong
 ```
 
 FPC 3.2.2. `docs/DESIGN.md` is the design; `docs/TEST-LOG.md` records what has
@@ -183,24 +186,28 @@ Wayland の `text-input-v3` ではこれは表現できない（preedit のス�
 
 ### 現状
 
-手書き 27 ユニットと生成した Wayland プロトコル 21 ユニット、およそ 2 万行。
-動いているのは、Wayland のウィンドウと `wl_shm` への描画、シート（xkb を使った
-キーボード、ポインタ、タッチ、ポインタ拘束、カーソル形状）、イベントキュー、
-fcitx5 経由の IME、ピクセル形式、サーフェス、BMP、ブリッタ、そして表示サーバ
-無しでテストを回すためのヘッドレスバックエンド。
+手書き 31 ユニットと生成した Wayland プロトコル 21 ユニット、およそ 2 万 3 千行。
+動いているのは、Wayland のウィンドウ、シート（xkb を使ったキーボード、ポインタ、
+タッチ、ポインタ拘束、カーソル形状）、イベントキュー、fcitx5 経由の IME、
+ピクセル形式、サーフェス、BMP、ブリッタ、ウィンドウへ VSync つきで描く
+ソフトウェアレンダラ、そして表示サーバ無しでテストを回すためのヘッドレス
+バックエンド。`examples/` には遊べる Pong がある。
 
-テストは 13 本、352 アサーション、全て成功。CI は静的解析を最も厳しい設定で
+テストは 16 本、442 アサーション、全て成功。CI は静的解析を最も厳しい設定で
 回し（warning 1 件でビルドが落ちる）、クラス図がコードと食い違っていないかを
 確かめ、各ファイルが名乗っている由来が設計書と一致するかを確かめ、画面の要らない
 テストを実行する。
 
-まだ無いもの: レンダラ、GL、オーディオ、ジョイスティック、設計書の後ろの章に
-あるもの一式。
+まだ無いもの: GPU のレンダラ、GL、オーディオ、ジョイスティック、設計書の
+後ろの章にあるもの一式。Pong を書いてみて足りなかったものは
+`examples/README.md` にまとめてある。
 
 ### ビルド
 
 ```bash
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib src/PaPiMeLa.Core.pas
+fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -oexamples/pong examples/pong.pas
+./examples/pong
 ```
 
 FPC 3.2.2。`docs/DESIGN.md` が設計、`docs/TEST-LOG.md` が実際に何を走らせたかの

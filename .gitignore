@@ -34,3 +34,4 @@ test/test_blit
 test/test_render
 test/test_render_window
 test/demo_render_window
+examples/pong

@@ -3,7 +3,7 @@
 papimela で実行したテストの記録。日時は実測値（ファイルの mtime と git のコミット時刻、
 および最終一括実行の時刻）に基づく。
 
-最終一括実行: **2026-09-30**（自動テスト 15 本すべて成功、アサーション 429 件・失敗 0 件）。
+最終一括実行: **2026-09-30**（自動テスト 16 本すべて成功、アサーション 442 件・失敗 0 件）。
 対話テスト T-07 / T-09 と、実機での計測 T-18 も同日に別途実行し、観測項目をすべて確認した。
 
 ## 1. 実行可能テスト
@@ -28,6 +28,7 @@ papimela で実行したテストの記録。日時は実測値（ファイル�
 | T-16 | `test/test_render` | レンダラ。コマンドキュー（結合・状態の重複排除）、ソフトウェアドライバの描画、三角形のラスタライザ | 2026-09-30 | **PASS 47 / 0** | **表示サーバ不要。CI で走る。** 中心の検査は「同じ絵を 2 つの経路で描いて画素が完全一致するか」。ソフトウェアドライバの速い経路（矩形・ブリット）と、既定の変換で三角形に落とした経路を、半透明の合成で描き比べる。二重塗りも塗り残しも色の違いとして出るので、top-left 規則の誤りは必ず表に出る。**実装より先に書き、空の実装に対して 13 件落ちることを確かめてから** qwen に渡した。D-33 / D-34 はこの検査で見つかった。D-35 の修正で「Clear はビューポートの外も塗る」を 1 件足した |
 | T-17 | `test/test_render_window` | ウィンドウへ描くレンダラ。フレームバッファへの描画と Present、**ウィンドウの大きさが変わったときの描画先の取り直し**、VSync の受け渡し、ウィンドウとレンダラの破棄の順序 | 2026-09-30 | **PASS 30 / 0** | **表示サーバ不要。CI で走る。** ダミーのウィンドウで検査する。取り直しの検査は、取り直しを外した実装で**異常終了（終了コード 217）**することを `-B` で確かめた。縮む向きではヒープが同じ番地を返して偶然通るので、大きくなる向きで見ている。D-35 はこの検査を書いていて見つかった |
 | T-18 | `test/demo_render_window`（実機のコンポジタ。人の操作は不要） | wl_shm バッファの使い回し（release）と、フレームコールバックによる VSync が実際に効くか | 2026-09-30 | **観測項目 5 / 5** | 数字で判定する。観測内容は下表 |
+| T-19 | `examples/pong --selftest` | サンプルの Pong。コンピュータ同士の対戦を 60 秒ぶん再生し、盤面（球とパドルが盤面の外へ出ない、打ち返しと得点、サーブの回数）と描画（パドルと地の色、横長のウィンドウでの帯、一時停止の表示）を見る | 2026-09-30 | **PASS 13 / 0** | **表示サーバ不要。CI で走る。** 盤面の計算は固定の刻みと自前の乱数で決定的なので、毎回同じ試合（2 対 0、打ち返し 34 回）になる。heaptrc でリーク 0 件も確認した。書いてみて足りなかった API は `examples/README.md` の F-1〜F-8 |
 
 ### T-04 が決定的である理由
 
@@ -144,13 +145,14 @@ fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_blit                 t
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_render               test/test_render.pas
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_render_window        test/test_render_window.pas
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/demo_render_window        test/demo_render_window.pas
+fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -oexamples/pong               examples/pong.pas
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/demo_pointer_constraints test/demo_pointer_constraints.pas
 fpc -O1 -gl spikes/spike1_wayland.pas && fpc -O1 -gl spikes/spike2_fcitx.pas
 ./spikes/spike1_wayland && ./spikes/spike2_fcitx
 ./test/test_fcitx_textinput && ./test/test_wayland_protocols && ./test/test_wayland_window
 ./test/test_key_routing && ./test/test_pointer_constraints && ./test/test_touch_cursor
 
-# 表示サーバが無くても通るテスト（CI で走るのはこの 7 本）。
+# 表示サーバが無くても通るテスト（CI で走るのはこの 8 本）。
 env -u WAYLAND_DISPLAY -u DISPLAY ./test/test_dummy_video
 env -u WAYLAND_DISPLAY -u DISPLAY ./test/test_pixels
 env -u WAYLAND_DISPLAY -u DISPLAY ./test/test_io
@@ -158,6 +160,7 @@ env -u WAYLAND_DISPLAY -u DISPLAY ./test/test_surface
 env -u WAYLAND_DISPLAY -u DISPLAY ./test/test_blit
 env -u WAYLAND_DISPLAY -u DISPLAY ./test/test_render
 env -u WAYLAND_DISPLAY -u DISPLAY ./test/test_render_window
+env -u WAYLAND_DISPLAY -u DISPLAY ./examples/pong --selftest
 
 # T-18（実機のコンポジタ）。小さいウィンドウで VSync の有無を比べる。
 ./test/demo_render_window 4 vsync 160x100

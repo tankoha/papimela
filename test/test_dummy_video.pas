@@ -95,9 +95,13 @@ begin
   // 実機の Wayland セッションで走らせてもダミーを選ばせる。環境変数ではなく
   // オプションで指定するので、呼び出し方に左右されない。
   Opts := TPMLContextOptions.Create;
-  Opts.PreferredVideo := 'dummy';
+  try
+    Opts.PreferredVideo := 'dummy';
+    Ctx := TPMLContext.Create([TPMLSubsystem.Video], Opts);
+  finally
+    Opts.Free;   // 呼び出し側の持ち物。Context は保持しない
+  end;
 
-  Ctx := TPMLContext.Create([TPMLSubsystem.Video], Opts);
   try
     WriteLn('1. バックエンドの選択');
     Check(Ctx.Video.BackendName = 'dummy', 'PAPIMELA_VIDEO=dummy でダミーが選ばれる');
