@@ -98,9 +98,6 @@ jobs:
       # Mesa の llvmpipe で描く。ウィンドウの区間は Wayland が無いので飛ばされる。
       - name: Compare the GLES2 render driver with the software one (llvmpipe)
         timeout-minutes: 5
-        env:
-          # Mesa の EGL の記録を stderr へ出す。止まった場所を調べるため。
-          EGL_LOG_LEVEL: debug
         run: |
           set -eu
           fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_render_gles2 test/test_render_gles2.pas

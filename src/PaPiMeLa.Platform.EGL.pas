@@ -21,6 +21,13 @@
       ライブラリに無ければ eglGetProcAddress で探し、それでも無ければ nil のまま
     - 読み込みは参照カウント。PaPiMeLa.Platform.XKB と同じ形
     - 読み込み処理（implementation 部）は qwen2.5-coder が書いた
+    - 読み込むとき、呼んだスレッドの浮動小数点の例外をすべて無効にする（D-40）。
+      FPC は既定で例外を有効にしているが、C で書かれた GL の実装（Mesa と、
+      llvmpipe が使う LLVM）は無効を前提に普通に不正な演算を起こす。Ubuntu 24.04 の
+      Mesa 25.2.8 では EInvalidOp で落ち、llvmpipe の作業スレッドで起きると止まる。
+      作業スレッドは作られた時点の設定を引き継ぐので、コンテキストを作る前、
+      ライブラリを読む時点で無効にする。以後このスレッドでは 0 除算などが例外で
+      なく無限大や NaN になる（C の SDL アプリと同じ）
 
   Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
   Copyright (C) 2026 papimela contributors
@@ -33,7 +40,7 @@ unit PaPiMeLa.Platform.EGL;
 interface
 
 uses
-  SysUtils,
+  SysUtils, Math,
   PaPiMeLa.Errors,
   PaPiMeLa.Platform.DynLib;
 
@@ -151,6 +158,10 @@ end;
 
 function PMLEGLLoad: Boolean;
 begin
+  // C の GL の実装は浮動小数点の例外が無効であることを前提にしている（D-40）。
+  // 2 回目以降の読み込みでも、呼んだスレッドが違うかもしれないので毎回行う。
+  SetExceptionMask([exInvalidOp, exDenormalized, exZeroDivide, exOverflow,
+    exUnderflow, exPrecision]);
   if GRefCount > 0 then
   begin
     Inc(GRefCount);
