@@ -41,7 +41,8 @@
 
   NOT RESOLVED:
     - 論理解像度（LogicalPresentation）、描画先テクスチャ（SetRenderTarget）、
-      回転（RenderTextureRotated）、9-grid / タイル、DebugText、VSync は未実装
+      回転（RenderTextureRotated）、9-grid / タイル、DebugText は未実装
+      （VSync はウィンドウへ描くドライバで実装済み）
     - パレットと YUV のテクスチャは未実装
     - GPU のドライバは OpenGL ES 2.0（#43）だけ。デスクトップ GL（#44）は未着手
 

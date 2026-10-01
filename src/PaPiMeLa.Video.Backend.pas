@@ -24,10 +24,8 @@
     - Wayland は拡張の有無で能力が変わるため Capabilities は Connect 後に確定する
 
   NOT RESOLVED:
-    - 部品のうち GL / Vulkan / Clipboard / Cursors / ScreenSaver / MessageBox /
-      SystemMenu / ScreenKeyboard は型だけ用意し、実装は各担当ユニットで
-      （第 11 章 #33、#38、#39、#40、#67）
-    - シート（キーボード / ポインタ / タッチ）は #37。現状イベントは来ない
+    - 部品のうち実装済みは Cursors（#37）と GL（#33、#39）。Vulkan / Clipboard /
+      ScreenSaver / MessageBox / SystemMenu / ScreenKeyboard は未実装（#38、#40、#67 など）
 
   Copyright (C) 2026 papimela contributors
   （zlib ライセンス本文は papimela.inc を参照）
@@ -177,8 +175,8 @@ type
 
     NOT RESOLVED:
       任意のピクセルからカーソルを作る経路（設計 4.2 の
-      `Cursors.Create(Surface, HotX, HotY)`）は未実装。wl_shm バッファの
-      共通部品（第 11 章 #39）が入ってから足す。 }
+      `Cursors.Create(Surface, HotX, HotY)`）は未実装。wl_shm のバッファ
+      （PaPiMeLa.Video.Wayland.Shm）はあるので、それを使って足せる。 }
   TPMLCursorBackend = class abstract(TPMLSystemObject)
   public
     procedure SetSystemCursor(AKind: TPMLSystemCursor); virtual; abstract;

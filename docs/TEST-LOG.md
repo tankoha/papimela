@@ -3,7 +3,7 @@
 papimela で実行したテストの記録。日時は実測値（ファイルの mtime と git のコミット時刻、
 および最終一括実行の時刻）に基づく。
 
-最終一括実行: **2026-09-30**（自動テスト 19 本すべて成功、アサーション 584 件・失敗 0 件）。
+最終一括実行: **2026-10-02**（自動テスト 19 本すべて成功、アサーション 584 件・失敗 0 件。`-B` で全部作り直して実行）。
 対話テスト T-07 / T-09 と、実機での計測 T-18 も同日に別途実行し、観測項目をすべて確認した。
 
 ## 1. 実行可能テスト
@@ -97,9 +97,9 @@ papimela で実行したテストの記録。日時は実測値（ファイル�
 | C-01 | `src/` の全ユニット（Types / Errors / Unicode / Core.Base / Core / Events / Events.Keymap / IO / Pixels / Platform 系 7 本 / TextInput 系 3 本 / Video 系 12 本 / Surface 系 3 本 / Render 系 4 本） | 2026-10-01 | **PASS** | 全 38 ユニット（ほかに生成したキーボードの表 2 本、C-07）。到達過程で D-03〜D-08、D-19 を修正 |
 | C-02 | `tools/wlscan-pas` | 2026-09-28 22:24 | **PASS** | — |
 | C-03 | 生成プロトコル 21 ユニット（9230 行） | 2026-09-28 22:24 | **PASS 21 / 21** | 初回は 9 / 21 が失敗（D-10〜D-12）。§9.2 が挙げる XML のうち、`reference/SDL/wayland-protocols/` にあるものすべて |
-| C-04 | **rawpaco 静的解析（激辛モード `--fail-on=warning`）** — `src` / `src/generated` / `test` / `spikes` / `tools` の全 Pascal ファイル | 2026-09-29 | **PASS 指摘 0 件** | 導入初回は 2 件の指摘（D-20）。修正後は 0 件。`.github/workflows/lint.yml` で push / pull_request ごとに走る |
-| C-05 | **図と実装の整合性検査**（`tools/check-diagrams.sh`） — 英日の Mermaid ブロック同一性、図に出てくる型 51 個の実在 | 2026-09-29 | **PASS 不整合 0 件** | `.github/workflows/lint.yml` で push ごとに走る |
-| C-06 | **Origin 行と設計書の突き合わせ**（`tools/checkorigin.bb`） — 第11章の由来列との一致、移植部分の SDL 著作権表示の有無 | 2026-09-29 | **PASS 不一致 0 件** | 導入初回は 10 件の不一致（D-30）。`.github/workflows/lint.yml` で push ごとに走る |
+| C-04 | **rawpaco 静的解析（激辛モード `--fail-on=warning`）** — `src` / `src/generated` / `test` / `spikes` / `tools` / `examples` の全 Pascal ファイル | 2026-10-02 | **PASS 指摘 0 件** | 導入初回は 2 件の指摘（D-20）。修正後は 0 件。`.github/workflows/lint.yml` で push / pull_request ごとに走る |
+| C-05 | **図と実装の整合性検査**（`tools/check-diagrams.sh`） — 英日の Mermaid ブロック同一性、図に出てくる型 51 個の実在 | 2026-10-02 | **PASS 不整合 0 件** | `.github/workflows/lint.yml` で push ごとに走る |
+| C-06 | **Origin 行と設計書の突き合わせ**（`tools/checkorigin.bb`） — 第11章の由来列との一致、移植部分の SDL 著作権表示の有無 | 2026-10-02 | **PASS 不一致 0 件** | 第 11 章のユニット 93 件に対して 61 ファイルを検査。導入初回は 10 件の不一致（D-30）。`.github/workflows/lint.yml` で push ごとに走る |
 | C-07 | **キーボードの表の生成**（`tools/genscancodes.bb`） — SDL のソースから `PaPiMeLa.Keycodes` と `.Keycodes.Tables` を作る | 2026-09-30 | **PASS** | スキャンコード 249、キーコード 257（SDLK_ の定義 259 から 2 つのマスクを除く）、evdev 表 768（注釈の番号と並びを突き合わせる）、名前 247、既定キー 175、Unicode 範囲 20（1525 項目）。大文字小文字だけが違う名前が無いことも検査する（D-09 系）。**imKStoUCS.c の範囲の食い違い（D-36）を警告する**。reference/SDL が要るので CI では走らせない |
 | C-08 | **EGL / GLES2 の定数の生成**（`tools/genkhronos.bb`） — Khronos のヘッダから `src/generated/egl_constants.inc` と `gles2_constants.inc` を作る | 2026-10-01 | **PASS** | egl.h の数値定数 163 と、SDL が使う eglext.h の 20、gl2.h の 303 と gl2ext.h の 4。拡張の一覧にあってヘッダに無い名前があれば止まる。大文字小文字の衝突も検査する |
 

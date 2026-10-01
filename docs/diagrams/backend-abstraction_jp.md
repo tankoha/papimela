@@ -171,7 +171,8 @@ classDiagram
   god object を分解できた要因である。
 - §3.2 は `TPMLVideoBackend` に任意搭載の部品 8 種（GL、Vulkan、Clipboard、Cursors、
   ScreenSaver、MessageBox、SystemMenu、ScreenKeyboard）を持たせる予定で、現在あるのは
-  `Cursors` だけなので、それだけを描いている。コンポジタが対応していない部品は nil のままで、
+  `Cursors` と `GL`。描いているのは `Cursors` だけで、GL の部品（`TPMLGLBackend` →
+  `TPMLEGLBackend` → `TPMLWaylandEGL`）は `docs/DESIGN.md` §3.4 にある。コンポジタが対応していない部品は nil のままで、
   能力集合がそれを示す。
 - `TPMLWindowBackend` の 22 メソッドが、SDL のウィンドウ操作 44 個のうち実装済みの部分に当たる。
   残り 22 個（フルスクリーン、不透明度、形状、アイコン、キーボードグラブ、ヒットテスト）は未実装。
@@ -293,7 +294,8 @@ classDiagram
 | 対象 | 理由 |
 |---|---|
 | 生成プロトコルの 125 型 | 機械的なバインディング。`Twl_registry_listener` が代表している |
-| 任意搭載の部品 8 種 | 未実装（第 11 章 #33、#38、#39、#40、#67） |
-| シート（キーボード / ポインタ / タッチ） | 未実装（#37） |
+| GL の部品（`TPMLGLBackend` と EGL / Wayland の派生） | 実装済み（#33、#39）。図にはまだ描いていない |
+| 残りの任意搭載の部品 6 種 | 未実装（第 11 章 #38、#40、#67 など） |
+| シート（キーボード / ポインタ / タッチ） | 実装済み（#37）。`event-model.md` に描いてある |
 | IBus / WaylandTI バックエンド | 未実装（#48、#49） |
 | 所有グラフ、イベントモデル、基底クラス、IME の値型 | それぞれ別の図。ここに詰め込むと読めなくなる |

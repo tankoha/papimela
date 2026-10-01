@@ -114,7 +114,7 @@ classDiagram
 | Audio (`TPMLAudioSystem`) | not implemented; `TPMLContext.Create` raises `EPMLUnsupported` if requested |
 | Joystick / Gamepad / Haptic | same |
 | `TPMLRenderer`, `TPMLTexture`, `TPMLSurface` | implemented (#41, #42, #28) but not drawn here yet. A window renderer is owned by its `TPMLWindow`: the window frees it first through `IPMLWindowDependent`, and textures go with their renderer. A surface renderer and `TPMLSurface` itself are owned by the application |
-| `TPMLGLContext` | not implemented (chapter 11: #33) |
+| `TPMLGLContext` | implemented (#33, #39) but not drawn yet. Owned by its `TPMLWindow` like a window renderer (`IPMLWindowDependent`) |
 | `TPMLClipboard`, `TPMLCursor` | not implemented (#38, #39) |
 | `TPMLHints`, `TPMLLog` | not implemented; logging currently goes straight to stderr from `TPMLContext.Log` |
 

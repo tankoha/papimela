@@ -21,7 +21,8 @@
     - ロードは参照カウント付き。多重呼び出し安全
 
   NOT RESOLVED:
-    - wl_egl_window_* / wl_cursor_* は EGL / カーソル着手時に追加する
+    - wl_egl_window_* は別のユニット（PaPiMeLa.Platform.Wayland.EGL）にある。
+      wl_cursor_*（libwayland-cursor）は任意ピクセルのカーソルを作るときに足す
     - wl_list / wl_array の操作関数はインライン関数なので、必要になったら
       Pascal 側で再実装する
 

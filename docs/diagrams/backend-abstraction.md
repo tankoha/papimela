@@ -171,8 +171,9 @@ classDiagram
   not know `TPMLWindow`. This one-way dependency (public → abstract → implementation) is what made
   splitting the god object possible.
 - §3.2 also gives `TPMLVideoBackend` eight optional parts (GL, Vulkan, Clipboard, Cursors,
-  ScreenSaver, MessageBox, SystemMenu, ScreenKeyboard). Only `Cursors` exists so far, so only that
-  one is drawn. A part the compositor cannot support stays nil, and the capability set says so.
+  ScreenSaver, MessageBox, SystemMenu, ScreenKeyboard). `Cursors` and `GL` exist so far; only
+  `Cursors` is drawn. The GL part (`TPMLGLBackend` → `TPMLEGLBackend` → `TPMLWaylandEGL`) is
+  described in `docs/DESIGN.md` §3.4. A part the compositor cannot support stays nil, and the capability set says so.
 - The 22 methods on `TPMLWindowBackend` correspond to the window-operation slice of SDL's 44.
   The remaining 22 (fullscreen, opacity, shape, icon, keyboard grab, hit-testing) are not
   implemented. The three pointer-constraint methods only record a request: the constraint object
@@ -294,7 +295,8 @@ pump every registered source in registration order. Video and IME are peers in t
 | Subject | Reason |
 |---|---|
 | the 125 generated protocol types | mechanical bindings; `Twl_registry_listener` stands in for them |
-| the eight optional backend parts | not implemented (chapter 11: #33, #38, #39, #40, #67) |
-| seats (keyboard / pointer / touch) | not implemented (#37) |
+| the GL part (`TPMLGLBackend` and its EGL / Wayland subclasses) | implemented (#33, #39), not drawn yet |
+| the other six optional backend parts | not implemented (chapter 11: #38, #40, #67 and later) |
+| seats (keyboard / pointer / touch) | implemented (#37); drawn in `event-model.md` |
 | IBus and WaylandTI backends | not implemented (#48, #49) |
 | ownership graph, event model, base classes, IME value types | separate diagrams; cramming them here would make it unreadable |

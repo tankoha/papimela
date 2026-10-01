@@ -112,7 +112,7 @@ classDiagram
 | Audio（`TPMLAudioSystem`） | 未実装。要求すると `TPMLContext.Create` が `EPMLUnsupported` を投げる |
 | Joystick / Gamepad / Haptic | 同上 |
 | `TPMLRenderer`、`TPMLTexture`、`TPMLSurface` | 実装済み（#41、#42、#28）だが図にはまだ描いていない。ウィンドウへ描くレンダラの所有者は `TPMLWindow` で、ウィンドウは `IPMLWindowDependent` 経由でレンダラを先に畳む。テクスチャはレンダラと一緒に消える。サーフェスへ描くレンダラと `TPMLSurface` 自体はアプリが所有する |
-| `TPMLGLContext` | 未実装（第 11 章 #33） |
+| `TPMLGLContext` | 実装済み（#33、#39）だが図にはまだ描いていない。ウィンドウへ描くレンダラと同じく所有者は `TPMLWindow`（`IPMLWindowDependent`） |
 | `TPMLClipboard`、`TPMLCursor` | 未実装（#38、#39） |
 | `TPMLHints`、`TPMLLog` | 未実装。ログは現在 `TPMLContext.Log` から直接 stderr へ出している |
 
