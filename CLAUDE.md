@@ -81,7 +81,8 @@ tools/qwen-gen.bb プロンプトファイル 出力ファイル
 大きな定数表は qwen に書き写させない。#27 の 67 個の形式定数は SDL のヘッダから
 awk で抽出し、手で書いた分と突き合わせて一致を確認してから採用した。
 大きな表は生成器で作る: `tools/genscancodes.bb`（キーボード）、`tools/genkhronos.bb`
-（EGL / GLES2 の定数）。どちらも件数を元と突き合わせ、合わなければ止まる。
+（EGL / GLES2 の定数）、`tools/gendebugfont.bb`（DebugText の字形）。どれも件数を元と
+突き合わせ、合わなければ止まる。
 
 ### Sonnet に任せるとき（#33 / #39 / #43 で確立）
 

@@ -421,21 +421,25 @@ end;
 { テクスチャ転送。拡大縮小つきのブリットを使う。
 
   テクスチャの変調と合成モードは、ブリット元のサーフェスへ一時的に写して
-  から転送する。PMLBlitScaled がそれらを読むため。 }
+  から転送する。PMLBlitScaled がそれらを読むため。
+  写すのは**積んだときの値**（ACmd.Color と ACmd.Blend）。テクスチャの今の値を
+  読むと、同じテクスチャを色を変えて 2 回描いたとき、どちらも後の色になる（D-43）。 }
 procedure TPMLSoftwareRenderDriver.ExecCopy(AQueue: TPMLRenderQueue;
   const ACmd: TPMLRenderCommand);
 var
   S: TPMLSurface;
   Src, Dst: TPMLFRect;
+  Mod8: TPMLColor;
 begin
   S := TextureSurface(ACmd.Texture);
   if S = nil then
     Exit;
   Src := AQueue.RectAt(ACmd.First);
   Dst := AQueue.RectAt(ACmd.First + 1);
-  S.BlendMode := ACmd.Texture.BlendMode;
-  S.ColorMod := ACmd.Texture.ColorMod;
-  S.AlphaMod := ACmd.Texture.AlphaMod;
+  S.BlendMode := ACmd.Blend;
+  Mod8 := ACmd.Color.ToColor;
+  S.ColorMod := TPMLColor.Make(Mod8.R, Mod8.G, Mod8.B);
+  S.AlphaMod := Mod8.A;
   PMLBlitScaled(S,
     TPMLRect.Make(Trunc(Src.X), Trunc(Src.Y), Trunc(Src.W), Trunc(Src.H)),
     FTarget,

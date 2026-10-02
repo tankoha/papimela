@@ -30,13 +30,14 @@ git -C reference/SDL checkout 1ce4c5bc2916702e8e0f6df1f612dbd8633011da
 |---|---|
 | `tools/genscancodes.bb`（キーボードの表） | `include/SDL3/SDL_scancode.h`、`SDL_keycode.h`、`src/events/` の 4 ファイル |
 | `tools/genkhronos.bb`（EGL / GLES2 の定数） | `src/video/khronos/EGL/`、`src/video/khronos/GLES2/` |
+| `tools/gendebugfont.bb`（DebugText の字形） | `src/render/SDL_render_debug_font.h` |
 | `tools/wlscan-pas`（Wayland プロトコルの生成） | `wayland-protocols/*.xml` |
 | `tools/checkorigin.bb` | 読まない（設計書第 11 章とソースの見出しだけを突き合わせる） |
 
 ## 版を上げるとき
 
 1. `reference/SDL` を新しいコミットへ進め、この表のコミットと日付を書き換える
-2. 生成器を回し直し、生成物の差分を読む（`tools/genscancodes.bb`、`tools/genkhronos.bb`）
+2. 生成器を回し直し、生成物の差分を読む（`tools/genscancodes.bb`、`tools/genkhronos.bb`、`tools/gendebugfont.bb`）
 3. 移植したユニットの元ファイルの差分（`git -C reference/SDL diff 旧..新 -- 元ファイル`）を読み、
    取り込むか決める。上流の不具合として記録したもの（`docs/DEFECTS.md` の D-18、D-36、D-38）が
    直っていないかも見る

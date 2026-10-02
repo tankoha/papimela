@@ -276,6 +276,76 @@ begin
   R.DrawLine(60, 2, 5, 61);
 end;
 
+{ 論理解像度 32x24 を 64x64 へ（Letterbox。2 倍で、上下に 8 画素の帯）。 }
+procedure SceneLogical(R: TPMLRenderer);
+var
+  T: TPMLTexture;
+begin
+  Background(R);
+  R.SetLogicalPresentation(32, 24, TPMLLogicalPresentation.Letterbox);
+  R.DrawColor := TPMLColor.Make(30, 30, 30, 255);
+  R.Clear;                                          // 帯まで塗る
+  T := R.CreateTextureFromSurface(Checker);
+  R.RenderTexture(T, FR(0, 0, 0, 0), FR(0, 0, 0, 0)); // 論理画面の全体
+  R.DrawColor := TPMLColor.Make(255, 0, 0, 255);
+  R.FillRect(FR(2, 3, 5, 4));
+  R.DrawPoints([TPMLFPoint.Make(20, 2), TPMLFPoint.Make(31, 23)]);
+  R.DrawColor := TPMLColor.Make(0, 255, 0, 255);
+  R.DrawLine(1, 20, 30, 20);
+  R.DrawLine(28, 1, 28, 22);
+  R.Viewport := TPMLRect.Make(10, 10, 8, 8);
+  R.DrawColor := TPMLColor.Make(255, 255, 0, 255);
+  R.FillRect(FR(-2, -2, 6, 6));
+  R.Viewport := TPMLRect.Make(0, 0, 0, 0);
+  R.SetLogicalPresentation(0, 0, TPMLLogicalPresentation.Disabled);
+end;
+
+{ 論理解像度の線は三角形で描く。斜めの線も、閉じた半透明の折れ線も。 }
+procedure SceneLogicalLines(R: TPMLRenderer);
+begin
+  Background(R);
+  R.SetLogicalPresentation(32, 24, TPMLLogicalPresentation.Letterbox);
+  R.DrawColor := TPMLColor.Make(255, 255, 255, 255);
+  R.DrawLine(1, 1, 20, 9);
+  R.DrawLine(30, 2, 12, 22);
+  R.BlendMode := TPMLBlendMode.Blend;
+  R.DrawColor := TPMLColor.Make(255, 128, 0, 128);
+  R.DrawLines([TPMLFPoint.Make(3, 12), TPMLFPoint.Make(15, 14), TPMLFPoint.Make(9, 22),
+               TPMLFPoint.Make(3, 12)]);
+  R.DrawRect(FR(18, 12, 10, 8));
+  R.BlendMode := TPMLBlendMode.None;
+  R.SetLogicalPresentation(0, 0, TPMLLogicalPresentation.Disabled);
+end;
+
+{ 倍率だけ（論理解像度なし）。線は矩形の並びとブレゼンハムの点で描く。 }
+procedure SceneScaleLines(R: TPMLRenderer);
+begin
+  Background(R);
+  R.Scale := TPMLFPoint.Make(3, 2);
+  R.DrawColor := TPMLColor.Make(255, 255, 255, 255);
+  R.DrawLine(1, 1, 18, 9);
+  R.DrawLine(2, 30, 19, 12);
+  R.DrawRect(FR(4, 14, 12, 10));
+  R.FillRect(FR(1, 26, 3, 2));
+  R.Scale := TPMLFPoint.Make(1, 1);
+end;
+
+{ DebugText。等倍と、論理解像度で 2 倍。1 フレームの中で色を変える（D-43）。 }
+procedure SceneDebugText(R: TPMLRenderer);
+begin
+  Background(R);
+  R.DrawColor := TPMLColor.Make(255, 255, 255, 255);
+  R.DebugText(1, 1, 'Hi! @#');
+  R.DrawColor := TPMLColor.Make(255, 80, 0, 255);
+  R.DebugText(1, 10, 'é?あ');
+  R.SetLogicalPresentation(32, 24, TPMLLogicalPresentation.Letterbox);
+  R.DrawColor := TPMLColor.Make(0, 255, 128, 255);
+  R.DebugText(0, 12, 'OK');
+  R.DrawColor := TPMLColor.Make(255, 255, 0, 160);
+  R.DebugText(16, 12, '42');
+  R.SetLogicalPresentation(0, 0, TPMLLogicalPresentation.Disabled);
+end;
+
 { ---- 比較 ---- }
 
 function NewGPU: TPMLRenderer;
@@ -433,6 +503,10 @@ begin
   Compare('点', @ScenePoints, 0);
   Compare('水平・垂直の線と枠', @SceneAxisLines, 0);
   Compare('斜めの線（GL の線の規則はブレゼンハムと違う）', @SceneDiagonalLines, 0, 12);
+  Compare('論理解像度（塗り・点・軸の線・転送・ビューポート）', @SceneLogical, 0);
+  Compare('論理解像度の線（三角形。斜め・閉じた半透明）', @SceneLogicalLines, 2);
+  Compare('倍率だけの線（矩形の並びとブレゼンハム）', @SceneScaleLines, 0);
+  Compare('DebugText（等倍・2 倍・色の切り替え）', @SceneDebugText, 2);
 end;
 
 { ---- ウィンドウ ---- }

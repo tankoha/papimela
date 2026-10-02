@@ -1,6 +1,6 @@
 # 引き継ぎ資料
 
-新しいセッションは、`CLAUDE.md` の次にこれを読む。最終更新: 2026-10-02（コミット `1ae1bdd` の次）。
+新しいセッションは、`CLAUDE.md` の次にこれを読む。最終更新: 2026-10-02（論理解像度と DebugText のコミット）。
 
 ## 1. 今どこにいるか
 
@@ -8,9 +8,9 @@
 |---|---|
 | リポジトリ | https://github.com/tankoha/papimela（公開、Issues 有効、`master` に直接 push） |
 | CI | 緑。rawpaco 激辛、checkorigin、図の検査、表示サーバ無しのテスト 8 本、Pong の自己検査、GLES2 と ソフトウェアのドライバの画素比較（llvmpipe）。ジョブ 60 分・GLES2 の手順 5 分の時間制限つき |
-| テスト | 19 本、584 件、すべて成功（`docs/TEST-LOG.md`） |
-| 不具合 | 41 件。うち上流 SDL の 3 件（D-18、D-36、D-38）は未報告（方針は `CLAUDE.md`） |
-| 規模 | 手書き 38 ユニット + 生成（Wayland プロトコル 21、キーボードの表 2、EGL / GLES2 の定数 2）。約 3 万行 |
+| テスト | 20 本、639 件、すべて成功（`docs/TEST-LOG.md`。手元専用の検査は 639 件に数えているが、追加後は流し直していない） |
+| 不具合 | 43 件。うち上流 SDL の 4 件（D-18、D-36、D-38、D-42）は未報告（方針は `CLAUDE.md`） |
+| 規模 | 手書き 38 ユニット + 生成（Wayland プロトコル 21、キーボードの表 2、EGL / GLES2 の定数 2、DebugText の字形 1）。約 3 万行 |
 
 ### 動いているもの
 
@@ -18,29 +18,32 @@ Wayland のウィンドウ（xdg-shell、configure の往復、最大化・最�
 （xkb のキーボード、ポインタ、タッチ、ポインタ拘束、カーソル形状）、キーボードの状態と
 SDL と同じ値のスキャンコード・キーコード（配列ごとのキーマップ）、イベントキュー、
 fcitx5 経由の IME（全文節・周辺テキスト・周辺削除）、ピクセル形式、サーフェス、BMP、
-ブリッタ、レンダラ（ソフトウェアと OpenGL ES 2.0。どちらもウィンドウへ VSync つき）、
+ブリッタ、レンダラ（ソフトウェアと OpenGL ES 2.0。どちらもウィンドウへ VSync つき。拡大率、論理解像度 5 方式、
+ウィンドウ座標との変換、DebugText）、
 EGL の GL コンテキスト、ヘッドレスのダミーのビデオ、サンプルの Pong。
 
 ### 設計書第 11 章の進み具合
 
 済み（一部を含む）: #1–4、#10、#12–17（#17 の `.GL` は未）、#22、#24（`Events.Keymap`。押下状態は
 `PaPiMeLa.Events` の `TPMLKeyboardState`）、#25 の一部（マウスとタッチの状態機械は `PaPiMeLa.Events`）、
-#26–29、#31–37（#32 の `.Clipboard` は未）、#39、#41–43、#46、#47、#50、#64、#70。
+#26–29、#31–37（#32 の `.Clipboard` は未）、#39、#41–43（#41 の残りは描画先テクスチャ、回転、9-grid / タイル）、
+#46、#47、#50、#64、#70。
 
 未着手: #5–9（Log、Properties、Atomic、Threading、Time）、#11、#18–21、#23、#30、#38、#40、#44、
 #45、#48、#49、#51–63（オーディオ、ジョイスティック、ゲームパッド、ハプティクス）、#65–69。
 
 ## 2. 次の候補（おすすめ順）
 
-1. **レンダラの残り（#41、High）**: 論理解像度（LogicalPresentation）と DebugText。
-   Pong を書いて分かった F-4 / F-5 で、アプリを書く人がすぐ当たる。両ドライバの画素比較
-   （`test_render_gles2` の形）にそのまま載せられる
-2. **待つ API（#9 Time、Medium）**: F-6。`SDL_Delay` 相当。VSync が効かない環境でループが CPU を使い切る
-3. **Context のオプションを値型に（Core）**: F-7。呼び出し側が解放し忘れる（papimela 自身のテストも忘れていた）
-4. **アンブレラ（#45）**: `uses PaPiMeLa` 1 つで公開 API が揃うように
-5. **クリップボード（#38、Medium）**、**IBus（#48、High）と text-input-v3（#49、High）**: IME は papimela の看板。
+1. **待つ API（#9 Time、Medium）**: F-6。`SDL_Delay` 相当。VSync が効かない環境でループが CPU を使い切る
+2. **Context のオプションを値型に（Core）**: F-7。呼び出し側が解放し忘れる（papimela 自身のテストも忘れていた）
+3. **アンブレラ（#45）**: `uses PaPiMeLa` 1 つで公開 API が揃うように
+4. **クリップボード（#38、Medium）**、**IBus（#48、High）と text-input-v3（#49、High）**: IME は papimela の看板。
    fcitx5 以外の利用者に届く
+5. **レンダラの残り（#41）**: 描画先テクスチャ（SetRenderTarget。テクスチャごとの view が要るので、
+   今レンダラに直接持っている拡大率・論理解像度のフィールドを record にまとめるところから）、回転、9-grid / タイル
 6. **オーディオ（#51 以降）**: 大きな段階。PipeWire から
+
+済んだもの: 論理解像度と DebugText（F-4 / F-5、2026-10-02）。Pong も書き換えた。
 
 ## 3. 定着した進め方
 
@@ -62,7 +65,7 @@ EGL の GL コンテキスト、ヘッドレスのダミーのビデオ、サン
 表示サーバ無しで通るもの（CI と同じ）:
 
 ```bash
-for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_keyboard; do
+for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_keyboard; do
   fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/$t test/$t.pas && ./test/$t
 done
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -oexamples/pong examples/pong.pas && ./examples/pong --selftest
@@ -109,6 +112,7 @@ man-db などの設定は所有者の切り替えで失敗するが、`dpkg -r -
 | rawpaco | `../rawpaco`（https://github.com/tankoha/rawpaco。`make` で作る）。CI は `main` を取る |
 | SDL のソース | `reference/SDL`（gitignore 済み）。版と取り直し方は `docs/ORIGIN.md` |
 | Babashka | 生成器と checkorigin と qwen-gen が使う |
+| SDL の実物 | 移植の結果を SDL と画素で比べるときに作る。表示サーバ無しで静的に作れる: `cmake -G Ninja -S reference/SDL -B <作業用> -DSDL_UNIX_CONSOLE_BUILD=ON -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TESTS=OFF` に、使わないもの（`-DSDL_AUDIO=OFF` など）を足す。`SDL_CreateSoftwareRenderer` でサーフェスへ描けば比べられる（`docs/TEST-LOG.md` の使い捨て検証） |
 | qwen | 手元の ollama の `qwen2.5-coder:14b`。呼び出しは `tools/qwen-gen.bb`。**クラウドには無い**ので、Low の作業は手元に戻るか、Sonnet に回す |
 | 手元の機械 | labwc（Wayland）、画面 DP-3 2560x1080 200 Hz、Radeon RX 9070 + 内蔵 Raphael、Mesa 26.0.8、Ubuntu 26.04、fcitx5-mozc |
 
@@ -124,10 +128,13 @@ man-db などの設定は所有者の切り替えで失敗するが、`dpkg -r -
 - `Check(条件, Format(…))` の `Format` は条件より先に評価される
 - `perl -0pi` の置換は、アンカーの字下げが 1 つ違うだけで合わない。`or die` で失敗を知る
 - 「環境が無ければ飛ばす」検査は、空の実装を通してしまう
+- レンダラは描画を**積んでから実行する**。積んだ後に変えられる値（テクスチャの変調色など）は積むときに写す（D-43。D-39 も同じ隙間）
 
 ## 7. 保留中の判断（利用者に聞く）
 
-- SDL の不具合 D-36、D-38 を README の「SDL にバグ報告を返すべきか」の節に足すか（今は D-18 だけ）
+- SDL の不具合 D-36、D-38、D-42 を README の「SDL にバグ報告を返すべきか」の節に足すか（今は D-18 だけ）
+- ソフトウェアのブリッタの半透明の丸めが SDL と 1 違う（SDL は `0x9f`、papimela は `0xa0`。SDL の実物と比べて分かった。
+  `docs/TEST-LOG.md` の使い捨て検証）。SDL に揃えるか。揃えるなら T-15 の参照実装と T-22 の許容差も見直す
 - GL を使うと浮動小数点の例外が無効になること（D-40）を README にも書くか
 - Sonnet が挙げた SDL の怪しい点 3 つ（スワップ間隔が全体で 1 つ、EGL 1.5 をちょうど 1.5 で判定、
   面が無いときに成功を返す MakeCurrent）は**まだ確かめていない**。確かめるまで不具合一覧に載せない

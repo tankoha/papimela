@@ -136,14 +136,13 @@ type
     function Decide(AGame: TPongGame; ASide: TSide): Integer; override;
   end;
 
-  { 盤面を描く。論理座標をウィンドウへ合わせる変換もここで持つ。 }
+  { 盤面を描く。ウィンドウへ合わせるのはレンダラの論理解像度に任せる。 }
   TPongView = class
   strict private
     FRenderer: TPMLRenderer;
-    FScale, FOffX, FOffY: Single;
-    function  Map(AX, AY, AW, AH: Single): TPMLFRect;
     procedure Fill(AX, AY, AW, AH: Single; const AColor: TPMLColor);
-    procedure DrawDigit(ADigit: Integer; AX, AY: Single; const AColor: TPMLColor);
+    procedure DrawText(AX, AY, AScale: Single; const AText: String;
+      const AColor: TPMLColor);
   public
     constructor Create(ARenderer: TPMLRenderer);
     procedure Draw(AGame: TPongGame; APaused: Boolean; ATime: Double);
@@ -414,61 +413,44 @@ constructor TPongView.Create(ARenderer: TPMLRenderer);
 begin
   inherited Create;
   FRenderer := ARenderer;
-end;
-
-function TPongView.Map(AX, AY, AW, AH: Single): TPMLFRect;
-begin
-  Result := TPMLFRect.Make(FOffX + AX * FScale, FOffY + AY * FScale,
-    AW * FScale, AH * FScale);
+  // 盤面の座標のまま描く。縦横比を保ってウィンドウに収め、余りは帯になる。
+  // ウィンドウの大きさが変わっても、レンダラが当てはめ直す。
+  FRenderer.SetLogicalPresentation(FieldW, FieldH, TPMLLogicalPresentation.Letterbox);
 end;
 
 procedure TPongView.Fill(AX, AY, AW, AH: Single; const AColor: TPMLColor);
 begin
   FRenderer.DrawColor := AColor;
-  FRenderer.FillRect(Map(AX, AY, AW, AH));
+  FRenderer.FillRect(TPMLFRect.Make(AX, AY, AW, AH));
+end;
+
+{ 文字を AScale 倍で描く。倍率は描く間だけ掛け、座標もその倍率で割っておく。 }
+procedure TPongView.DrawText(AX, AY, AScale: Single; const AText: String;
+  const AColor: TPMLColor);
+begin
+  FRenderer.Scale := TPMLFPoint.Make(AScale, AScale);
+  FRenderer.DrawColor := AColor;
+  FRenderer.DebugText(AX / AScale, AY / AScale, AText);
+  FRenderer.Scale := TPMLFPoint.Make(1, 1);
 end;
 
 procedure TPongView.LogicalToWindow(AX, AY: Single; out AWX, AWY: Integer);
-begin
-  AWX := Floor(FOffX + AX * FScale);
-  AWY := Floor(FOffY + AY * FScale);
-end;
-
-{ 7 セグメントの数字。papimela にはまだ文字を描く API（DebugText）が無い。 }
-procedure TPongView.DrawDigit(ADigit: Integer; AX, AY: Single; const AColor: TPMLColor);
-const
-  // ビット 0..6 = a（上）b（右上）c（右下）d（下）e（左下）f（左上）g（中）
-  Segments: array[0..9] of Byte = ($3F, $06, $5B, $4F, $66, $6D, $7D, $07, $7F, $6F);
-  W = 24;
-  H = 40;
-  T = 6;
 var
-  M: Byte;
+  P: TPMLFPoint;
 begin
-  M := Segments[EnsureRange(ADigit, 0, 9)];
-  if (M and $01) <> 0 then Fill(AX, AY, W, T, AColor);
-  if (M and $02) <> 0 then Fill(AX + W - T, AY, T, H / 2, AColor);
-  if (M and $04) <> 0 then Fill(AX + W - T, AY + H / 2, T, H / 2, AColor);
-  if (M and $08) <> 0 then Fill(AX, AY + H - T, W, T, AColor);
-  if (M and $10) <> 0 then Fill(AX, AY + H / 2, T, H / 2, AColor);
-  if (M and $20) <> 0 then Fill(AX, AY, T, H / 2, AColor);
-  if (M and $40) <> 0 then Fill(AX, AY + (H - T) / 2, W, T, AColor);
+  P := FRenderer.RenderCoordinatesToWindow(AX, AY);
+  AWX := Floor(P.X);
+  AWY := Floor(P.Y);
 end;
 
 procedure TPongView.Draw(AGame: TPongGame; APaused: Boolean; ATime: Double);
+const
+  ScoreScale = 5;           // 8x8 の文字を 40x40 に
 var
-  W, H: Integer;
   Y: Single;
   S: TSide;
   Blink: Boolean;
 begin
-  // 縦横比を保って収め、余りは上下か左右に帯として残す。
-  // papimela にはまだ論理解像度（LogicalPresentation）が無いので自分で計算する。
-  FRenderer.GetOutputSize(W, H);
-  FScale := Min(W / FieldW, H / FieldH);
-  FOffX := (W - FieldW * FScale) / 2;
-  FOffY := (H - FieldH * FScale) / 2;
-
   FRenderer.BlendMode := TPMLBlendMode.None;
   FRenderer.DrawColor := ColorBorder;
   FRenderer.Clear;
@@ -484,9 +466,11 @@ begin
   // 勝った側の点数は点滅させる。
   Blink := AGame.HasWinner and (Frac(ATime * 2) < 0.5);
   if not (Blink and (AGame.Winner = TSide.Left)) then
-    DrawDigit(AGame.Score[TSide.Left], FieldW / 2 - 64, 24, ColorScore);
+    DrawText(FieldW / 2 - 64, 24, ScoreScale, IntToStr(AGame.Score[TSide.Left]), ColorScore);
   if not (Blink and (AGame.Winner = TSide.Right)) then
-    DrawDigit(AGame.Score[TSide.Right], FieldW / 2 + 40, 24, ColorScore);
+    DrawText(FieldW / 2 + 24, 24, ScoreScale, IntToStr(AGame.Score[TSide.Right]), ColorScore);
+  if AGame.HasWinner then
+    DrawText(FieldW / 2 - 6 * 16, FieldH - 48, 2, 'SPACE: AGAIN', ColorScore);
 
   for S := Low(TSide) to High(TSide) do
     if S = TSide.Left then
@@ -507,6 +491,7 @@ begin
     FRenderer.BlendMode := TPMLBlendMode.None;
     Fill(FieldW / 2 - 22, FieldH / 2 - 30, 14, 60, ColorPaddle);
     Fill(FieldW / 2 + 8, FieldH / 2 - 30, 14, 60, ColorPaddle);
+    DrawText(FieldW / 2 - 8 * 2 * 8, FieldH / 2 + 48, 2, 'P: RESUME  2: 2P', ColorPaddle);
   end;
 end;
 
@@ -662,6 +647,27 @@ begin
   end;
 end;
 
+{ 論理座標の矩形の中に、AColor の画素がいくつあるか。 }
+function CountColor(AR: TPMLRenderer; AView: TPongView; AX, AY, AW, AH: Single;
+  const AColor: TPMLColor): Integer;
+var
+  S: TPMLSurface;
+  X1, Y1, X2, Y2, X, Y: Integer;
+begin
+  AView.LogicalToWindow(AX, AY, X1, Y1);
+  AView.LogicalToWindow(AX + AW, AY + AH, X2, Y2);
+  S := AR.ReadPixels(TPMLRect.Make(X1, Y1, X2 - X1, Y2 - Y1));
+  try
+    Result := 0;
+    for Y := 0 to S.Height - 1 do
+      for X := 0 to S.Width - 1 do
+        if SameRGB(S.ReadPixel(X, Y), AColor) then
+          Inc(Result);
+  finally
+    S.Free;
+  end;
+end;
+
 { シートが届けるのと同じ形で、スキャンコードだけのキーを流す。 }
 procedure SendKey(ACtx: TPMLContext; AWin: TPMLWindow; AScancode: TPMLScancode;
   ADown: Boolean);
@@ -759,6 +765,10 @@ begin
     Check(SameRGB(PixelAt(R, View, FieldW - PaddleMargin - PaddleW / 2,
       Game.PaddleY[TSide.Right] + PaddleH / 2), ColorPaddle), '右のパドル');
     Check(SameRGB(PixelAt(R, View, FieldW / 4, FieldH - 4), ColorField), '盤面の地の色');
+    Check(CountColor(R, View, FieldW / 2 - 64, 24, 40, 40, ColorScore) > 100,
+      '左の得点が文字（DebugText）で描かれている');
+    Check(CountColor(R, View, FieldW / 2 + 24, 24, 40, 40, ColorScore) > 100,
+      '右の得点が文字（DebugText）で描かれている');
 
     WriteLn;
     WriteLn('3. ウィンドウを横長にすると、縦横比を保って左右に帯が付く');
