@@ -64,6 +64,11 @@ const
   // 盤面は固定の刻みで進める。1/240 秒なら最高速でも 1 刻み 3.75 で、
   // パドルの厚み 10 をすり抜けない。
   StepSeconds = 1 / 240;
+  // 1 フレームの最短の長さ。VSync が使えないときは 60 fps。VSync を受け付けても
+  // Present が待つとは限らない（ダミーのビデオは受け付けるだけで待たない）ので、
+  // そのときも 240 fps で頭打ちにする。240 Hz までの画面の VSync なら効かない。
+  FrameNSNoVSync = UInt64(1000000000) div 60;
+  FrameNSVSync   = UInt64(1000000000) div 240;
 
 type
   TSide = (Left, Right);
@@ -510,8 +515,8 @@ var
   Computer : TComputerController;
   Left, Right: TController;
   Ev       : TPMLEvent;
-  Running, Paused, TwoPlayers: Boolean;
-  Start, Last, Now: UInt64;
+  Running, Paused, TwoPlayers, VSyncOn: Boolean;
+  Start, Last, Now, FrameStart, Spent, MinFrame: UInt64;
   Acc      : Double;
 
 begin
@@ -529,12 +534,16 @@ begin
     Win := Ctx.Video.CreateWindow(
       TPMLWindowOptions.Make('papimela pong', 960, 600).Resizable);
     R := TPMLRenderer.CreateForWindow(Win);
+    VSyncOn := True;
     try
       R.VSync := 1;
     except
-      // VSync が使えなければ、そのまま回す。
+      // VSync が使えなければ、1 フレームの残りを自分で眠って 60 fps に抑える。
       on E: EPMLUnsupported do
-        WriteLn('VSync なしで動かします: ', E.Message);
+      begin
+        WriteLn('VSync なしで動かします（60 fps に抑えます）: ', E.Message);
+        VSyncOn := False;
+      end;
     end;
     View := TPongView.Create(R);
 
@@ -548,6 +557,7 @@ begin
     Last := Start;
     while Running do
     begin
+      FrameStart := Ctx.Timer.TicksNS;
       Ctx.Events.Pump(0);
       while Ctx.Events.Poll(Ev) do
         case Ev.Kind of
@@ -597,6 +607,14 @@ begin
 
       View.Draw(Game, Paused, (Now - Start) / 1e9);
       R.Present;
+      // Present が待たなかったら、残りの時間を眠り、CPU を使い切らない（F-6）。
+      if VSyncOn then
+        MinFrame := FrameNSVSync
+      else
+        MinFrame := FrameNSNoVSync;
+      Spent := Ctx.Timer.TicksNS - FrameStart;
+      if Spent < MinFrame then
+        Ctx.Timer.DelayNS(MinFrame - Spent);
     end;
     // レンダラはウィンドウと一緒に消える。
     Win.Free;
@@ -698,14 +716,9 @@ var
 begin
   WriteLn('pong --selftest — コンピュータ同士の対戦を再生して検査する');
   WriteLn;
-  // オプションは呼び出し側の持ち物。Context は生成中に読むだけで保持しない。
-  Opts := TPMLContextOptions.Create;
-  try
-    Opts.PreferredVideo := 'dummy';
-    Ctx := TPMLContext.Create([TPMLSubsystem.Video], Opts);
-  finally
-    Opts.Free;
-  end;
+  Opts := TPMLContextOptions.Default;
+  Opts.PreferredVideo := 'dummy';
+  Ctx := TPMLContext.Create([TPMLSubsystem.Video], Opts);
   Game := TPongGame.Create(12345);
   A := TComputerController.Create(111);
   B := TComputerController.Create(222);

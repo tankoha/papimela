@@ -21,7 +21,7 @@
 
   NOT RESOLVED:
     - Audio / Joysticks は未実装のため常に nil。要求されたら EPMLUnsupported を投げる
-    - TPMLTimerService は TicksNS のみ。タイマースレッドと Timer.AddTimer は
+    - TPMLTimerService は時刻と待つことだけ。タイマースレッドと Timer.AddTimer は
       PaPiMeLa.Threading（#8）の後
     - TPMLHints / TPMLLog は未実装。Log は当面 Context.LogInfo で標準出力へ
     - RunOnMainThread は Threading 着手時
@@ -50,24 +50,41 @@ type
 
   TPMLLogLevel = (Verbose, Debug, Info, Warn, Error_);
 
-  { 単調増加時刻の提供。 }
+  { 単調増加時刻と、待つこと。どれも Context を要らないので class 関数
+    （TPMLTimerService.Delay(16) とも Ctx.Timer.Delay(16) とも書ける）。
+    待つ処理は PaPiMeLa.Time にある。 }
   TPMLTimerService = class sealed(TPMLSystemObject)
   public
-    function TicksNS: UInt64;
-    function TicksMS: UInt64;
+    class function TicksNS: UInt64; static;
+    class function TicksMS: UInt64; static;
+    class procedure Delay(AMs: LongWord); static;
+    class procedure DelayNS(ANs: UInt64); static;
+    class procedure DelayPrecise(ANs: UInt64); static;
   end;
 
-  TPMLContextOptions = class
-  public
+  { Context を作るときの選択肢。値型なので解放は要らない（F-7）。
+
+    書き方:
+      Opts := TPMLContextOptions.Default;
+      Opts.PreferredVideo := 'dummy';
+      Ctx := TPMLContext.Create([TPMLSubsystem.Video], Opts);
+
+    Default を通さずに宣言しただけの変数も、Initialize 演算子が既定値で
+    埋める（中身が不定にならない）。ただし FPC 3.2 はその変数に「初期化
+    されていないようだ」と警告するので、普段は Default から書く。 }
+  TPMLContextOptions = record
     // 使用する IME バックエンドを明示指定する（'fcitx' / 'ibus' / 'wayland' / 'none'）。
     // 空なら PAPIMELA_IME 環境変数、それも無ければ自動選択。
     PreferredTextInput: String;
     // 使用するビデオバックエンドを明示指定する（'wayland'）。空なら PAPIMELA_VIDEO。
     PreferredVideo    : String;
-    // イベントキューの容量（イベント数）。
+    // イベントキューの容量（イベント数）。1 以上。
     EventQueueCapacity: Integer;
     MinimumLogLevel   : TPMLLogLevel;
-    constructor Create;
+    class function Default: TPMLContextOptions; static;
+    class operator Initialize(var AOptions: TPMLContextOptions);
+  private
+    class procedure SetDefaults(var AOptions: TPMLContextOptions); static;
   end;
 
   TPMLContext = class sealed(TPMLObject)
@@ -79,7 +96,9 @@ type
     FSubsystems: TPMLSubsystems;
     FMinLevel  : TPMLLogLevel;
   public
-    constructor Create(ASubsystems: TPMLSubsystems; AOptions: TPMLContextOptions = nil);
+    constructor Create(ASubsystems: TPMLSubsystems); overload;
+    constructor Create(ASubsystems: TPMLSubsystems;
+      const AOptions: TPMLContextOptions); overload;
     destructor Destroy; override;
 
     procedure Log(ALevel: TPMLLogLevel; const AMsg: String);
@@ -94,68 +113,96 @@ type
 
 implementation
 
-constructor TPMLContextOptions.Create;
+uses
+  PaPiMeLa.Time;
+
+// 既定値の正本。Default と Initialize 演算子の両方がここを通る。
+class procedure TPMLContextOptions.SetDefaults(var AOptions: TPMLContextOptions);
 begin
-  inherited Create;
-  PreferredTextInput := '';
-  PreferredVideo := '';
-  EventQueueCapacity := 256;
-  MinimumLogLevel := TPMLLogLevel.Info;
+  AOptions.PreferredTextInput := '';
+  AOptions.PreferredVideo := '';
+  AOptions.EventQueueCapacity := 256;
+  AOptions.MinimumLogLevel := TPMLLogLevel.Info;
 end;
 
-function TPMLTimerService.TicksNS: UInt64;
+class operator TPMLContextOptions.Initialize(var AOptions: TPMLContextOptions);
+begin
+  SetDefaults(AOptions);
+end;
+
+class function TPMLContextOptions.Default: TPMLContextOptions;
+begin
+  // Result は Initialize 演算子で既に埋まっているが、FPC 3.2 はそれを知らずに
+  // 「初期化されていない」と警告する。フィールドを 1 つ書いてから渡すと黙る。
+  // Initialize 演算子から Default を呼ぶ形にはできない（互いに呼び合って落ちる。実測）。
+  Result.PreferredVideo := '';
+  SetDefaults(Result);
+end;
+
+class function TPMLTimerService.TicksNS: UInt64;
 begin
   Result := PMLNowNS;
 end;
 
-function TPMLTimerService.TicksMS: UInt64;
+class function TPMLTimerService.TicksMS: UInt64;
 begin
   Result := PMLNowNS div 1000000;
 end;
 
-constructor TPMLContext.Create(ASubsystems: TPMLSubsystems; AOptions: TPMLContextOptions);
-var
-  Opts    : TPMLContextOptions;
-  OwnsOpts: Boolean;
+class procedure TPMLTimerService.Delay(AMs: LongWord);
+begin
+  PMLDelay(AMs);
+end;
+
+class procedure TPMLTimerService.DelayNS(ANs: UInt64);
+begin
+  PMLDelayNS(ANs);
+end;
+
+class procedure TPMLTimerService.DelayPrecise(ANs: UInt64);
+begin
+  PMLDelayPrecise(ANs);
+end;
+
+constructor TPMLContext.Create(ASubsystems: TPMLSubsystems);
+begin
+  Create(ASubsystems, TPMLContextOptions.Default);
+end;
+
+constructor TPMLContext.Create(ASubsystems: TPMLSubsystems;
+  const AOptions: TPMLContextOptions);
 begin
   // Context 自身はルートなので ContextRef は nil。生成スレッドがメインになる。
   inherited Create(nil);
   FSubsystems := ASubsystems;
+  if AOptions.EventQueueCapacity < 1 then
+    raise EPMLArgument.CreateFmt('EventQueueCapacity must be at least 1 (got %d)',
+      [AOptions.EventQueueCapacity]);
+  // AOptions は値で読むだけで、Context は覚えない。
+  FMinLevel := AOptions.MinimumLogLevel;
 
-  OwnsOpts := AOptions = nil;
-  if OwnsOpts then
-    Opts := TPMLContextOptions.Create
-  else
-    Opts := AOptions;
-  try
-    FMinLevel := Opts.MinimumLogLevel;
+  // 生成順 = 破棄の逆順。Events と Timer は常に存在する。
+  FEvents := TPMLEventQueue.Create(Self, Self, AOptions.EventQueueCapacity);
+  FTimer := TPMLTimerService.Create(Self, Self);
 
-    // 生成順 = 破棄の逆順。Events と Timer は常に存在する。
-    FEvents := TPMLEventQueue.Create(Self, Self, Opts.EventQueueCapacity);
-    FTimer := TPMLTimerService.Create(Self, Self);
+  if TPMLSubsystem.Video in ASubsystems then
+  begin
+    FVideo := TPMLVideoSystem.Create(Self, Self, FEvents, AOptions.PreferredVideo);
+    LogFmt(TPMLLogLevel.Info, 'video backend: %s', [FVideo.BackendName]);
+  end;
+  if TPMLSubsystem.Audio in ASubsystems then
+    raise EPMLUnsupported.Create('the Audio subsystem is not implemented yet');
+  if (TPMLSubsystem.Joystick in ASubsystems)
+    or (TPMLSubsystem.Gamepad in ASubsystems)
+    or (TPMLSubsystem.Haptic in ASubsystems) then
+    raise EPMLUnsupported.Create('the input subsystems are not implemented yet');
 
-    if TPMLSubsystem.Video in ASubsystems then
-    begin
-      FVideo := TPMLVideoSystem.Create(Self, Self, FEvents, Opts.PreferredVideo);
-      LogFmt(TPMLLogLevel.Info, 'video backend: %s', [FVideo.BackendName]);
-    end;
-    if TPMLSubsystem.Audio in ASubsystems then
-      raise EPMLUnsupported.Create('the Audio subsystem is not implemented yet');
-    if (TPMLSubsystem.Joystick in ASubsystems)
-      or (TPMLSubsystem.Gamepad in ASubsystems)
-      or (TPMLSubsystem.Haptic in ASubsystems) then
-      raise EPMLUnsupported.Create('the input subsystems are not implemented yet');
-
-    if TPMLSubsystem.TextInput in ASubsystems then
-    begin
-      FTextInput := TPMLTextInputSystem.Create(Self, Self, FEvents,
-        Opts.PreferredTextInput);
-      FEvents.KeyFilter := FTextInput as IPMLKeyFilter;
-      LogFmt(TPMLLogLevel.Info, 'text input backend: %s', [FTextInput.BackendName]);
-    end;
-  finally
-    if OwnsOpts then
-      Opts.Free;
+  if TPMLSubsystem.TextInput in ASubsystems then
+  begin
+    FTextInput := TPMLTextInputSystem.Create(Self, Self, FEvents,
+      AOptions.PreferredTextInput);
+    FEvents.KeyFilter := FTextInput as IPMLKeyFilter;
+    LogFmt(TPMLLogLevel.Info, 'text input backend: %s', [FTextInput.BackendName]);
   end;
 end;
 

@@ -84,7 +84,7 @@ the D-Bus route is not an optimisation, it is the only way.
 
 ### State
 
-Roughly 30,000 lines across 38 hand-written units and 21 generated Wayland
+Roughly 30,000 lines across 39 hand-written units and 21 generated Wayland
 protocol units. Working: Wayland windows, the seat (keyboard with xkb, pointer,
 touch, pointer constraints, cursor shapes), keyboard state with SDL-compatible
 scancodes and keycodes, the event queue, the IME path through
@@ -93,7 +93,7 @@ renderer that draw into windows with VSync (the GPU one about 135 times faster o
 the same scene) with logical resolution and built-in debug text, OpenGL ES contexts on Wayland windows through EGL, and a headless video backend so tests can run without
 a display server. There is a playable Pong in `examples/`.
 
-20 test programs, 639 assertions, all passing. The GPU renderer is compared pixel by
+21 test programs, 662 assertions, all passing. The GPU renderer is compared pixel by
 pixel against the software one, in CI too (on Mesa llvmpipe). CI runs a static analyser in its
 strictest mode (one warning fails the build), checks that the class diagrams
 still match the code, checks that every file's stated provenance matches the
@@ -189,7 +189,7 @@ Wayland の `text-input-v3` ではこれは表現できない（preedit のス�
 
 ### 現状
 
-手書き 38 ユニットと生成した Wayland プロトコル 21 ユニット、およそ 3 万行。
+手書き 39 ユニットと生成した Wayland プロトコル 21 ユニット、およそ 3 万行。
 動いているのは、Wayland のウィンドウ、シート（xkb を使ったキーボード、ポインタ、
 タッチ、ポインタ拘束、カーソル形状）、SDL と同じ値のスキャンコードとキーコードを
 持つキーボードの状態、イベントキュー、fcitx5 経由の IME、
@@ -198,7 +198,7 @@ Wayland の `text-input-v3` ではこれは表現できない（preedit のス�
 EGL による Wayland ウィンドウ上の OpenGL ES コンテキスト、そして表示サーバ無しでテストを回すためのヘッドレス
 バックエンド。`examples/` には遊べる Pong がある。
 
-テストは 20 本、639 アサーション、全て成功。GPU のレンダラはソフトウェアの
+テストは 21 本、662 アサーション、全て成功。GPU のレンダラはソフトウェアの
 レンダラと画素ごとに比べていて、CI でも（Mesa の llvmpipe で）走る。CI は静的解析を最も厳しい設定で
 回し（warning 1 件でビルドが落ちる）、クラス図がコードと食い違っていないかを
 確かめ、各ファイルが名乗っている由来が設計書と一致するかを確かめ、画面の要らない

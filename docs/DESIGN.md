@@ -200,7 +200,10 @@ type
 
   TPMLContext = class sealed(TPMLObject)
   public
-    constructor Create(ASubsystems: TPMLSubsystems; AOptions: TPMLContextOptions = nil);
+    constructor Create(ASubsystems: TPMLSubsystems); overload;
+    // TPMLContextOptions は record（値型。解放が要らない。F-7 で class から変更）。
+    // TPMLContextOptions.Default から書く。
+    constructor Create(ASubsystems: TPMLSubsystems; const AOptions: TPMLContextOptions); overload;
     destructor  Destroy; override;      // 所有する順序の逆（TextInput → Joystick → Audio → Video → Events）に破棄
     property Events    : TPMLEventQueue      read FEvents;      // 常に存在
     property Timer     : TPMLTimerService    read FTimer;       // 常に存在
@@ -1230,7 +1233,7 @@ wayland-scanner の Pascal 版。C の `wayland-scanner` が生成する `*-clie
 | 6 | `PaPiMeLa.Properties` | `SDL_properties.c` (855)、`SDL_hints.c` (404) | 中 | 2 | P0 | 移植 | Low | qwen | ハッシュ表は `TDictionary`。ヒントは環境変数 `PAPIMELA_*` を読む。ヒントコールバック |
 | 7 | `PaPiMeLa.Atomic` | `atomic/` (573) | 小 | — | P0 | 移植 | Medium | Sonnet | FPC の `Interlocked*` へのマッピング、メモリバリア、スピンロックのバックオフ |
 | 8 | `PaPiMeLa.Threading` | `thread/pthread/` (1003)、`thread/` (772)、`core/linux/SDL_threadprio.c` (345) | 中 | 1, 2, 7 | P0 | 移植 | **High** | Opus | pthread 直接使用、`TThread` 派生の `TPMLThread`、`TPMLLockGuard`（管理レコード）、RealtimeKit 経路は D-Bus（#16）完成後に追加、`cthreads` 検査 |
-| 9 | `PaPiMeLa.Time` | `timer/SDL_timer.c` (795)、`timer/unix/` (180) | 小 | 2, 8 | P0 | 移植 | Medium | Sonnet | タイマースレッドと期限管理、`DelayPrecise`、`CLOCK_MONOTONIC` |
+| 9 | `PaPiMeLa.Time` | `timer/SDL_timer.c` (795)、`timer/unix/` (180) | 小 | 2, 8 | P0 | 移植 | Medium | Sonnet | タイマースレッドと期限管理、`DelayPrecise`、`CLOCK_MONOTONIC`。**待つ API（`PMLDelay` / `PMLDelayNS` / `PMLDelayPrecise`、`TPMLTimerService` の class 関数）は実装済み**（F-6。Sonnet。受け入れ検査 T-24 を先に書いた）。タイマースレッドと `AddTimer` は #8 の後 |
 | 10 | `PaPiMeLa.Platform.DynLib`、`.Platform.Posix` | `loadso/dlopen/` (82) | 小 | 1 | P0 | クリーンルーム | Medium | Sonnet | 参照カウント付きロード、必須/任意シンボルの区別、`eventfd` / `inotify` / `memfd_create` / `poll` の宣言 |
 | 11 | `tools/gensyms` | `SDL_*sym.h` / `SDL_*dyn.c` のマクロ機構 | 小 | — | P0 | クリーンルーム | Medium | Sonnet | 9.1。定義ファイル形式の設計と生成器（FPC で書く） |
 | 12 | `tools/wlscan-pas` | （`wayland-scanner` 相当） | 中 | — | P0 | クリーンルーム | **High** | Opus | 9.2。`wl_interface` 定数表の生成、`wl_proxy_marshal_array_flags` 経由のリクエスト、リスナー抽象クラスとサンク束の生成。**Wayland 実装全体の前提** |

@@ -34,6 +34,7 @@ test/test_blit
 test/test_render
 test/test_render_window
 test/test_render_logical
+test/test_time
 test/test_keyboard
 test/test_gl_window
 test/test_render_gles2

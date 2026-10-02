@@ -80,6 +80,72 @@ begin
     end;
 end;
 
+{ スタックを汚してから、Default を通さない変数を作る。Initialize 演算子が
+  無ければ、整数のフィールドは汚した値（-1）のまま見える。 }
+procedure DirtyStack;
+var
+  Junk: array[0..255] of LongInt;
+  I: Integer;
+begin
+  for I := 0 to High(Junk) do
+    Junk[I] := -1;
+  if Junk[7] = 0 then
+    WriteLn;
+end;
+
+function UndeclaredDefaults: Boolean;
+var
+  O: TPMLContextOptions;   // わざと Default を通さない（Initialize 演算子の検査）
+begin
+  Result := (O.EventQueueCapacity = 256) and (O.MinimumLogLevel = TPMLLogLevel.Info)
+        and (O.PreferredVideo = '') and (O.PreferredTextInput = '');
+end;
+
+procedure TestOptions;
+var
+  O: TPMLContextOptions;
+  C: TPMLContext;
+  Raised: Boolean;
+begin
+  WriteLn('0. Context のオプション（値型。F-7）');
+  O := TPMLContextOptions.Default;
+  Check((O.EventQueueCapacity = 256) and (O.MinimumLogLevel = TPMLLogLevel.Info)
+    and (O.PreferredVideo = '') and (O.PreferredTextInput = ''),
+    'Default は既定値（容量 256、Info、バックエンドは自動）');
+  DirtyStack;
+  Check(UndeclaredDefaults,
+    'Default を通さずに宣言しただけの変数も既定値になる（中身が不定にならない）');
+
+  O.EventQueueCapacity := 0;
+  Raised := False;
+  try
+    TPMLContext.Create([], O).Free;
+  except
+    on E: EPMLArgument do
+      Raised := True;
+  end;
+  Check(Raised, '容量 0 は EPMLArgument');
+
+  // 値で渡すので、作った後に呼び出し側の変数を変えても Context には届かない。
+  // 解放も要らない（このテストはオプションを Free していない）。
+  O := TPMLContextOptions.Default;
+  O.EventQueueCapacity := 64;
+  C := TPMLContext.Create([], O);
+  try
+    O.EventQueueCapacity := 32;
+    Check(C.Events.Capacity = 64, '作ったときの値が使われる（容量 64）');
+  finally
+    C.Free;
+  end;
+  C := TPMLContext.Create([]);
+  try
+    Check(C.Events.Capacity = 256, 'オプション無しの Create は既定値');
+  finally
+    C.Free;
+  end;
+  WriteLn;
+end;
+
 var
   Pixels  : Pointer;
   Pitch   : Integer;
@@ -92,16 +158,13 @@ var
 begin
   WriteLn('test_dummy_video — 表示サーバ無しでの公開 API');
   WriteLn;
+  TestOptions;
 
   // 実機の Wayland セッションで走らせてもダミーを選ばせる。環境変数ではなく
   // オプションで指定するので、呼び出し方に左右されない。
-  Opts := TPMLContextOptions.Create;
-  try
-    Opts.PreferredVideo := 'dummy';
-    Ctx := TPMLContext.Create([TPMLSubsystem.Video], Opts);
-  finally
-    Opts.Free;   // 呼び出し側の持ち物。Context は保持しない
-  end;
+  Opts := TPMLContextOptions.Default;
+  Opts.PreferredVideo := 'dummy';
+  Ctx := TPMLContext.Create([TPMLSubsystem.Video], Opts);
 
   try
     WriteLn('1. バックエンドの選択');

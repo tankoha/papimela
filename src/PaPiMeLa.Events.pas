@@ -318,6 +318,7 @@ type
     FKeyFilter : IPMLKeyFilter;
     function  TakeLocked(out AEvent: TPMLEvent): Boolean;
     function  NotifyWatches(const AEvent: TPMLEvent): Boolean;
+    function  GetCapacity: Integer;
   public
     constructor Create(AContextRef: TObject; AOwner: TPMLObject;
       ACapacity: Integer = 256);
@@ -351,6 +352,8 @@ type
     property Enabled[AKind: TPMLEventKind]: Boolean read GetEnabled write SetEnabled;
     property PendingCount: Integer read FCount;
     property DroppedCount: Integer read FDroppedLog;
+    // キューに溜められるイベントの数。作るときに 16 未満を指定すると 16。
+    property Capacity: Integer read GetCapacity;
 
     // 状態機械。バックエンドはこれを通してイベントを流す（§6.3）。
     property Keyboard: TPMLKeyboardState read FKeyboard;
@@ -401,6 +404,12 @@ begin
   FKeyboard := TPMLKeyboardState.Create(AContextRef, Self);
   FMouse := TPMLMouseState.Create(AContextRef, Self);
   FTouch := TPMLTouchState.Create(AContextRef, Self);
+end;
+
+// 輪の長さは作るときに決まり、以後変わらないので、ロックは要らない。
+function TPMLEventQueue.GetCapacity: Integer;
+begin
+  Result := Length(FRing);
 end;
 
 destructor TPMLEventQueue.Destroy;

@@ -512,13 +512,9 @@ var
 begin
   WriteLn;
   WriteLn('7. ウィンドウの大きさの追従');
-  Opts := TPMLContextOptions.Create;
-  try
-    Opts.PreferredVideo := 'dummy';
-    Ctx := TPMLContext.Create([TPMLSubsystem.Video], Opts);
-  finally
-    Opts.Free;
-  end;
+  Opts := TPMLContextOptions.Default;
+  Opts.PreferredVideo := 'dummy';
+  Ctx := TPMLContext.Create([TPMLSubsystem.Video], Opts);
   try
     Win := Ctx.Video.CreateWindow(TPMLWindowOptions.Make('logical', 80, 40).Resizable);
     WR := TPMLRenderer.CreateForWindow(Win);
