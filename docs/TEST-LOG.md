@@ -4,7 +4,7 @@ papimela で実行したテストの記録。日時は実測値（ファイル�
 および最終一括実行の時刻）に基づく。
 
 最終一括実行: **2026-10-02**（自動テスト 19 本すべて成功、アサーション 584 件・失敗 0 件。`-B` で全部作り直して実行）。
-同日、T-23 を足し、T-19 と T-22 に検査を足した（20 本・639 件）。さらに T-24 を足し、T-11 に検査を足した（21 本・662 件）。足した分と、CI で走る 9 本・T-19・T-22 のオフスクリーンの区間はクラウドの Ubuntu 24.04 で通した。手元専用の検査は追加後に流し直していない。
+同日、T-23 を足し、T-19 と T-22 に検査を足した（20 本・639 件）。さらに T-24 を足し、T-11 に検査を足した（21 本・662 件）。さらに T-25 と T-26 を足した（23 本・724 件）。足した分と、CI で走る 9 本・T-19・T-22 のオフスクリーンの区間はクラウドの Ubuntu 24.04 で通した。手元専用の検査は追加後に流し直していない。
 対話テスト T-07 / T-09 と、実機での計測 T-18 も同日に別途実行し、観測項目をすべて確認した。
 
 ## 1. 実行可能テスト
@@ -35,6 +35,8 @@ papimela で実行したテストの記録。日時は実測値（ファイル�
 | T-22 | `test/test_render_gles2` | **GPU（OpenGL ES 2.0）のドライバをソフトウェアのドライバと画素で比べる**。18 の場面（塗り、合成 5 種、12 枚の扇、頂点色、テクスチャの転送・変調・形式・部分更新、ビューポートとクリップ、点、線、**論理解像度・倍率・DebugText の 4 場面**）と、読み戻しの向き。ウィンドウの区間では既定のドライバの選び方、VSync、最大化、破棄の順序 | 2026-10-02 | **PASS 35 / 0** | オフスクリーンの区間は窓の無い GL（Mesa の surfaceless）で描くので**コンポジタが要らない。CI でも llvmpipe で走る**。手元では **radeonsi（GPU）と llvmpipe の 2 つの実装**で通した。**CI（Ubuntu 24.04、Mesa 25.2.8）では最初止まった**（D-40。FPC の浮動小数点の例外）。直した後、24.04 の環境（下の使い捨て検証）でも通した。塗り・転送・ビューポート・点・水平垂直の線は差 0、合成・頂点色・変調も最大差 1。斜めの線も両実装で差 0。2026-10-02 に足した論理解像度・倍率・DebugText の 4 場面は llvmpipe で最大差 0（クラウドの Ubuntu 24.04、Mesa 25.2.8。オフスクリーンの区間 24 件。窓の区間は手元で未実行）。**実装（#43、Sonnet）より先に書き**、空の実装で失敗することを確かめた（最初は「GL が無ければ飛ばす」になっていて、空の実装が飛ばされて通ってしまうのを直した）。SDL から外れた 2 箇所（線の端の延ばし量、テクセルの境目の寄せ）は、SDL の値に戻すと落ちることを確かめた |
 | T-23 | `test/test_render_logical` | **拡大率（Scale）・論理解像度（SetLogicalPresentation の 5 方式）・DebugText**。当てはめの矩形 10 通り（floor が効く値、整数倍が 1 倍未満になる値を含む）、塗り・ビューポート・クリップ・転送・点・線の変換、ウィンドウ座標との往復、文字の字形と色、ダミーのウィンドウの大きさの追従 | 2026-10-02 | **PASS 49 / 0** | **表示サーバ不要。CI で走る。** 期待する絵はテスト側で別に組み立て、全画素で比べる。字形はヘッダのコメントの絵から書き写した（生成器の表とは別の道筋）。閉じた枠は半透明で描き、二重塗りが色の差に出るようにした。**実装より先に書き、空の実装で 42 件が落ちる**ことを確かめた。歯の確認（`-B`）: SDL の字形の判定に戻す（D-42）、閉じた折れ線の始点の省略を外す、終点を描く規則を外す、ブレゼンハムの `d < 0` を `<=` に、IntegerScale の 1 倍の下限を外す、ビューポートやクリップに倍率を掛けない、文字の色を実行時に読む（D-43）の 7 通りがそれぞれ落ちる。最初は「終点を描く規則」を外しても通った（閉じた枠しか描いていなかった）ので、開いた折れ線の場面を足した。**SDL の実物との突き合わせ**は下の使い捨て検証 |
 | T-24 | `test/test_time` | **待つ API**（`Delay` / `DelayNS` / `DelayPrecise`）。DelayPrecise の手順を偽の時計で動かして眠りの列と空回りの回数を SDL と比べる 5 場面、本物の時計で早く戻らないことと遅れ、待っている間の CPU 時間、1 ms ごとのシグナルで割り込まれても眠り切ること（EINTR）、`TPMLTimerService` から Context 無しで呼べること | 2026-10-02 | **PASS 18 / 0** | **表示サーバ不要。CI で走る。** **実装（#9、Sonnet）より先に書き**、空の実装で 12 件落ちることを確かめた。実装した Sonnet が検査の誤りを 2 つ指摘し、どちらも確かめて直した: 偽の時計の 1 場面で期待する眠りを 1 回多く書いていた（コメントの手順では 7 回）、`setitimer` へ `const` の record を渡してタイマーが動いていなかった（D-45）。歯の確認（`-B`）: EINTR で寝直さない、Delay が空回りで待つ、遅れの最大を測らない、短い眠りから遅れの分を引かない、2 つめの 1 ms ずつの眠りを外す、DelayPrecise が全部空回りする、の 6 通りがそれぞれ落ちる。観測: Delay(20) は 20.1 ms、DelayPrecise(3 ms) の遅れは中央値 0.000 ms・最大 0.09 ms、DelayPrecise(100 ms) の CPU 時間は 2.1 ms（クラウドの Ubuntu 24.04） |
+| T-25 | `test/test_backends` | **バックエンドの登録とリンクの絞り込み**（#45）。`PaPiMeLa.Backends` を uses しないプログラムで、Wayland / Fcitx / GLES2 が実行ファイルに**リンクされていない**こと（クラス名を自分の実行ファイルから探す。探す文字列は実行時に組み立てる）、ビデオ・IME・レンダラの登録の規則（優先度、登録順、Connect を断ったら次、名前で指定したら他へ逃げない、大文字小文字、2 度目の登録、リンクされていない名前を断るときに使える名前と `PaPiMeLa.Backends` を添える） | 2026-10-02 | **PASS 29 / 0** | **表示サーバ不要。CI で走る。** **実装（Sonnet）より先に書き**、空の実装で 21 件落ちることを確かめた（最初は空の実装で例外が漏れて途中で止まったので、各検査が例外を失敗として数えるよう直した）。歯の確認（`-B`）: 優先度を無視する、名前を大文字小文字で区別する、2 度目の登録を許す、名前で指定したバックエンドが断ったら他へ逃げる、レンダラの Prefers を無視する、`PaPiMeLa.Video` が Wayland を uses し直す、の 6 通りがそれぞれ落ちる |
+| T-26 | `test/test_umbrella` | **`uses PaPiMeLa` だけで書けること**と **`TPMLApplication`**（#45）。公開層の各ユニットから型・定数・関数・helper（別名にできないので派生で置く）を通し、全バックエンドが登録・リンクされること、アプリのループの約束（呼ぶ順、イベントが DoIterate より先、DoQuit は必ず 1 回、例外のときも DoQuit(Failure) を先に、WaitForEvents、RunMain が解放する） | 2026-10-02 | **PASS 33 / 0** | **表示サーバ不要。CI で走る。** 先に書き、アンブレラが空のうちはコンパイルできないこと、公開層を直接 uses した写しでは登録とアプリの 20 件が落ちることを確かめた。書いた検査の誤り 2 つ（ウィンドウを作ったときのイベントが Quit より先に並ぶ、空の配列の 0 番目を読む）は渡す前に直した。歯の確認（`-B`）: 例外のときに DoQuit を呼ばない、DoIterate をイベントより先に呼ぶ、DoQuit が Context を残す、の 3 通りがそれぞれ落ちる |
 
 ### T-04 が決定的である理由
 
@@ -104,6 +106,7 @@ papimela で実行したテストの記録。日時は実測値（ファイル�
 | C-05 | **図と実装の整合性検査**（`tools/check-diagrams.sh`） — 英日の Mermaid ブロック同一性、図に出てくる型 51 個の実在 | 2026-10-02 | **PASS 不整合 0 件** | `.github/workflows/lint.yml` で push ごとに走る |
 | C-06 | **Origin 行と設計書の突き合わせ**（`tools/checkorigin.bb`） — 第11章の由来列との一致、移植部分の SDL 著作権表示の有無 | 2026-10-02 | **PASS 不一致 0 件** | 第 11 章のユニット 93 件に対して 61 ファイルを検査。導入初回は 10 件の不一致（D-30）。`.github/workflows/lint.yml` で push ごとに走る |
 | C-07 | **キーボードの表の生成**（`tools/genscancodes.bb`） — SDL のソースから `PaPiMeLa.Keycodes` と `.Keycodes.Tables` を作る | 2026-09-30 | **PASS** | スキャンコード 249、キーコード 257（SDLK_ の定義 259 から 2 つのマスクを除く）、evdev 表 768（注釈の番号と並びを突き合わせる）、名前 247、既定キー 175、Unicode 範囲 20（1525 項目）。大文字小文字だけが違う名前が無いことも検査する（D-09 系）。**imKStoUCS.c の範囲の食い違い（D-36）を警告する**。reference/SDL が要るので CI では走らせない |
+| C-10 | **アンブレラの生成**（`tools/genumbrella.bb`） — 公開層 16 ユニットの interface 部から `src/generated/umbrella_interface.inc` と `umbrella_implementation.inc` を作る | 2026-10-02 | **PASS** | 型 121（うち type helper 3 は派生で置く）、定数 339、関数 64。`--check` は CI で走り、古ければ落ちる（ファイルを 1 文字変えて落ちることを確かめた）。生成器を書いた Sonnet が型付き定数を足して止まることを確かめた。今の公開層に無いオーバーロードの枝は、こちらで Time に一時的に 2 つ足して生成し、`uses PaPiMeLa` から両方を呼べることを確かめた |
 | C-09 | **DebugText の字形の生成**（`tools/gendebugfont.bb`） — SDL の `SDL_render_debug_font.h` から `src/generated/debug_font.inc` を作る | 2026-10-02 | **PASS** | 190 字形・1520 バイト。字形の数、並び（33..126、161..255、印）、**各バイトの値と同じ行のコメントの絵の一致**を確かめ、合わなければ止まる。初回は最後の字形（字形の無い文字の印）で止まった。この字形だけコメントの絵が左右逆に書かれている。SDL で実際に描いて値のほうが正しいことを確かめ、生成器に例外として名前で書いた。テストの側もこの字形を絵から写していて誤っていたので直した |
 | C-08 | **EGL / GLES2 の定数の生成**（`tools/genkhronos.bb`） — Khronos のヘッダから `src/generated/egl_constants.inc` と `gles2_constants.inc` を作る | 2026-10-01 | **PASS** | egl.h の数値定数 163 と、SDL が使う eglext.h の 20、gl2.h の 303 と gl2ext.h の 4。拡張の一覧にあってヘッダに無い名前があれば止まる。大文字小文字の衝突も検査する |
 
@@ -155,6 +158,8 @@ cd papimela
 ./tools/genkhronos.bb
 # DebugText の字形を作り直す（同じく reference/SDL が要る）。
 ./tools/gendebugfont.bb
+# アンブレラを作り直す（公開層の interface 部を変えたら）。
+./tools/genumbrella.bb
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_fcitx_textinput   test/test_fcitx_textinput.pas
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_wayland_protocols test/test_wayland_protocols.pas
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_wayland_window    test/test_wayland_window.pas
@@ -171,6 +176,8 @@ fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_render               t
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_render_window        test/test_render_window.pas
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_render_logical       test/test_render_logical.pas
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_time                 test/test_time.pas
+fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_backends             test/test_backends.pas
+fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_umbrella             test/test_umbrella.pas
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_keyboard             test/test_keyboard.pas
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_gl_window            test/test_gl_window.pas
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_render_gles2         test/test_render_gles2.pas
@@ -193,6 +200,8 @@ env -u WAYLAND_DISPLAY -u DISPLAY ./test/test_render
 env -u WAYLAND_DISPLAY -u DISPLAY ./test/test_render_window
 env -u WAYLAND_DISPLAY -u DISPLAY ./test/test_render_logical
 env -u WAYLAND_DISPLAY -u DISPLAY ./test/test_time
+env -u WAYLAND_DISPLAY -u DISPLAY ./test/test_backends
+env -u WAYLAND_DISPLAY -u DISPLAY ./test/test_umbrella
 env -u WAYLAND_DISPLAY -u DISPLAY ./test/test_keyboard
 env -u WAYLAND_DISPLAY -u DISPLAY ./examples/pong --selftest
 env -u WAYLAND_DISPLAY -u DISPLAY LIBGL_ALWAYS_SOFTWARE=1 ./test/test_render_gles2   # llvmpipe

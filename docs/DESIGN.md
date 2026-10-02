@@ -151,7 +151,7 @@ FPC のドット付きユニット名で `PaPiMeLa.<Layer>.<Name>` とする。�
 
 | 名前空間 | 内容 | 依存してよいもの |
 |---|---|---|
-| `PaPiMeLa` | アンブレラ。公開 API 層の型を型エイリアスで再エクスポートし、`PaPiMeLa.Backends` も `uses` する | すべて |
+| `PaPiMeLa` | アンブレラ。公開 API 層の型を型エイリアスで再エクスポートし、`PaPiMeLa.Backends` も `uses` する。並べ直しは `tools/genumbrella.bb` が生成（type helper は派生、関数は inline の中継） | すべて |
 | `PaPiMeLa.Core`, `.Errors`, `.Types`, `.Unicode`, `.Log`, `.Properties`, `.Atomic`, `.Threading`, `.Time` | 基盤。プラットフォーム非依存（`.Threading` / `.Time` は内部で `BaseUnix` / `pthreads` を使うが、公開型は非依存） | RTL、`Generics.Collections`、基盤層内 |
 | `PaPiMeLa.Platform.*` | C ライブラリの型と関数ポインタ。`Platform.Wayland.Protocols.*` は生成物 | `.Core`, `.Errors`（ロード失敗の例外） |
 | `PaPiMeLa.Video`, `.Video.Backend`, `.Video.EGL`, `.Pixels`, `.Surface`, `.Surface.Blit`, `.Surface.BMP` | ビデオ公開 API と抽象、共通 EGL 実装、ピクセル処理 | 基盤層、`.Events`（キューへの投入）、`Platform.EGL` |
@@ -799,7 +799,7 @@ type
   protected
     function  DoInit(const AArgs: TArray<String>): TPMLAppResult; virtual;     // Context を生成する場所
     function  DoIterate: TPMLAppResult; virtual;
-    function  DoEvent(const AEvent: TPMLEvent): TPMLAppResult; virtual;        // 既定: Context.Events.Dispatcher.Dispatch
+    function  DoEvent(const AEvent: TPMLEvent): TPMLAppResult; virtual;        // 既定: Quit / WindowCloseRequested で Success（Dispatcher は未実装。#45 で変更）
     procedure DoQuit(AResult: TPMLAppResult); virtual;                         // Context を Free する場所
   public
     property Context: TPMLContext;
@@ -1269,7 +1269,7 @@ wayland-scanner の Pascal 版。C の `wayland-scanner` が生成する `*-clie
 | 42 | `PaPiMeLa.Render.Software`、`.Render.Software.Raster` | `render/software/` (5175)、`SDL_yuv_sw.c` (486) | 大 | 41, 29 | P1 | 移植 | Low | qwen | 三角形ラスタライザ、回転ブリット。#41 の最初のドライバ実装例 |
 | 43 | `PaPiMeLa.Render.GLES2` | `render/opengles2/` (3256) | 大 | 41, 33, 17 | P1 | 移植 | Medium | Sonnet | シェーダソース（GLSL ES）を Pascal 文字列定数に、YUV シェーダ、シェーダキャッシュ、コンテキスト喪失。**実装済み（Sonnet、受け入れ検査 T-22）**: 矩形と転送は上書きせず三角形の既定の経路（SDL と同じ）。窓の無い GL（Mesa surfaceless）のオフスクリーンでも描け、CI では llvmpipe で比べる。線の端の延ばし量（SDL の 1/4 → 0.75 画素）とテクセルの境目の寄せは、ソフトウェアのドライバと画素を揃えるための実測に基づく逸脱。YUV・パレット・描画先テクスチャ・コンテキスト喪失は未実装 |
 | 44 | `PaPiMeLa.Render.GL` | `render/opengl/` (3401) | 大 | 41, 33, 17 | P3 | 移植 | Low | qwen | #43 を手本に。OpenGL 2.1 / 3.x コア |
-| 45 | `PaPiMeLa.App`、`PaPiMeLa.Backends`、`PaPiMeLa`（アンブレラ） | `main/` (234) | 小 | 全部 | P1 | クリーンルーム | Medium | Sonnet | 6.5 の `TPMLApplication`、バックエンド登録、型エイリアス再エクスポート |
+| 45 | `PaPiMeLa.App`、`PaPiMeLa.Backends`、`PaPiMeLa`（アンブレラ） | `main/` (234) | 小 | 全部 | P1 | クリーンルーム | Medium | Sonnet | 6.5 の `TPMLApplication`、バックエンド登録、型エイリアス再エクスポート。**実装済み**（Sonnet。受け入れ検査 T-25 / T-26 を先に書いた）。登録は `PMLRegisterVideoBackend` / `PMLRegisterTextInputBackend` / `PMLRegisterRenderDriver`（抽象のユニットに置き、具象バックエンドが initialization で自分を登録）。`PaPiMeLa.Backends` は uses の並びだけ。アンブレラの並べ直しは `tools/genumbrella.bb` で生成し、type helper は別名にできない（FPC が拒む。実測）ので派生で置く |
 | 46 | `PaPiMeLa.TextInput`（公開モデル、`TPMLTextInputSystem`、`TPMLTextInputSession`、バックエンド選択） | — | 中 | 2, 4, 22, 24 | P1 | クリーンルーム | **High** | Opus | 7.3 / 7.6。`IPMLTextInputClient` の呼び出しタイミング、周辺削除→確定の順序保証、`IPMLFocusObserver`。**本プロジェクトの中核** |
 | 47 | `PaPiMeLa.TextInput.Backend`、`.TextInput.Null` | — | 小 | 46 | P1 | クリーンルーム | **High** | Opus | 3.6 の抽象クラス、`IPMLTextInputSink`、能力集合。#46 と同一担当で同時に設計する |
 | 48 | `PaPiMeLa.TextInput.IBus` | （`core/linux/SDL_ibus.c` (743) は接続手順の参考のみ。バグあり: 115 行目） | 大 | 16, 46, 47 | P1 | クリーンルーム | **High** | Opus | 7.4。アドレス解決と inotify 追従、`IBusText` の完全解析、`TPMLIBusSegmenter`、非同期 `ProcessKeyEvent`、`SetSurroundingText` / `DeleteSurroundingText`、`SetCursorLocationRelative`、埋め込み候補。**未解決 1〜4 の実機検証を伴う** |

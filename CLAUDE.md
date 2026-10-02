@@ -82,7 +82,8 @@ tools/qwen-gen.bb プロンプトファイル 出力ファイル
 awk で抽出し、手で書いた分と突き合わせて一致を確認してから採用した。
 大きな表は生成器で作る: `tools/genscancodes.bb`（キーボード）、`tools/genkhronos.bb`
 （EGL / GLES2 の定数）、`tools/gendebugfont.bb`（DebugText の字形）。どれも件数を元と
-突き合わせ、合わなければ止まる。
+突き合わせ、合わなければ止まる。アンブレラ `PaPiMeLa` の並べ直しも `tools/genumbrella.bb` が
+公開層から生成し、CI が `--check` で古さを見る（公開 API を足したら作り直す）。
 
 ### Sonnet に任せるとき（#33 / #39 / #43 で確立）
 

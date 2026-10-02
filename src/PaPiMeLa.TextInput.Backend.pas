@@ -24,6 +24,7 @@ unit PaPiMeLa.TextInput.Backend;
 interface
 
 uses
+  SysUtils,
   PaPiMeLa.Types,
   PaPiMeLa.Events,
   PaPiMeLa.TextInput;
@@ -53,7 +54,29 @@ type
     function Connect(ASink: IPMLTextInputSink): Boolean; override;
   end;
 
+  TPMLTextInputBackendFactory = function: TPMLTextInputBackend;
+
+{ ---- 登録（#45） ----
+
+  具象バックエンドは、自分のユニットの initialization で自分を登録する。
+  公開層（PaPiMeLa.TextInput）は具象バックエンドを uses しない（設計 §2.1）。どれを
+  リンクするかはアプリの uses で決まる: PaPiMeLa.Backends（またはアンブレラの
+  PaPiMeLa）を uses すれば全部、個別のユニットを uses すればそれだけ。
+
+  名前は大文字小文字を区別せずに比べる。同じ名前を 2 度登録すると
+  EPMLArgument。試す順は優先度の大きい順、同じなら登録した順。
+
+  IME の無い環境のための 'none'（TPMLNullTextInputBackend）は登録しない。
+  公開層が最後の候補として必ず持つ。 }
+procedure PMLRegisterTextInputBackend(const AName: String; APriority: Integer;
+  AFactory: TPMLTextInputBackendFactory);
+function  PMLTextInputBackendNames: TStringArray;
+function  PMLFindTextInputBackend(const AName: String): TPMLTextInputBackendFactory;
+
 implementation
+
+uses
+  PaPiMeLa.Errors;
 
 function TPMLTextInputBackend.Capabilities: TPMLTextInputCapabilities;
 begin
@@ -106,6 +129,77 @@ function TPMLNullTextInputBackend.Connect(ASink: IPMLTextInputSink): Boolean;
 begin
   FSink := ASink;
   Result := True;
+end;
+
+{ ---- 登録（#45） ---- }
+
+type
+  TTextInputRegistration = record
+    Name    : String;
+    Priority: Integer;
+    Factory : TPMLTextInputBackendFactory;
+  end;
+
+var
+  // 試す順（優先度の大きい順、同じなら登録順）に並べて持つ。
+  TextInputRegistry: array of TTextInputRegistration;
+
+function FindTextInputIndex(const AName: String): Integer;
+var
+  I: Integer;
+begin
+  Result := -1;
+  for I := 0 to High(TextInputRegistry) do
+    if SameText(TextInputRegistry[I].Name, AName) then
+      Exit(I);
+end;
+
+procedure PMLRegisterTextInputBackend(const AName: String; APriority: Integer;
+  AFactory: TPMLTextInputBackendFactory);
+var
+  At, I: Integer;
+begin
+  if AName = '' then
+    raise EPMLArgument.Create('text input backend name is empty');
+  if not Assigned(AFactory) then
+    raise EPMLArgument.Create('text input backend factory is nil');
+  if FindTextInputIndex(AName) >= 0 then
+    raise EPMLArgument.CreateFmt('text input backend "%s" is already registered', [AName]);
+  // 自分より優先度の小さい最初の位置へ入れる（同じ優先度は後ろへ回る）。
+  At := Length(TextInputRegistry);
+  for I := 0 to High(TextInputRegistry) do
+    if TextInputRegistry[I].Priority < APriority then
+    begin
+      At := I;
+      Break;
+    end;
+  SetLength(TextInputRegistry, Length(TextInputRegistry) + 1);
+  for I := High(TextInputRegistry) downto At + 1 do
+    TextInputRegistry[I] := TextInputRegistry[I - 1];
+  TextInputRegistry[At].Name := AName;
+  TextInputRegistry[At].Priority := APriority;
+  TextInputRegistry[At].Factory := AFactory;
+end;
+
+function PMLTextInputBackendNames: TStringArray;
+var
+  I: Integer;
+begin
+  Result := nil;
+  SetLength(Result, Length(TextInputRegistry));
+  for I := 0 to High(TextInputRegistry) do
+    Result[I] := TextInputRegistry[I].Name;
+end;
+
+function PMLFindTextInputBackend(const AName: String): TPMLTextInputBackendFactory;
+var
+  I: Integer;
+begin
+  I := FindTextInputIndex(AName);
+  if I >= 0 then
+    Result := TextInputRegistry[I].Factory
+  else
+    Result := nil;
 end;
 
 end.

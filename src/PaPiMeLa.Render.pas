@@ -385,13 +385,102 @@ const
 // ドライバの実装が使う。色と状態を比べ、同じなら結合してよいかを返す。
 function PMLSameDrawState(const A, B: TPMLRenderCommand): Boolean;
 
+type
+  // ウィンドウへ描くドライバを作る。
+  TPMLRenderDriverFactory = function(AWindow: TPMLWindow): TPMLRenderDriver;
+  // 名前を指定されなかったとき、このウィンドウにこのドライバを選ぶか
+  // （GLES2 なら OpenGL の能力で作ったウィンドウ）。
+  TPMLRenderDriverPrefers = function(AWindow: TPMLWindow): Boolean;
+
+{ ---- 登録（#45） ----
+
+  ウィンドウへ描くドライバの登録。ソフトウェアのドライバ（'software'）は
+  登録しない。どのアプリでも使えるよう、この公開層が直接持ち、どの登録
+  ドライバも選ばれなかったときの最後の候補になる。
+
+  CreateForWindow の選び方:
+    名前が空   登録順（優先度の大きい順）に APrefers を聞き、最初に True を
+               返したもの。どれも無ければ 'software'
+    名前あり   'software' か、登録された名前。どちらでもなければ
+               EPMLUnsupported（登録済みの名前を添える）
+
+  名前の比べ方と 2 度目の登録は、ビデオのバックエンドの登録と同じ。 }
+procedure PMLRegisterRenderDriver(const AName: String; APriority: Integer;
+  APrefers: TPMLRenderDriverPrefers; AFactory: TPMLRenderDriverFactory);
+// 登録済みの名前を試す順に返し、最後に 'software' を付ける。
+function  PMLRenderDriverNames: TStringArray;
+
 implementation
 
 uses
   Math,
   PaPiMeLa.Render.Software,
-  PaPiMeLa.Render.GLES2,
   PaPiMeLa.Video.Backend;
+
+{ ---- 登録（#45） ---- }
+
+type
+  TRenderDriverRegistration = record
+    Name    : String;
+    Priority: Integer;
+    Prefers : TPMLRenderDriverPrefers;
+    Factory : TPMLRenderDriverFactory;
+  end;
+
+var
+  // 試す順（優先度の大きい順、同じなら登録順）に並べて持つ。
+  RenderDriverRegistry: array of TRenderDriverRegistration;
+
+function FindRenderDriverIndex(const AName: String): Integer;
+var
+  I: Integer;
+begin
+  Result := -1;
+  for I := 0 to High(RenderDriverRegistry) do
+    if SameText(RenderDriverRegistry[I].Name, AName) then
+      Exit(I);
+end;
+
+procedure PMLRegisterRenderDriver(const AName: String; APriority: Integer;
+  APrefers: TPMLRenderDriverPrefers; AFactory: TPMLRenderDriverFactory);
+var
+  At, I: Integer;
+begin
+  if AName = '' then
+    raise EPMLArgument.Create('render driver name is empty');
+  if SameText(AName, 'software') then
+    raise EPMLArgument.Create('render driver "software" is built in');
+  if (not Assigned(APrefers)) or (not Assigned(AFactory)) then
+    raise EPMLArgument.Create('render driver needs Prefers and Factory');
+  if FindRenderDriverIndex(AName) >= 0 then
+    raise EPMLArgument.CreateFmt('render driver "%s" is already registered', [AName]);
+  // 自分より優先度の小さい最初の位置へ入れる（同じ優先度は後ろへ回る）。
+  At := Length(RenderDriverRegistry);
+  for I := 0 to High(RenderDriverRegistry) do
+    if RenderDriverRegistry[I].Priority < APriority then
+    begin
+      At := I;
+      Break;
+    end;
+  SetLength(RenderDriverRegistry, Length(RenderDriverRegistry) + 1);
+  for I := High(RenderDriverRegistry) downto At + 1 do
+    RenderDriverRegistry[I] := RenderDriverRegistry[I - 1];
+  RenderDriverRegistry[At].Name := AName;
+  RenderDriverRegistry[At].Priority := APriority;
+  RenderDriverRegistry[At].Prefers := APrefers;
+  RenderDriverRegistry[At].Factory := AFactory;
+end;
+
+function PMLRenderDriverNames: TStringArray;
+var
+  I: Integer;
+begin
+  Result := nil;
+  SetLength(Result, Length(RenderDriverRegistry) + 1);
+  for I := 0 to High(RenderDriverRegistry) do
+    Result[I] := RenderDriverRegistry[I].Name;
+  Result[High(Result)] := 'software';
+end;
 
 { ---- 補助 ---- }
 
@@ -719,13 +808,32 @@ end;
 
 constructor TPMLRenderer.CreateForWindow(AWindow: TPMLWindow;
   const ADriverName: String);
+var
+  Index, I: Integer;
 begin
   if AWindow = nil then
     raise EPMLArgument.Create('CreateForWindow needs a window');
-  if (ADriverName <> '') and not SameText(ADriverName, 'software')
-    and not SameText(ADriverName, 'gles2') then
-    raise EPMLUnsupported.CreateNative(
-      Format('render driver "%s" is not available', [ADriverName]), 0, 'render');
+  // 名前の解決はドライバを作る前に済ませる（未登録なら何も作らずに断る）。
+  Index := -1;
+  if ADriverName <> '' then
+  begin
+    if not SameText(ADriverName, 'software') then
+    begin
+      Index := FindRenderDriverIndex(ADriverName);
+      if Index < 0 then
+        raise EPMLUnsupported.CreateNative(
+          Format('render driver "%s" is not available (available: %s); '
+            + 'add PaPiMeLa.Backends (or PaPiMeLa) to uses to link the built-in drivers',
+            [ADriverName, String.Join(', ', PMLRenderDriverNames)]), 0, 'render');
+    end;
+  end
+  else
+    for I := 0 to High(RenderDriverRegistry) do
+      if RenderDriverRegistry[I].Prefers(AWindow) then
+      begin
+        Index := I;
+        Break;
+      end;
   inherited Create(AWindow.ContextRef, AWindow);
   FQueue := TPMLRenderQueue.Create;
   FDrawColor := TPMLFColor.Make(0, 0, 0, 1);
@@ -733,11 +841,10 @@ begin
   FScale := TPMLFPoint.Make(1, 1);
   FLogicalScale := TPMLFPoint.Make(1, 1);
   FCurrentScale := FScale;
-  // 名前が無ければ、GL で作ったウィンドウには GPU のドライバを選ぶ（SDL も
-  // 既定では GPU のレンダラを優先する）。
-  if SameText(ADriverName, 'gles2')
-    or ((ADriverName = '') and (TPMLWindowFlag.OpenGL in AWindow.Flags)) then
-    FDriver := TPMLGLES2RenderDriver.CreateForWindow(AWindow)
+  // 名前が無ければ、登録されたドライバのうち選ぶと答えた最初のもの。GL で作った
+  // ウィンドウには GPU のドライバを選ぶ（SDL も既定では GPU を優先する）。
+  if Index >= 0 then
+    FDriver := RenderDriverRegistry[Index].Factory(AWindow)
   else
     FDriver := TPMLWindowSoftwareRenderDriver.Create(AWindow);
   // 登録は最後。ここまでで例外が出たら Destroy が走るが、まだ登録していない。

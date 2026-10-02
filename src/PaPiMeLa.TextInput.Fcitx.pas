@@ -596,4 +596,14 @@ begin
     FSink.DeleteSurroundingRequested(Data);
 end;
 
+{ ---- 登録 ---- }
+
+function CreateFcitxTextInputBackend: TPMLTextInputBackend;
+begin
+  Result := TPMLFcitxTextInputBackend.Create;
+end;
+
+initialization
+  PMLRegisterTextInputBackend('fcitx', 100, @CreateFcitxTextInputBackend);
+
 end.

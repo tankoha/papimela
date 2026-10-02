@@ -40,6 +40,7 @@ uses
   PaPiMeLa.Errors,
   PaPiMeLa.Core.Base,
   PaPiMeLa.Pixels,
+  PaPiMeLa.Events,
   PaPiMeLa.Video.Backend;
 
 type
@@ -349,5 +350,17 @@ begin
   if ATimeoutMs > 0 then
     Sleep(ATimeoutMs);
 end;
+
+{ ---- 登録 ---- }
+
+function CreateDummyVideoBackend(AContextRef: TObject; AOwner: TPMLObject;
+  AQueue: TPMLEventQueue): TPMLVideoBackend;
+begin
+  Result := TPMLDummyVideoBackend.Create(AContextRef, AOwner);
+end;
+
+initialization
+  // 優先度 0: 既定では、実画面のバックエンドが全部断ったときの最後の候補。
+  PMLRegisterVideoBackend('dummy', 0, @CreateDummyVideoBackend);
 
 end.

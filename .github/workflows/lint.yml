@@ -48,14 +48,15 @@ jobs:
       # ビルドが壊れている状態を見逃さないための保険。
       # 不要なら、このステップは削除してよい。
       #
-      # PaPiMeLa.Core は依存を辿って手書きユニット 17 本すべてを巻き込むが、
-      # 生成プロトコルは実際に使われている 8 本しか通らない。残りも個別に
+      # アンブレラの PaPiMeLa は依存を辿って手書きユニットと全バックエンドを巻き込む
+      # （PaPiMeLa.Core だけでは、もうバックエンドを巻き込まない。#45）。
+      # 生成プロトコルは実際に使われているものしか通らないので、残りも個別に
       # コンパイルして、生成器の退行を検出できるようにする。
       - name: Build papimela
         run: |
           set -eu
           mkdir -p lib
-          fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib src/PaPiMeLa.Core.pas
+          fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib src/PaPiMeLa.pas
           fpc -O1 -FUlib tools/wlscan-pas.pas
           for f in src/generated/*.pas; do
             fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib "$f"
@@ -70,6 +71,11 @@ jobs:
           curl -sSL https://raw.githubusercontent.com/babashka/babashka/master/install \
             | sudo bash
 
+      # アンブレラ（PaPiMeLa）の並べ直しは公開層から生成する。公開 API を足して
+      # 生成し直し忘れたら落ちる。
+      - name: Check umbrella is up to date
+        run: ./tools/genumbrella.bb --check
+
       # Origin 行と設計書 第11章の由来列の突き合わせ。移植部分に SDL の著作権表示が
       # あるか、クリーンルーム部分に紛れ込んでいないかもここで見る。
       - name: Check origins
@@ -81,7 +87,7 @@ jobs:
       - name: Run headless tests
         run: |
           set -eu
-          for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_time test_keyboard; do
+          for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_time test_keyboard test_backends test_umbrella; do
             fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/$t test/$t.pas
             ./test/$t
           done

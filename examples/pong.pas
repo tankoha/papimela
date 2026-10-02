@@ -37,14 +37,7 @@ program pong;
 
 uses
   SysUtils, Math,
-  PaPiMeLa.Types,
-  PaPiMeLa.Errors,
-  PaPiMeLa.Events,
-  PaPiMeLa.Keycodes,
-  PaPiMeLa.Surface,
-  PaPiMeLa.Video,
-  PaPiMeLa.Render,
-  PaPiMeLa.Core;
+  PaPiMeLa;   // 公開 API とバックエンドが全部揃う（アンブレラ。#45）
 
 const
   // 盤面は論理座標 640x400 で計算し、描くときにウィンドウへ合わせる。

@@ -47,7 +47,8 @@ uses
   PaPiMeLa.Platform.Wayland.Client,
   PaPiMeLa.Video.Wayland,
   PaPiMeLa.Render,
-  PaPiMeLa.Core;
+  PaPiMeLa.Core,
+  PaPiMeLa.Backends;   // 引数で gles2 を選べるので GPU のドライバも要る（#45）
 
 var
   Ctx    : TPMLContext;

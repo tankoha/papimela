@@ -1419,4 +1419,19 @@ begin
   end;
 end;
 
+{ ---- 登録 ---- }
+
+function GLES2DriverPrefers(AWindow: TPMLWindow): Boolean;
+begin
+  Result := TPMLWindowFlag.OpenGL in AWindow.Flags;
+end;
+
+function CreateGLES2Driver(AWindow: TPMLWindow): TPMLRenderDriver;
+begin
+  Result := TPMLGLES2RenderDriver.CreateForWindow(AWindow);
+end;
+
+initialization
+  PMLRegisterRenderDriver('gles2', 100, @GLES2DriverPrefers, @CreateGLES2Driver);
+
 end.

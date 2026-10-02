@@ -8,9 +8,9 @@
 |---|---|
 | リポジトリ | https://github.com/tankoha/papimela（公開、Issues 有効、`master` に直接 push） |
 | CI | 緑。rawpaco 激辛、checkorigin、図の検査、表示サーバ無しのテスト 8 本、Pong の自己検査、GLES2 と ソフトウェアのドライバの画素比較（llvmpipe）。ジョブ 60 分・GLES2 の手順 5 分の時間制限つき |
-| テスト | 21 本、662 件、すべて成功（`docs/TEST-LOG.md`。手元専用の検査は 662 件に数えているが、追加後は流し直していない） |
+| テスト | 23 本、724 件、すべて成功（`docs/TEST-LOG.md`。手元専用の検査は 724 件に数えているが、追加後は流し直していない） |
 | 不具合 | 45 件。うち上流 SDL の 4 件（D-18、D-36、D-38、D-42）は未報告（方針は `CLAUDE.md`） |
-| 規模 | 手書き 39 ユニット + 生成（Wayland プロトコル 21、キーボードの表 2、EGL / GLES2 の定数 2、DebugText の字形 1）。約 3 万行 |
+| 規模 | 手書き 42 ユニット + 生成（Wayland プロトコル 21、キーボードの表 2、EGL / GLES2 の定数 2、DebugText の字形 1、アンブレラ 2）。約 3 万行 |
 
 ### 動いているもの
 
@@ -20,30 +20,31 @@ SDL と同じ値のスキャンコード・キーコード（配列ごとのキ�
 fcitx5 経由の IME（全文節・周辺テキスト・周辺削除）、ピクセル形式、サーフェス、BMP、
 ブリッタ、レンダラ（ソフトウェアと OpenGL ES 2.0。どちらもウィンドウへ VSync つき。拡大率、論理解像度 5 方式、
 ウィンドウ座標との変換、DebugText）、
-EGL の GL コンテキスト、ヘッドレスのダミーのビデオ、待つ API（Delay / DelayNS / DelayPrecise）、サンプルの Pong。
+EGL の GL コンテキスト、ヘッドレスのダミーのビデオ、待つ API（Delay / DelayNS / DelayPrecise）、
+バックエンドの登録（`PaPiMeLa.Backends`）、アンブレラ（`uses PaPiMeLa`）、`TPMLApplication`、サンプルの Pong。
 
 ### 設計書第 11 章の進み具合
 
 済み（一部を含む）: #1–4、#10、#12–17（#17 の `.GL` は未）、#22、#24（`Events.Keymap`。押下状態は
 `PaPiMeLa.Events` の `TPMLKeyboardState`）、#25 の一部（マウスとタッチの状態機械は `PaPiMeLa.Events`）、
 #26–29、#31–37（#32 の `.Clipboard` は未）、#39、#41–43（#41 の残りは描画先テクスチャ、回転、9-grid / タイル）、
-#46、#47、#50、#64、#70。
+#45、#46、#47、#50、#64、#70。
 
 未着手: #5–8（Log、Properties、Atomic、Threading）、#9 Time のタイマー（待つ API は済み）、#11、#18–21、#23、#30、#38、#40、#44、
-#45、#48、#49、#51–63（オーディオ、ジョイスティック、ゲームパッド、ハプティクス）、#65–69。
+#48、#49、#51–63（オーディオ、ジョイスティック、ゲームパッド、ハプティクス）、#65–69。
 
 ## 2. 次の候補（おすすめ順）
 
-1. **アンブレラ（#45、Medium）**: `uses PaPiMeLa` 1 つで公開 API が揃うように。Pong は今 papimela のユニットを 8 つ `uses` している
-2. **クリップボード（#38、Medium）**、**IBus（#48、High）と text-input-v3（#49、High）**: IME は papimela の看板。
+1. **クリップボード（#38、Medium）**、**IBus（#48、High）と text-input-v3（#49、High）**: IME は papimela の看板。
    fcitx5 以外の利用者に届く
-3. **Threading（#8、High）**: これが済むと #9 のタイマー（`AddTimer`）と `RunOnMainThread` に進める
-4. **レンダラの残り（#41）**: 描画先テクスチャ（SetRenderTarget。テクスチャごとの view が要るので、
+2. **Threading（#8、High）**: これが済むと #9 のタイマー（`AddTimer`）と `RunOnMainThread` に進める
+3. **レンダラの残り（#41）**: 描画先テクスチャ（SetRenderTarget。テクスチャごとの view が要るので、
    今レンダラに直接持っている拡大率・論理解像度のフィールドを record にまとめるところから）、回転、9-grid / タイル
-5. **オーディオ（#51 以降）**: 大きな段階。PipeWire から
+4. **オーディオ（#51 以降）**: 大きな段階。PipeWire から
 
 済んだもの（2026-10-02）: 論理解像度と DebugText（F-4 / F-5）、待つ API（F-6、#9 の一部）、
-Context のオプションを値型に（F-7）。Pong もすべて書き換えた。
+Context のオプションを値型に（F-7）、アンブレラ・バックエンドの登録・TPMLApplication（#45）。
+Pong もすべて書き換え、今は `uses SysUtils, Math, PaPiMeLa` だけで書ける。
 
 ## 3. 定着した進め方
 
@@ -65,7 +66,7 @@ Context のオプションを値型に（F-7）。Pong もすべて書き換え�
 表示サーバ無しで通るもの（CI と同じ）:
 
 ```bash
-for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_time test_keyboard; do
+for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_time test_keyboard test_backends test_umbrella; do
   fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/$t test/$t.pas && ./test/$t
 done
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -oexamples/pong examples/pong.pas && ./examples/pong --selftest
@@ -128,6 +129,8 @@ man-db などの設定は所有者の切り替えで失敗するが、`dpkg -r -
 - `Check(条件, Format(…))` の `Format` は条件より先に評価される
 - `perl -0pi` の置換は、アンカーの字下げが 1 つ違うだけで合わない。`or die` で失敗を知る
 - 「環境が無ければ飛ばす」検査は、空の実装を通してしまう
+- **具象バックエンドは uses したものだけが使える**（#45）。Wayland や fcitx や GLES2 を使うプログラムは `PaPiMeLa`（アンブレラ）か `PaPiMeLa.Backends` を uses する。忘れると実行時に「登録されていない」と断られる（コンパイルは通る）
+- 公開層の interface 部を変えたら `tools/genumbrella.bb` で作り直す（CI の `--check` が落ちる）。type helper は別名にできない
 - C の関数へ構造体を渡すときは `const` の record でなくポインタで宣言する（cdecl の `const` は値渡しになる。D-45）
 - レンダラは描画を**積んでから実行する**。積んだ後に変えられる値（テクスチャの変調色など）は積むときに写す（D-43。D-39 も同じ隙間）
 

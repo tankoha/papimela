@@ -41,7 +41,8 @@ uses
   PaPiMeLa.Types,
   PaPiMeLa.Errors,
   PaPiMeLa.Core.Base,
-  PaPiMeLa.Pixels;
+  PaPiMeLa.Pixels,
+  PaPiMeLa.Events;
 
 type
   TPMLVideoCapability = (
@@ -284,6 +285,26 @@ type
     property Capabilities: TPMLVideoCapabilities read FCapabilities;
   end;
 
+  { 生成だけをする関数。Connect は呼び出し側（TPMLVideoSystem）が行う。 }
+  TPMLVideoBackendFactory = function(AContextRef: TObject; AOwner: TPMLObject;
+    AQueue: TPMLEventQueue): TPMLVideoBackend;
+
+{ ---- 登録（#45） ----
+
+  具象バックエンドは、自分のユニットの initialization で自分を登録する。
+  公開層（PaPiMeLa.Video）は具象バックエンドを uses しない（設計 §2.1）。どれを
+  リンクするかはアプリの uses で決まる: PaPiMeLa.Backends（またはアンブレラの
+  PaPiMeLa）を uses すれば全部、個別のユニットを uses すればそれだけ。
+
+  名前は大文字小文字を区別せずに比べる。同じ名前を 2 度登録すると
+  EPMLArgument。試す順は優先度の大きい順、同じなら登録した順。 }
+procedure PMLRegisterVideoBackend(const AName: String; APriority: Integer;
+  AFactory: TPMLVideoBackendFactory);
+// 登録済みの名前を試す順に返す。
+function  PMLVideoBackendNames: TStringArray;
+// 名前の工場。登録されていなければ nil。
+function  PMLFindVideoBackend(const AName: String): TPMLVideoBackendFactory;
+
 implementation
 
 { TPMLWindowBackend — 既定は「何もしない」。能力集合で呼ばれるかが決まる。 }
@@ -420,6 +441,77 @@ end;
 
 procedure TPMLVideoBackend.WakeEventLoop;
 begin
+end;
+
+{ ---- 登録（#45） ---- }
+
+type
+  TVideoRegistration = record
+    Name    : String;
+    Priority: Integer;
+    Factory : TPMLVideoBackendFactory;
+  end;
+
+var
+  // 試す順（優先度の大きい順、同じなら登録順）に並べて持つ。
+  VideoRegistry: array of TVideoRegistration;
+
+function FindVideoIndex(const AName: String): Integer;
+var
+  I: Integer;
+begin
+  Result := -1;
+  for I := 0 to High(VideoRegistry) do
+    if SameText(VideoRegistry[I].Name, AName) then
+      Exit(I);
+end;
+
+procedure PMLRegisterVideoBackend(const AName: String; APriority: Integer;
+  AFactory: TPMLVideoBackendFactory);
+var
+  At, I: Integer;
+begin
+  if AName = '' then
+    raise EPMLArgument.Create('video backend name is empty');
+  if not Assigned(AFactory) then
+    raise EPMLArgument.Create('video backend factory is nil');
+  if FindVideoIndex(AName) >= 0 then
+    raise EPMLArgument.CreateFmt('video backend "%s" is already registered', [AName]);
+  // 自分より優先度の小さい最初の位置へ入れる（同じ優先度は後ろへ回る）。
+  At := Length(VideoRegistry);
+  for I := 0 to High(VideoRegistry) do
+    if VideoRegistry[I].Priority < APriority then
+    begin
+      At := I;
+      Break;
+    end;
+  SetLength(VideoRegistry, Length(VideoRegistry) + 1);
+  for I := High(VideoRegistry) downto At + 1 do
+    VideoRegistry[I] := VideoRegistry[I - 1];
+  VideoRegistry[At].Name := AName;
+  VideoRegistry[At].Priority := APriority;
+  VideoRegistry[At].Factory := AFactory;
+end;
+
+function PMLVideoBackendNames: TStringArray;
+var
+  I: Integer;
+begin
+  Result := nil;
+  SetLength(Result, Length(VideoRegistry));
+  for I := 0 to High(VideoRegistry) do
+    Result[I] := VideoRegistry[I].Name;
+end;
+
+function PMLFindVideoBackend(const AName: String): TPMLVideoBackendFactory;
+var
+  I: Integer;
+begin
+  I := FindVideoIndex(AName);
+  if I >= 0 then
+    Result := VideoRegistry[I].Factory
+  else
+    Result := nil;
 end;
 
 end.

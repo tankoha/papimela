@@ -34,7 +34,8 @@ uses
   PaPiMeLa.Video.Backend,
   PaPiMeLa.Video,
   PaPiMeLa.TextInput,
-  PaPiMeLa.Core;
+  PaPiMeLa.Core,
+  PaPiMeLa.Backends;   // 実機の Wayland と fcitx を使う（#45 からはアプリが選んでリンクする）
 
 type
   { アプリのテキストバッファ。IME へ周辺テキストを供給する。 }

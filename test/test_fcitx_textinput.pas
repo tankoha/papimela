@@ -27,7 +27,8 @@ uses
   PaPiMeLa.Errors,
   PaPiMeLa.Events,
   PaPiMeLa.TextInput,
-  PaPiMeLa.Core;
+  PaPiMeLa.Core,
+  PaPiMeLa.Backends;   // 実機の Wayland と fcitx を使う（#45 からはアプリが選んでリンクする）
 
 type
   { アプリ役。テキストバッファを持ち、周辺テキストを供給する（§7.9）。 }

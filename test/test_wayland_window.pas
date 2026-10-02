@@ -27,7 +27,8 @@ uses
   PaPiMeLa.Events,
   PaPiMeLa.Video.Backend,
   PaPiMeLa.Video,
-  PaPiMeLa.Core;
+  PaPiMeLa.Core,
+  PaPiMeLa.Backends;   // 実機の Wayland と fcitx を使う（#45 からはアプリが選んでリンクする）
 
 var
   Ctx      : TPMLContext;

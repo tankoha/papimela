@@ -302,10 +302,6 @@ type
 
 implementation
 
-uses
-  PaPiMeLa.Video.Wayland,
-  PaPiMeLa.Video.Dummy;
-
 { TPMLWindowOptions }
 
 class function TPMLWindowOptions.Make(const ATitle: String;
@@ -802,20 +798,26 @@ constructor TPMLVideoSystem.Create(AContextRef: TObject; AOwner: TPMLObject;
   AQueue: TPMLEventQueue; const APreferred: String);
 var
   Wanted: String;
+  Names: TStringArray;
+  Factory: TPMLVideoBackendFactory;
+  I: Integer;
 
-  function TryBackend(ACandidate: TPMLVideoBackend): Boolean;
+  // 作って繋ぐ。繋がらなければその実体を破棄する。
+  function TryBackend(AFactory: TPMLVideoBackendFactory): Boolean;
+  var
+    Candidate: TPMLVideoBackend;
   begin
     Result := False;
-    if ACandidate = nil then
+    Candidate := AFactory(AContextRef, Self, AQueue);
+    if Candidate = nil then
       Exit;
-    if ((Wanted <> '') and (LowerCase(ACandidate.BackendName) <> Wanted))
-      or (not ACandidate.Connect(Self as IPMLVideoSink)) then
+    if not Candidate.Connect(Self as IPMLVideoSink) then
     begin
-      ACandidate.Free;
+      Candidate.Free;
       Exit;
     end;
-    FBackend := ACandidate;
-    FSelectedName := ACandidate.BackendName;
+    FBackend := Candidate;
+    FSelectedName := Candidate.BackendName;
     Result := True;
   end;
 
@@ -823,15 +825,37 @@ begin
   inherited Create(AContextRef, AOwner);
   FQueue := AQueue;
   FNextWindowID := 1;
-  Wanted := LowerCase(Trim(APreferred));
+  Wanted := Trim(APreferred);
   if Wanted = '' then
-    Wanted := LowerCase(Trim(GetEnvironmentVariable('PAPIMELA_VIDEO')));
+    Wanted := Trim(GetEnvironmentVariable('PAPIMELA_VIDEO'));
 
-  // 試す順。PAPIMELA_VIDEO で名前を指定すると、その 1 つだけが候補になる。
-  // dummy を最後に置くのは、既定で実画面より先に選ばれないようにするため。
-  if not TryBackend(TPMLWaylandVideoBackend.Create(AContextRef, Self, AQueue)) then
-    if not TryBackend(TPMLDummyVideoBackend.Create(AContextRef, Self)) then
-      raise EPMLVideoError.Create('no video backend could be selected');
+  Names := PMLVideoBackendNames;
+  if Wanted <> '' then
+  begin
+    // 名前を指定したら、その 1 つだけを試す。繋がらなくても他へは逃げない。
+    Factory := PMLFindVideoBackend(Wanted);
+    if Factory = nil then
+      raise EPMLUnsupported.CreateFmt(
+        'video backend "%s" is not available (registered: %s); '
+        + 'add PaPiMeLa.Backends (or PaPiMeLa) to uses to link the built-in backends',
+        [Wanted, String.Join(', ', Names)]);
+    if not TryBackend(Factory) then
+      raise EPMLVideoError.CreateFmt('video backend "%s" could not connect', [Wanted]);
+  end
+  else
+  begin
+    // 登録された順（優先度の大きい順）に試す。dummy は優先度 0 で、既定では
+    // 実画面より先に選ばれない。
+    if Length(Names) = 0 then
+      raise EPMLVideoError.Create('no video backend is registered; '
+        + 'add PaPiMeLa.Backends (or PaPiMeLa) to uses');
+    for I := 0 to High(Names) do
+      if TryBackend(PMLFindVideoBackend(Names[I])) then
+        Break;
+    if FBackend = nil then
+      raise EPMLVideoError.CreateFmt('no video backend could be selected (tried: %s)',
+        [String.Join(', ', Names)]);
+  end;
 
   RefreshDisplays;
   // カーソル部品はバックエンドが Connect のときに用意する。無い場合もある。

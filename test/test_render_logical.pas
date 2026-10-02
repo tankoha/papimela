@@ -43,7 +43,8 @@ uses
   PaPiMeLa.Surface,
   PaPiMeLa.Video,
   PaPiMeLa.Render,
-  PaPiMeLa.Core;
+  PaPiMeLa.Core,
+  PaPiMeLa.Video.Dummy;   // ダミーのビデオを登録する（#45）
 
 const
   OutW = 80;

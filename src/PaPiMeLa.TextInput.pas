@@ -182,8 +182,7 @@ type
 implementation
 
 uses
-  PaPiMeLa.TextInput.Backend,
-  PaPiMeLa.TextInput.Fcitx;
+  PaPiMeLa.TextInput.Backend;
 
 { TPMLTextInputSession }
 
@@ -256,15 +255,17 @@ constructor TPMLTextInputSystem.Create(AContextRef: TObject; AOwner: TPMLObject;
   AQueue: TPMLEventQueue; const APreferred: String);
 var
   Wanted: String;
+  Names: TStringArray;
+  Factory: TPMLTextInputBackendFactory;
+  I: Integer;
 
-  // 候補を試し、繋がらなければその実体を破棄する。
+  // 作って繋ぐ。繋がらなければその実体を破棄する。
   function TryBackend(ACandidate: TPMLTextInputBackend): Boolean;
   begin
     Result := False;
     if ACandidate = nil then
       Exit;
-    if ((Wanted <> '') and (LowerCase(ACandidate.BackendName) <> Wanted))
-      or (not ACandidate.Connect(Self as IPMLTextInputSink)) then
+    if not ACandidate.Connect(Self as IPMLTextInputSink) then
     begin
       ACandidate.Free;
       Exit;
@@ -278,14 +279,39 @@ var
 begin
   inherited Create(AContextRef, AOwner);
   FQueue := AQueue;
-  Wanted := LowerCase(Trim(APreferred));
+  Wanted := Trim(APreferred);
   if Wanted = '' then
-    Wanted := LowerCase(Trim(GetEnvironmentVariable('PAPIMELA_IME')));
+    Wanted := Trim(GetEnvironmentVariable('PAPIMELA_IME'));
 
-  // §7.6 の順序。IBus は未実装なので Fcitx から試す（spikes/RESULTS.md の判断）。
-  if not TryBackend(TPMLFcitxTextInputBackend.Create) then
+  Names := PMLTextInputBackendNames;
+  if SameText(Wanted, 'none') then
+  begin
+    // 'none' は登録されない。名前で指定されたら、それだけを使う。
     if not TryBackend(TPMLNullTextInputBackend.Create) then
-      raise EPMLTextInputError.Create('no text input backend could be selected');
+      raise EPMLTextInputError.Create('text input backend "none" could not connect');
+  end
+  else if Wanted <> '' then
+  begin
+    // 名前を指定したら、その 1 つだけを試す。繋がらなくても他へは逃げない。
+    Factory := PMLFindTextInputBackend(Wanted);
+    if Factory = nil then
+      raise EPMLUnsupported.CreateFmt(
+        'text input backend "%s" is not available (registered: %s, none); '
+        + 'add PaPiMeLa.Backends (or PaPiMeLa) to uses to link the built-in backends',
+        [Wanted, String.Join(', ', Names)]);
+    if not TryBackend(Factory()) then
+      raise EPMLTextInputError.CreateFmt('text input backend "%s" could not connect', [Wanted]);
+  end
+  else
+  begin
+    // §7.6 の順序。登録された順（優先度の大きい順）に試し、最後は IME 無し。
+    for I := 0 to High(Names) do
+      if TryBackend(PMLFindTextInputBackend(Names[I])()) then
+        Break;
+    if FBackend = nil then
+      if not TryBackend(TPMLNullTextInputBackend.Create) then
+        raise EPMLTextInputError.Create('no text input backend could be selected');
+  end;
 
   FQueue.RegisterPumpSource(Self as IPMLEventPumpSource);
 end;

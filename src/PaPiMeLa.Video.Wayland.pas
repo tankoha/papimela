@@ -358,4 +358,15 @@ begin
     wl_display_flush(FConn.Display);
 end;
 
+{ ---- 登録 ---- }
+
+function CreateWaylandVideoBackend(AContextRef: TObject; AOwner: TPMLObject;
+  AQueue: TPMLEventQueue): TPMLVideoBackend;
+begin
+  Result := TPMLWaylandVideoBackend.Create(AContextRef, AOwner, AQueue);
+end;
+
+initialization
+  PMLRegisterVideoBackend('wayland', 100, @CreateWaylandVideoBackend);
+
 end.

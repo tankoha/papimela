@@ -6,6 +6,8 @@ papimela の公開 API だけで書いたサンプル。
 |---|---|
 | [`pong.pas`](pong.pas) | Pong。1 人用（右はコンピュータ）と 2 人対戦。ウィンドウの大きさを変えると縦横比を保って拡大縮小する |
 
+`uses SysUtils, Math, PaPiMeLa` だけで書いてある（アンブレラ。#45）。
+
 ```bash
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -oexamples/pong examples/pong.pas
 ./examples/pong              # 遊ぶ（Wayland セッションが要る）
