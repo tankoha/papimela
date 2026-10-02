@@ -75,7 +75,10 @@ implementation
 
 { ---- 合成 ---- }
 
-// a * b / 255 を四捨五入で。SDL の MULT_DIV_255 と同じ狙い。
+// a * b / 255 を四捨五入で（0..255 の全組で四捨五入と一致することを確かめた）。
+// PORT-NOTE: SDL とは丸めが違う。SDL の MULT_DIV_255（SDL_blit.h）も DRAW_MUL
+// （render/software/SDL_draw.h）も切り捨てで、半透明の結果が 1 小さくなることがある
+// （D-44）。どちらに揃えるかは未決（docs/HANDOFF.md §7）。
 function Mul255(A, B: Integer): Integer; inline;
 begin
   Result := A * B + 128;
