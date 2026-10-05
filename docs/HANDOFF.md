@@ -4,7 +4,8 @@
 
 > **2026-10-05 の手元のセッションで**: クラウドの作業（ブランチ `claude/zen-mayer-sjyn3o`）を**早送りで `master` に入れた**
 > （持ち主の判断）。§5.1 の手元の検査のうち自動で判定できるものはすべて通った（23 本・724 件、`docs/TEST-LOG.md` の冒頭）。
-> **残りは対話の確認だけ**: `demo_japanese_input`、`demo_pointer_constraints`、Pong（§5.1 の「見るところ」）。結果を聞いて記録する。
+> 対話の確認（`demo_japanese_input`、`demo_pointer_constraints`、Pong）も 2026-10-06 に持ち主が済ませ、すべて想定どおりだった
+> （`docs/TEST-LOG.md` の冒頭と T-09 の節）。**手元の確認は残っていない。** 次は §3 の候補と §8 の保留中の判断へ。
 
 ## 1. 今どこにいるか
 
@@ -114,7 +115,7 @@ env -u WAYLAND_DISPLAY LIBGL_ALWAYS_SOFTWARE=1 ./test/test_render_gles2   # Mesa
 `test_fcitx_textinput`、`test_key_routing`、`test_gl_window`、`test_render_gles2` のウィンドウの区間、
 スパイク 2 本、対話のデモ（`demo_japanese_input`、`demo_pointer_constraints`、`demo_render_window`）。
 
-### 5.1 手元で流す検査（2026-10-05 に手元で流した。自動の分はすべて合格、対話の分は未確認）
+### 5.1 手元で流す検査（2026-10-05〜06 に手元で流した。自動の分も対話の分もすべて合格）
 
 前回手元で流したのは 2026-10-02 の朝（`1ae1bdd` の時点）。その後の変更で手元専用の検査に効くもの:
 **バックエンドの選び方が登録制になった**（#45。全部のプログラムに効く）、Context のオプション（F-7）、
