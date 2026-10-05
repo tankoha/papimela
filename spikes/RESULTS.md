@@ -91,6 +91,39 @@ fcitx5 の入力コンテキストは D-Bus 接続に紐づいて破棄される
 
 ---
 
+## スパイク 3: IBus（ibus-mozc）の属性と通知の並び（2026-10-06）
+
+`spikes/spike3_ibus.pas`。papimela の `PaPiMeLa.Platform.DBus` で IBus の私設バスに繋ぎ、キーを返信を待たずに送って、
+返信と通知の並びと `IBusText` の属性を記録した。デスクトップの fcitx5 と混ざらないよう、Ubuntu 24.04 の最小 rootfs に
+ibus 1.5.29 と ibus-mozc 2.28.4715.102 を入れ、bwrap で隔離して動かした（`tools/ibus-sandbox/`）。
+
+### 結果
+
+| 項目 | 結果 |
+|---|---|
+| (a) 接続 | アドレスファイル `$XDG_CONFIG_HOME/ibus/bus/<machine-id>-<host>-<display>` から `IBUS_ADDRESS` を読み、`dbus_connection_open_private` + `dbus_bus_register` で繋がる。**machine-id は `/var/lib/dbus/machine-id` が先**（`/etc/machine-id` と値が違う環境で、ファイル名は前者だった）。`DISPLAY=:0` なら `unix-0` |
+| (b) 非同期 | `dbus_connection_send` の通し番号と、返信の `reply_serial` で突き合わせられる。返信は送った順に届いた。**同じキーの通知（UpdatePreeditText など）は返信より先に届く** |
+| (b) 離す | mozc は**キーを離すイベントを一度も消費しなかった**（押すほうを消費したキーでも `handled=false`） |
+| (c) 変換前 | 読み全体に下線 SINGLE（type=1 value=1）だけ。カーソルは末尾（文字数） |
+| (c) 変換後 | 注目文節に下線 DOUBLE（value=2）+ 背景（type=3、$D1EAFF）+ 前景（type=2、$000000）。**注目していない変換済みの文節は下線 SINGLE だけ**で、変換前の読みと同じ。カーソルは注目文節の先頭 |
+| (c) 文節の移動 | → で注目が移り、DOUBLE と色も移る。範囲は文字（コードポイント）単位 |
+| (d) 確定 | `CommitText` の直後に `HidePreeditText`。空の `UpdatePreeditText` は来ない。変換の破棄（Escape 2 回）も `HidePreeditText` だけ |
+| (d) 周辺テキスト | `SetSurroundingText(v IBusText, u cursor, u anchor)` は受理された（位置は文字単位）。mozc は**キーごとに** `RequireSurroundingText` を送ってくる |
+| (d) 周辺削除 | 「漢字を」の「漢字」を選択（cursor 2、anchor 0）して変換キーで再変換すると、`DeleteSurroundingText(i -2, u 2)`（カーソルからの相対位置と長さ、文字単位）→ 注目文節「漢字」の `UpdatePreeditText` → 返信、の順に届いた。選択が無いと何も起きない |
+| ForwardKeyEvent | この手順では一度も来なかった |
+
+### 設計に反映すべき実測値
+
+- **文節の状態の規則を直す**: 下線 SINGLE だけでは「変換済み」と「未変換」を区別できない（mozc はどちらも SINGLE）。
+  注目文節（DOUBLE、または SINGLE + 背景）が 1 つでもあれば他の SINGLE は `Converted`、無ければ全部 `Unconverted`
+- 変換中テキストの消滅は `HidePreeditText` でも起きる（確定の後、破棄）。これを空の変換中テキストとして扱う
+- 離すキーは消費されない前提で、押すほうを消費したキーの KeyUp を流さない仕組みが要る（押されていないキーの KeyUp は
+  `TPMLKeyboardState` が捨てるので、押すほうを KeyDown にしなければ足りる。§7.5 で確かめる）
+- `RequireSurroundingText` に毎回答えると、同じ周辺テキストを毎キー送ることになる。前に送ったものと同じなら送らない
+- mozc は root では動かない（`mozc_server` が何も出さずに終了コード 255）。隔離環境は uid 1000 で動かす
+
+---
+
 ## 優先順位への影響
 
 設計書は IBus バックエンドを先に実装する前提だったが、**Fcitx5 バックエンドを先に実装するほうが合理的**。
@@ -107,3 +140,9 @@ cd spikes && fpc -O1 -gl spike2_fcitx.pas && ./spike2_fcitx
 ```
 
 スパイク 2 は Wayland セッションと fcitx5 + 日本語エンジン（mozc）の稼働が前提。
+
+スパイク 3 は隔離環境の中で動かす（`tools/ibus-sandbox/README.md`）:
+
+```bash
+tools/ibus-sandbox/run.sh sh -c 'fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FU/tmp/lib -o/tmp/spike3_ibus spikes/spike3_ibus.pas && /tmp/spike3_ibus'
+```

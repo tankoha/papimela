@@ -1,0 +1,46 @@
+#!/bin/sh
+# ibus-session — 隔離環境の中で IBus（ibus-mozc）を立て、引数のコマンドを動かす
+#
+# setup.sh が rootfs の /usr/local/bin へ置く。run.sh から uid 1000 で呼ばれる。
+# 画面もデスクトップのセッションバスも無いので、セッションバスを自前で立て、
+# DISPLAY=:0 を決め打ちにする（IBus のアドレスファイルの名前に入る）。
+set -eu
+mkdir -p /tmp/home
+export XDG_RUNTIME_DIR=/tmp/xdg XDG_CONFIG_HOME=/tmp/config XDG_CACHE_HOME=/tmp/cache
+mkdir -p "$XDG_RUNTIME_DIR" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME"
+chmod 700 "$XDG_RUNTIME_DIR"
+# ibus-mozc は既定（active_on_launch: False）だと直接入力から始まる。ひらがなから始めさせる。
+mkdir -p "$XDG_CONFIG_HOME/mozc"
+cat > "$XDG_CONFIG_HOME/mozc/ibus_config.textproto" <<'CONF'
+engines {
+  name : "mozc-jp"
+  longname : "Mozc"
+  layout : "default"
+  layout_variant : ""
+  layout_option : ""
+  rank : 80
+}
+active_on_launch: True
+CONF
+dbus-daemon --session --fork --nopidfile --print-address=3 3>/tmp/session-addr
+DBUS_SESSION_BUS_ADDRESS=$(cat /tmp/session-addr)
+export DBUS_SESSION_BUS_ADDRESS
+export DISPLAY=:0
+ibus-daemon --single --panel=disable --emoji-extension=disable --config=disable --cache=refresh \
+  >/tmp/ibus-daemon.log 2>&1 &
+# `ibus engine NAME` は切り替えに成功しても終了コード 1 を返す（setxkbmap が無いため。実測）ので、
+# 読み返して確かめる。
+i=0
+until { ibus engine mozc-jp >/dev/null 2>&1 || true; [ "$(ibus engine 2>/dev/null)" = mozc-jp ]; }; do
+  i=$((i+1))
+  if [ $i -ge 100 ]; then
+    echo "ibus-session: ibus-daemon did not start" >&2
+    cat /tmp/ibus-daemon.log >&2
+    exit 1
+  fi
+  sleep 0.1
+done
+status=0
+"$@" || status=$?
+ibus exit >/dev/null 2>&1 || true
+exit $status

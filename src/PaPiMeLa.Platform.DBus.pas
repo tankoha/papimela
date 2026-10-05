@@ -16,13 +16,15 @@
 
   RESOLVED:
     - 接続はプライベート接続（dbus_bus_get_private）。他の用途と共有しない
+    - IBus の私設バスはアドレスを指定して繋ぐ（CreateForAddress。open_private + bus_register）
     - シグナル受信は dbus_connection_pop_message のポーリング
     - C コールバック境界を作らないので例外遮断は不要
 
   NOT RESOLVED:
     - dbus_connection_set_watch_functions によるイベントループ統合は、
       PaPiMeLa.Core の Pump が存在してから行う（Design: docs/DESIGN.md §6.3）
-    - 非同期 ProcessKeyEvent（dbus_pending_call_*）は未実装。現状は同期呼び出し
+    - 返信を待たない呼び出しは SendAsync（通し番号を返す）。返信は PopMessage で通知と同じ列に
+      届くので、ReplySerialOf で突き合わせる（dbus_pending_call は使わない。spikes/spike3_ibus.pas で実測）
 }
 unit PaPiMeLa.Platform.DBus;
 
@@ -57,6 +59,13 @@ const
   DBUS_TYPE_STRUCT      = Ord('r');
   DBUS_TYPE_VARIANT     = Ord('v');
   DBUS_TYPE_BYTE        = Ord('y');
+  DBUS_TYPE_DICT_ENTRY  = Ord('e');
+
+  // dbus_message_get_type の値
+  DBUS_MESSAGE_TYPE_METHOD_CALL   = 1;
+  DBUS_MESSAGE_TYPE_METHOD_RETURN = 2;
+  DBUS_MESSAGE_TYPE_ERROR         = 3;
+  DBUS_MESSAGE_TYPE_SIGNAL        = 4;
 
 type
   PDBusConnection = Pointer;
@@ -83,6 +92,8 @@ type
     error_is_set : function(err: PDBusError): LongWord; cdecl;
 
     bus_get_private       : function(bustype: LongInt; err: PDBusError): PDBusConnection; cdecl;
+    bus_register          : function(conn: PDBusConnection; err: PDBusError): LongWord; cdecl;
+    connection_open_private: function(address: PAnsiChar; err: PDBusError): PDBusConnection; cdecl;
     bus_add_match         : procedure(conn: PDBusConnection; rule: PAnsiChar; err: PDBusError); cdecl;
     bus_remove_match      : procedure(conn: PDBusConnection; rule: PAnsiChar; err: PDBusError); cdecl;
     bus_name_has_owner    : function(conn: PDBusConnection; name: PAnsiChar; err: PDBusError): LongWord; cdecl;
@@ -106,6 +117,8 @@ type
     message_get_interface  : function(msg: PDBusMessage): PAnsiChar; cdecl;
     message_get_path       : function(msg: PDBusMessage): PAnsiChar; cdecl;
     message_get_type       : function(msg: PDBusMessage): LongInt; cdecl;
+    message_get_reply_serial: function(msg: PDBusMessage): LongWord; cdecl;
+    message_get_error_name : function(msg: PDBusMessage): PAnsiChar; cdecl;
 
     message_iter_init_append   : procedure(msg: PDBusMessage; iter: PDBusMessageIter); cdecl;
     message_iter_append_basic  : function(iter: PDBusMessageIter; atype: LongInt; value: Pointer): LongWord; cdecl;
@@ -171,6 +184,9 @@ type
 
     function OpenArray(const AElementSignature: String): TPMLDBusWriter;
     function OpenStruct: TPMLDBusWriter;
+    // AContentSignature は中身 1 つの型（例: '(sa{sv}sv)'）。
+    function OpenVariant(const AContentSignature: String): TPMLDBusWriter;
+    function OpenDictEntry: TPMLDBusWriter;
     procedure Close(var ASub: TPMLDBusWriter);
   end;
 
@@ -189,6 +205,8 @@ type
     procedure ClearError;
   public
     constructor Create(ABusType: LongInt = DBUS_BUS_SESSION);
+    // アドレスを指定して繋ぐ（IBus の私設バスなど）。Hello（bus_register）まで済ませる。
+    constructor CreateForAddress(const AAddress: String);
     destructor Destroy; override;
 
     function IsConnected: Boolean;
@@ -214,6 +232,14 @@ type
 
     function IsSignal(AMsg: PDBusMessage; const AIface, AName: String): Boolean;
     function MemberOf(AMsg: PDBusMessage): String;
+    function TypeOf(AMsg: PDBusMessage): LongInt;
+    // 返信（METHOD_RETURN / ERROR）が答えている呼び出しの通し番号。
+    function ReplySerialOf(AMsg: PDBusMessage): LongWord;
+    function ErrorNameOf(AMsg: PDBusMessage): String;
+
+    // 返信を待たずに送る。返信は PopMessage で他の通知と同じ列に届くので、
+    // ReplySerialOf をこの戻り値と突き合わせる。
+    function SendAsync(AMsg: PDBusMessage): LongWord;
 
     property API: TPMLDBusAPI read FAPI;
   end;
@@ -414,6 +440,23 @@ begin
     raise EPMLError.Create('D-Bus: failed to open struct container');
 end;
 
+function TPMLDBusWriter.OpenVariant(const AContentSignature: String): TPMLDBusWriter;
+begin
+  Result.FAPI := FAPI;
+  FillChar(Result.FIter, SizeOf(Result.FIter), 0);
+  if FAPI^.message_iter_open_container(@FIter, DBUS_TYPE_VARIANT,
+       PAnsiChar(AContentSignature), @Result.FIter) = 0 then
+    raise EPMLError.Create('D-Bus: failed to open variant container');
+end;
+
+function TPMLDBusWriter.OpenDictEntry: TPMLDBusWriter;
+begin
+  Result.FAPI := FAPI;
+  FillChar(Result.FIter, SizeOf(Result.FIter), 0);
+  if FAPI^.message_iter_open_container(@FIter, DBUS_TYPE_DICT_ENTRY, nil, @Result.FIter) = 0 then
+    raise EPMLError.Create('D-Bus: failed to open dict entry container');
+end;
+
 procedure TPMLDBusWriter.Close(var ASub: TPMLDBusWriter);
 begin
   if FAPI^.message_iter_close_container(@FIter, @ASub.FIter) = 0 then
@@ -435,6 +478,8 @@ begin
   Bind(FAPI.error_is_set, 'dbus_error_is_set');
 
   Bind(FAPI.bus_get_private,    'dbus_bus_get_private');
+  Bind(FAPI.bus_register,       'dbus_bus_register');
+  Bind(FAPI.connection_open_private, 'dbus_connection_open_private');
   Bind(FAPI.bus_add_match,      'dbus_bus_add_match');
   Bind(FAPI.bus_remove_match,   'dbus_bus_remove_match');
   Bind(FAPI.bus_name_has_owner, 'dbus_bus_name_has_owner');
@@ -456,6 +501,8 @@ begin
   Bind(FAPI.message_get_interface,   'dbus_message_get_interface');
   Bind(FAPI.message_get_path,        'dbus_message_get_path');
   Bind(FAPI.message_get_type,        'dbus_message_get_type');
+  Bind(FAPI.message_get_reply_serial, 'dbus_message_get_reply_serial');
+  Bind(FAPI.message_get_error_name,  'dbus_message_get_error_name');
 
   Bind(FAPI.message_iter_init_append,     'dbus_message_iter_init_append');
   Bind(FAPI.message_iter_append_basic,    'dbus_message_iter_append_basic');
@@ -503,6 +550,22 @@ begin
     raise EPMLTextInputError.CreateNative('D-Bus connection is nil', 0, 'dbus');
   // プロセスが D-Bus 切断で終了しないようにする。切断は EPMLBackendLost で扱う。
   FAPI.connection_set_exit_on_disconnect(FConn, 0);
+end;
+
+constructor TPMLDBusConnection.CreateForAddress(const AAddress: String);
+begin
+  inherited Create;
+  FLib := TPMLDynLib.Create(LIBDBUS_NAMES);
+  LoadAPI;
+  FAPI.error_init(@FErr);
+  FConn := FAPI.connection_open_private(PAnsiChar(AAddress), @FErr);
+  RaiseIfError('failed to connect to ' + AAddress);
+  if FConn = nil then
+    raise EPMLTextInputError.CreateNative('D-Bus connection is nil', 0, 'dbus');
+  FAPI.connection_set_exit_on_disconnect(FConn, 0);
+  // メッセージバスとして話すには Hello が要る（名前の割り当て）。
+  FAPI.bus_register(FConn, @FErr);
+  RaiseIfError('failed to register on ' + AAddress);
 end;
 
 destructor TPMLDBusConnection.Destroy;
@@ -601,6 +664,35 @@ end;
 function TPMLDBusConnection.IsSignal(AMsg: PDBusMessage; const AIface, AName: String): Boolean;
 begin
   Result := FAPI.message_is_signal(AMsg, PAnsiChar(AIface), PAnsiChar(AName)) <> 0;
+end;
+
+function TPMLDBusConnection.TypeOf(AMsg: PDBusMessage): LongInt;
+begin
+  Result := FAPI.message_get_type(AMsg);
+end;
+
+function TPMLDBusConnection.ReplySerialOf(AMsg: PDBusMessage): LongWord;
+begin
+  Result := FAPI.message_get_reply_serial(AMsg);
+end;
+
+function TPMLDBusConnection.ErrorNameOf(AMsg: PDBusMessage): String;
+var
+  P: PAnsiChar;
+begin
+  P := FAPI.message_get_error_name(AMsg);
+  if P = nil then
+    Result := ''
+  else
+    Result := String(P);
+end;
+
+function TPMLDBusConnection.SendAsync(AMsg: PDBusMessage): LongWord;
+begin
+  Result := 0;
+  if FAPI.connection_send(FConn, AMsg, @Result) = 0 then
+    raise EPMLTextInputError.CreateNative('D-Bus: out of memory while sending', 0, 'dbus');
+  Flush;
 end;
 
 function TPMLDBusConnection.MemberOf(AMsg: PDBusMessage): String;
