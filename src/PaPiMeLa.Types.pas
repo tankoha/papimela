@@ -139,6 +139,8 @@ type
     procedure Clear;
     // 文節のバイト範囲と State から、コードポイント位置と FocusedSegment を埋める。
     procedure Finalize;
+    // 文字列・カーソル・文節の区切りと状態が同じか（同じ内容を重ねて通知しないため）。
+    function SameAs(const AOther: TPMLComposition): Boolean;
   end;
 
   // TPMLEvent の固定部に載る変換中テキストの付随情報。
@@ -191,6 +193,22 @@ begin
   CursorChar := -1;
   FocusedSegment := -1;
   SegmentsReliable := False;
+end;
+
+function TPMLComposition.SameAs(const AOther: TPMLComposition): Boolean;
+var
+  I: Integer;
+begin
+  Result := (Text = AOther.Text) and (CursorByte = AOther.CursorByte)
+    and (Length(Segments) = Length(AOther.Segments));
+  if not Result then
+    Exit;
+  for I := 0 to High(Segments) do
+    if (Segments[I].StartByte <> AOther.Segments[I].StartByte)
+      or (Segments[I].EndByte <> AOther.Segments[I].EndByte)
+      or (Segments[I].State <> AOther.Segments[I].State)
+      or (Segments[I].Underline <> AOther.Segments[I].Underline) then
+      Exit(False);
 end;
 
 procedure TPMLComposition.Finalize;

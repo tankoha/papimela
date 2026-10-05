@@ -956,6 +956,17 @@ IBusAttribute = variant( struct( s "IBusAttribute", a{sv}, u type, u value, u st
 
 エンジンごとの属性の使い方（Mozc: 注目文節に DOUBLE、他に SINGLE。Anthy: 注目文節に SINGLE + 背景反転、他に SINGLE。SKK: 変換中は下線なし）は **[要検証: 実機で ibus-mozc / ibus-anthy / ibus-skk / ibus-libpinyin の属性を `dbus-monitor` で採取し、上記 3 のルールを確定する]**。ルールは `TPMLIBusSegmenter` に集約し、エンジン名（`GlobalEngine` プロパティで取得可）による分岐を入れられる余地を持たせる。
 
+**実装で決めたこと**（2026-10-06、#48。実測は `spikes/RESULTS.md` のスパイク 3）:
+
+- **規則 3 を実測で直した**: ibus-mozc は変換前の読みにも、注目していない変換済みの文節にも下線 SINGLE だけを付ける（区別できない）。そこで「下線 DOUBLE か背景のある区間が `Focused`。注目文節が 1 つでもあれば、他の下線 SINGLE の区間は `Converted`、無ければ全部 `Unconverted`」とした。区間は下線と背景の属性の境目で分ける（前景色の境目では分けない）。重なった下線は DOUBLE > ERROR > SINGLE > LOW の強いほうを採る。ERROR は背景があっても注目にしない
+- アドレスファイルの名前は ibus-daemon 1.5.29 の実測に合わせた: machine-id は `/var/lib/dbus/machine-id` が先、`WAYLAND_DISPLAY` があれば `unix-<それ>`、次に `DISPLAY`（`host:3.1` → `host-3`）、最後に `unix-0`。Wayland でもデーモンは `unix-0` を併せて書く
+- **fcitx5 は IBus を装う**: 手元の fcitx5 はアドレスファイルを書き、セッションバスの IBus 互換の口を指させる（`IBUS_DAEMON_PID` が fcitx5、アドレスに `fcitx_random_string`）。そのまま繋ぐと、文節の情報が多い Fcitx の本来の口より IBus（優先度 200）が先に選ばれてしまうので、`Connect` で断る
+- 入力の種類は `SetContentType` ではなく、**書き込み専用のプロパティ `ContentType`（`(uu)`）**（ibus-daemon が持つ introspection で確認）。値は IBus 1.5.29 のヘッダの `IBusInputPurpose` / `IBusInputHints`
+- `HidePreeditText` を変換中テキストの消滅として扱う（確定の後と破棄で来る。空の `UpdatePreeditText` は来ない）。`ShowPreeditText` で最後のものを出し直す
+- `RequireSurroundingText` はキーごとに来るので、前に送ったものと同じ周辺テキストは送らない
+- 接続が切れたら、待っているキーを素通しで解決し、変換中テキストを消し、1 秒ごとにアドレスファイルを読み直して繋ぎ直す（**inotify は使っていない**。ibus-daemon の立て直しで確認）
+- **未実装**: `ForwardKeyEvent`（ibus-mozc では来なかった。数えて記録するだけ）、埋め込み候補、ibus-anthy / ibus-skk / ibus-libpinyin の属性の実測
+
 **周辺テキスト**: `RequireSurroundingText` シグナルを受けたら、および `FocusIn` 直後・確定直後・削除適用直後に、`Client.GetSurroundingText` を呼び、バイト位置を文字位置に変換して `SetSurroundingText(IBusText(text), cursor_pos, anchor_pos)` を送る。送った `text` は `FLastSurrounding` として保持する。
 
 **周辺削除**: `DeleteSurroundingText(offset, n_chars)` シグナルを受けたら、`FLastSurrounding` とそのカーソル位置を使って文字単位の (offset, n_chars) を `BeforeChars` / `AfterChars` に分け、さらにバイト数に変換して `TextInputDeleteSurrounding` イベントを発行する。`FLastSurrounding` が無ければ（`Client = nil`）ログを出して無視する。
@@ -1285,7 +1296,7 @@ wayland-scanner の Pascal 版。C の `wayland-scanner` が生成する `*-clie
 | 45 | `PaPiMeLa.App`、`PaPiMeLa.Backends`、`PaPiMeLa`（アンブレラ） | `main/` (234) | 小 | 全部 | P1 | クリーンルーム | Medium | Sonnet | 6.5 の `TPMLApplication`、バックエンド登録、型エイリアス再エクスポート。**実装済み**（Sonnet。受け入れ検査 T-25 / T-26 を先に書いた）。登録は `PMLRegisterVideoBackend` / `PMLRegisterTextInputBackend` / `PMLRegisterRenderDriver`（抽象のユニットに置き、具象バックエンドが initialization で自分を登録）。`PaPiMeLa.Backends` は uses の並びだけ。アンブレラの並べ直しは `tools/genumbrella.bb` で生成し、type helper は別名にできない（FPC が拒む。実測）ので派生で置く |
 | 46 | `PaPiMeLa.TextInput`（公開モデル、`TPMLTextInputSystem`、`TPMLTextInputSession`、バックエンド選択） | — | 中 | 2, 4, 22, 24 | P1 | クリーンルーム | **High** | Opus | 7.3 / 7.6。`IPMLTextInputClient` の呼び出しタイミング、周辺削除→確定の順序保証、`IPMLFocusObserver`。**本プロジェクトの中核** |
 | 47 | `PaPiMeLa.TextInput.Backend`、`.TextInput.Null` | — | 小 | 46 | P1 | クリーンルーム | **High** | Opus | 3.6 の抽象クラス、`IPMLTextInputSink`、能力集合。#46 と同一担当で同時に設計する |
-| 48 | `PaPiMeLa.TextInput.IBus` | （`core/linux/SDL_ibus.c` (743) は接続手順の参考のみ。バグあり: 115 行目） | 大 | 16, 46, 47 | P1 | クリーンルーム | **High** | Opus | 7.4。アドレス解決と inotify 追従、`IBusText` の完全解析、`TPMLIBusSegmenter`、非同期 `ProcessKeyEvent`、`SetSurroundingText` / `DeleteSurroundingText`、`SetCursorLocationRelative`、埋め込み候補。**未解決 1〜4 の実機検証を伴う** |
+| 48 | `PaPiMeLa.TextInput.IBus` | （`core/linux/SDL_ibus.c` (743) は接続手順の参考のみ。バグあり: 115 行目） | 大 | 16, 46, 47 | P1 | クリーンルーム | **High** | Opus | 7.4。アドレス解決と inotify 追従、`IBusText` の完全解析、`TPMLIBusSegmenter`、非同期 `ProcessKeyEvent`、`SetSurroundingText` / `DeleteSurroundingText`、`SetCursorLocationRelative`、埋め込み候補。**未解決 1〜4 の実機検証を伴う**。**実装済み（Opus、2026-10-06）**: ibus 1.5.29 + ibus-mozc を隔離環境（`tools/ibus-sandbox/`）で動かして実測し、規則 3 を直した。通しの検査は CI でも走る（T-31）。inotify の代わりに切断を見て読み直す。埋め込み候補と ForwardKeyEvent は未実装 |
 | 49 | `PaPiMeLa.TextInput.WaylandTI` | （`SDL_waylandevents.c` の `text_input_*` は参考のみ） | 中 | 14, 46, 47, `Video.Wayland.Types` | P1 | クリーンルーム | **High** | Opus | 7.7。`done` での一括適用順序、`set_surrounding_text` の 4000 バイト切り詰め、`enter` / `leave` によるウィンドウ判定。IBus 直結時は `enable` を送らない。**実装済み（Opus、2026-10-06）**: 受信側の状態を `TPMLTextInputV3State` に分けて表示サーバ無しで検査（T-27）、手順は labwc で確認（T-28）。シートとサーフェスは `IPMLWaylandSeatProvider` で借りる。要求は Pump で 1 回の commit にまとめる |
 | 50 | `PaPiMeLa.TextInput.Fcitx` | （`core/linux/SDL_fcitx.c` (441) は参考のみ） | 中 | 16, 46, 47 | P2 | クリーンルーム | Medium | Sonnet | 7.8。#48 を手本に。`UpdateFormattedPreedit` のフラグ → 文節状態 |
 | 51 | `PaPiMeLa.Audio.Backend`、`PaPiMeLa.Audio`（公開 API） | `audio/SDL_audio.c` (2765)、`SDL_sysaudio.h`、`SDL_audiodev.c` | 大 | 2, 8, 22, 53 | P2 | 移植 | **High** | Opus | 物理/論理デバイス、デバイススレッド、bind、ロック順序、破棄とコールバックの競合、hotplug イベント。全オーディオバックエンドの土台 |

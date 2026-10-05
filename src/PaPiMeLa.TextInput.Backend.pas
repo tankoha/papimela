@@ -61,6 +61,21 @@ type
 
   TPMLTextInputBackendFactory = function: TPMLTextInputBackend;
 
+{ ---- バックエンドが共有する変換 ---- }
+
+// 修飾キーを X11 の状態マスク（ShiftMask=1、LockMask=2、ControlMask=4、Mod1=8（Alt）、
+// Mod2=16（NumLock）、Mod4=64（Super））にする。Fcitx5 も IBus もこれで話す。
+function PMLModifiersToXState(const AMods: TPMLKeyModifiers): LongWord;
+
+// IME の「カーソルから AOffset 文字の位置から ACount 文字を消す」を、papimela の
+// 「カーソルの前後を消す」（バイト数と文字数）に直す。AText は最後に IME へ送った
+// 周辺テキスト、ACursorChar はその中のカーソル（文字単位）。送ったテキストの外へ
+// はみ出す分は IME が知り得ないので切り捨てる。範囲がカーソルに接していなければ
+// （例: カーソル 3 で「先頭の 1 文字だけ」）papimela のモデルでは表せないので、何も消さない
+// （両方 0）。頼まれていない文字まで消すよりよい。
+function PMLDeleteSurroundingFromChars(const AText: String;
+  ACursorChar, AOffset, ACount: Integer): TPMLDeleteSurroundingData;
+
 { ---- 登録（#45） ----
 
   具象バックエンドは、自分のユニットの initialization で自分を登録する。
@@ -81,7 +96,50 @@ function  PMLFindTextInputBackend(const AName: String): TPMLTextInputBackendFact
 implementation
 
 uses
-  PaPiMeLa.Errors;
+  PaPiMeLa.Errors,
+  PaPiMeLa.Unicode;
+
+function PMLModifiersToXState(const AMods: TPMLKeyModifiers): LongWord;
+begin
+  Result := 0;
+  if TPMLKeyModifier.Shift    in AMods then Result := Result or (1 shl 0);
+  if TPMLKeyModifier.CapsLock in AMods then Result := Result or (1 shl 1);
+  if TPMLKeyModifier.Ctrl     in AMods then Result := Result or (1 shl 2);
+  if TPMLKeyModifier.Alt      in AMods then Result := Result or (1 shl 3);
+  if TPMLKeyModifier.NumLock  in AMods then Result := Result or (1 shl 4);
+  if TPMLKeyModifier.Super    in AMods then Result := Result or (1 shl 6);
+end;
+
+function PMLDeleteSurroundingFromChars(const AText: String;
+  ACursorChar, AOffset, ACount: Integer): TPMLDeleteSurroundingData;
+var
+  Total, StartChar, EndChar, CurByte: Integer;
+begin
+  FillChar(Result, SizeOf(Result), 0);
+  Total := UTF8CodePointCount(AText);
+  if ACursorChar < 0 then
+    ACursorChar := 0;
+  if ACursorChar > Total then
+    ACursorChar := Total;
+  if ACount < 0 then
+    ACount := 0;
+  StartChar := ACursorChar + AOffset;
+  EndChar := StartChar + ACount;
+  if StartChar < 0 then
+    StartChar := 0;
+  if EndChar > Total then
+    EndChar := Total;
+  if (EndChar <= StartChar) or (StartChar > ACursorChar) or (EndChar < ACursorChar) then
+    Exit;
+  // カーソルの前後に分ける。
+  if StartChar < ACursorChar then
+    Result.BeforeChars := ACursorChar - StartChar;
+  if EndChar > ACursorChar then
+    Result.AfterChars := EndChar - ACursorChar;
+  CurByte := UTF8CharToByteOffset(AText, ACursorChar);
+  Result.BeforeBytes := CurByte - UTF8CharToByteOffset(AText, ACursorChar - Result.BeforeChars);
+  Result.AfterBytes := UTF8CharToByteOffset(AText, ACursorChar + Result.AfterChars) - CurByte;
+end;
 
 function TPMLTextInputBackend.Capabilities: TPMLTextInputCapabilities;
 begin

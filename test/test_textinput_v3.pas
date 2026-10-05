@@ -48,6 +48,7 @@ type
       ASelected: Integer; AHorizontal: Boolean);
     procedure BackendLost(const AReason: String);
     procedure KeyResolved(ATicket: LongWord; AConsumed: Boolean);
+    procedure SurroundingTextRequested;
   end;
 
   { 周辺テキストを送り直す時機を見るためのバックエンド。Pump で 1 回だけ確定を流す。 }
@@ -145,6 +146,11 @@ end;
 function TEditor.GetCursorRect: TPMLRect;
 begin
   Result := TPMLRect.Make(0, 0, 2, 18);
+end;
+
+procedure TRecordingSink.SurroundingTextRequested;
+begin
+  Log := Log + 'S';
 end;
 
 procedure TRecordingSink.KeyResolved(ATicket: LongWord; AConsumed: Boolean);

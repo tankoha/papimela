@@ -87,13 +87,22 @@ jobs:
       - name: Run headless tests
         run: |
           set -eu
-          for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_time test_keyboard test_textinput_v3 test_ime_keys test_backends test_umbrella; do
+          for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_backends test_umbrella; do
             fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/$t test/$t.pas
             ./test/$t
           done
 
       # サンプル。ビルドが通ることと、表示サーバ無しの自己検査（コンピュータ同士の
       # 対戦を再生して盤面と描画を見る）が通ることを確かめる。
+      - name: IBus with ibus-mozc (end to end)
+        timeout-minutes: 10
+        run: |
+          set -eu
+          sudo apt-get install -y --no-install-recommends ibus ibus-mozc dbus-daemon
+          fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_ibus_textinput test/test_ibus_textinput.pas
+          # ランナーは使い捨ての VM で root でもないので、隔離せずに ibus-session で立てる
+          sh tools/ibus-sandbox/ibus-session ./test/test_ibus_textinput
+
       - name: Build and self-test examples
         run: |
           set -eu

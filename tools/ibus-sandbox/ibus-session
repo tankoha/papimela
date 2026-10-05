@@ -1,7 +1,8 @@
 #!/bin/sh
 # ibus-session — 隔離環境の中で IBus（ibus-mozc）を立て、引数のコマンドを動かす
 #
-# setup.sh が rootfs の /usr/local/bin へ置く。run.sh から uid 1000 で呼ばれる。
+# setup.sh が rootfs の /usr/local/bin へ置き、run.sh から uid 1000 で呼ばれる。CI では隔離せず
+# ランナーの上で直接呼ぶ（使い捨ての VM で、root でもない）。
 # 画面もデスクトップのセッションバスも無いので、セッションバスを自前で立て、
 # DISPLAY=:0 を決め打ちにする（IBus のアドレスファイルの名前に入る）。
 set -eu

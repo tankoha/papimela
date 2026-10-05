@@ -71,7 +71,6 @@ type
     procedure HandleFormattedPreedit(AMsg: PDBusMessage);
     procedure HandleCommitString(AMsg: PDBusMessage);
     procedure HandleDeleteSurrounding(AMsg: PDBusMessage);
-    function  ModifiersToState(const AMods: TPMLKeyModifiers): LongWord;
   public
     constructor Create;
     destructor Destroy; override;
@@ -112,14 +111,6 @@ const
   // TextFormatFlag (fcitx5: src/lib/fcitx-utils/textformatflags.h)
   FMT_UNDERLINE = 1 shl 3;
   FMT_HIGHLIGHT = 1 shl 4;
-
-  // X11 モディファイアマスク
-  X_SHIFT = 1 shl 0;
-  X_LOCK  = 1 shl 1;
-  X_CTRL  = 1 shl 2;
-  X_ALT   = 1 shl 3;
-  X_NUM   = 1 shl 4;
-  X_SUPER = 1 shl 6;
 
 constructor TPMLFcitxTextInputBackend.Create;
 begin
@@ -364,17 +355,6 @@ begin
   end;
 end;
 
-function TPMLFcitxTextInputBackend.ModifiersToState(const AMods: TPMLKeyModifiers): LongWord;
-begin
-  Result := 0;
-  if TPMLKeyModifier.Shift    in AMods then Result := Result or X_SHIFT;
-  if TPMLKeyModifier.CapsLock in AMods then Result := Result or X_LOCK;
-  if TPMLKeyModifier.Ctrl     in AMods then Result := Result or X_CTRL;
-  if TPMLKeyModifier.Alt      in AMods then Result := Result or X_ALT;
-  if TPMLKeyModifier.NumLock  in AMods then Result := Result or X_NUM;
-  if TPMLKeyModifier.Super    in AMods then Result := Result or X_SUPER;
-end;
-
 function TPMLFcitxTextInputBackend.FilterKey(const AKey: TPMLKeyEventData; AIsRelease: Boolean;
   ATicket: LongWord): TPMLKeyFilterResult;
 var
@@ -393,7 +373,7 @@ begin
     W := FConn.Writer(Msg);
     W.AddUInt32(AKey.Keysym);
     W.AddUInt32(AKey.Raw);
-    W.AddUInt32(ModifiersToState(AKey.Modifiers));
+    W.AddUInt32(PMLModifiersToXState(AKey.Modifiers));
     W.AddBoolean(AIsRelease);
     W.AddUInt32(0);   // time。0 は「不明」として扱われる
     Reply := FConn.Send(Msg);
@@ -561,9 +541,7 @@ var
   R: TPMLDBusReader;
   Offset: LongInt;
   Size: LongWord;
-  StartChar, EndChar: Integer;
   Data: TPMLDeleteSurroundingData;
-  CurByte, StartByte, EndByte: Integer;
 begin
   R := FConn.Reader(AMsg);
   if R.ArgType <> DBUS_TYPE_INT32 then
@@ -574,28 +552,7 @@ begin
     Exit;
   Size := R.AsUInt32;
 
-  StartChar := FSurroundingCursor + Offset;
-  if StartChar < 0 then
-    StartChar := 0;
-  EndChar := StartChar + Integer(Size);
-
-  Data.BeforeChars := FSurroundingCursor - StartChar;
-  if Data.BeforeChars < 0 then
-    Data.BeforeChars := 0;
-  Data.AfterChars := EndChar - FSurroundingCursor;
-  if Data.AfterChars < 0 then
-    Data.AfterChars := 0;
-
-  CurByte   := UTF8CharToByteOffset(FSurrounding, FSurroundingCursor);
-  StartByte := UTF8CharToByteOffset(FSurrounding, StartChar);
-  EndByte   := UTF8CharToByteOffset(FSurrounding, EndChar);
-  Data.BeforeBytes := CurByte - StartByte;
-  if Data.BeforeBytes < 0 then
-    Data.BeforeBytes := 0;
-  Data.AfterBytes := EndByte - CurByte;
-  if Data.AfterBytes < 0 then
-    Data.AfterBytes := 0;
-
+  Data := PMLDeleteSurroundingFromChars(FSurrounding, FSurroundingCursor, Offset, Integer(Size));
   if Assigned(FSink) then
     FSink.DeleteSurroundingRequested(Data);
 end;

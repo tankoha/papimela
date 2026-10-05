@@ -150,6 +150,11 @@ begin
     end;
 
     try
+      // fcitx5 は IBus のアドレスファイルを書いて IBus を装う。ibus（優先度 200）が
+      // それを断り、本来の fcitx が選ばれること。
+      Check(Ctx.TextInput.BackendName = 'fcitx',
+        'fcitx5 の動くデスクトップでは fcitx が選ばれる（ibus は IBus を装った fcitx5 を断る）: ' +
+        Ctx.TextInput.BackendName);
       Check(Ctx.Events.Keyboard <> nil, 'Events.Keyboard が存在する');
       Check(Ctx.Events.Mouse <> nil, 'Events.Mouse が存在する');
       Check(Ctx.Events.KeyFilter <> nil, 'KeyFilter が差し込まれている');

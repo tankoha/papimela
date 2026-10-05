@@ -198,22 +198,6 @@ begin
     Result := Length(AText);
 end;
 
-{ 文節の区切りと状態、カーソルが同じか。 }
-function SameComposition(const A, B: TPMLComposition): Boolean;
-var
-  I: Integer;
-begin
-  Result := (A.Text = B.Text) and (A.CursorByte = B.CursorByte)
-    and (Length(A.Segments) = Length(B.Segments));
-  if not Result then
-    Exit;
-  for I := 0 to High(A.Segments) do
-    if (A.Segments[I].StartByte <> B.Segments[I].StartByte)
-      or (A.Segments[I].EndByte <> B.Segments[I].EndByte)
-      or (A.Segments[I].State <> B.Segments[I].State) then
-      Exit(False);
-end;
-
 { TPMLTextInputV3State }
 
 constructor TPMLTextInputV3State.Create;
@@ -300,7 +284,7 @@ begin
   end;
   // 3. 変換中テキスト。done に preedit が無ければ空（初期値）になる。
   NewComp := BuildComposition(FPendingPreedit, FPendingBegin, FPendingEnd);
-  if not SameComposition(NewComp, FComposition) then
+  if not NewComp.SameAs(FComposition) then
   begin
     FComposition := NewComp;
     if Assigned(ASink) then

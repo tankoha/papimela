@@ -33,10 +33,10 @@ EGL の GL コンテキスト、ヘッドレスのダミーのビデオ、待つ
 済み（一部を含む）: #1–4、#10、#12–17（#17 の `.GL` は未）、#22、#24（`Events.Keymap`。押下状態は
 `PaPiMeLa.Events` の `TPMLKeyboardState`）、#25 の一部（マウスとタッチの状態機械は `PaPiMeLa.Events`）、
 #26–29、#31–37（#32 の `.Clipboard` は未）、#39、#41–43（#41 の残りは描画先テクスチャ、回転、9-grid / タイル）、
-#45、#46、#47、#49、#50、#64、#70。
+#45、#46、#47、#48、#49、#50、#64、#70。
 
 未着手: #5–8（Log、Properties、Atomic、Threading）、#9 Time のタイマー（待つ API は済み）、#11、#18–21、#23、#30、#38、#40、#44、
-#48、#51–63（オーディオ、ジョイスティック、ゲームパッド、ハプティクス）、#65–69。
+#51–63（オーディオ、ジョイスティック、ゲームパッド、ハプティクス）、#65–69。
 
 ## 2. 前のセッション（2026-10-02〜05）でしたこと
 
@@ -69,8 +69,8 @@ D-45（検査で `setitimer` へ `const` の record を渡し、C に NULL が�
 
 ## 3. 次の候補（おすすめ順）
 
-1. **IBus（#48、High）**（進行中。text-input-v3（#49）は 2026-10-06 に済み）、**クリップボード（#38、Medium）**: IME は papimela の看板。
-   fcitx5 以外の利用者に届く。IBus の検査環境は `tools/ibus-sandbox/`（ibus + ibus-mozc を入れた Ubuntu 24.04 の最小 rootfs を bwrap で隔離。デスクトップの fcitx5 と混ざらない）。実測の結果は `spikes/RESULTS.md` のスパイク 3
+1. **クリップボード（#38、Medium）**。IME は IBus（#48）・text-input-v3（#49）とも 2026-10-06 に済んだ。
+   IME の残り: 埋め込み候補（`TextEditingCandidates`）、IBus の ForwardKeyEvent、ibus-anthy など他のエンジンの属性の実測、GNOME / KDE での IBus 直結（§7.5 の要検証）。IBus の検査環境は `tools/ibus-sandbox/`（ibus + ibus-mozc を入れた Ubuntu 24.04 の最小 rootfs を bwrap で隔離。デスクトップの fcitx5 と混ざらない）。実測の結果は `spikes/RESULTS.md` のスパイク 3
 2. **Threading（#8、High）**: これが済むと #9 のタイマー（`AddTimer`）と `RunOnMainThread` に進める
 3. **レンダラの残り（#41）**: 描画先テクスチャ（SetRenderTarget。テクスチャごとの view が要るので、
    今レンダラに直接持っている拡大率・論理解像度のフィールドを record にまとめるところから）、回転、9-grid / タイル
@@ -102,7 +102,7 @@ Pong もすべて書き換え、今は `uses SysUtils, Math, PaPiMeLa` だけで
 表示サーバ無しで通るもの（CI と同じ）:
 
 ```bash
-for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_time test_keyboard test_textinput_v3 test_ime_keys test_backends test_umbrella; do
+for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_backends test_umbrella; do
   fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/$t test/$t.pas && ./test/$t
 done
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -oexamples/pong examples/pong.pas && ./examples/pong --selftest
@@ -112,8 +112,11 @@ env -u WAYLAND_DISPLAY LIBGL_ALWAYS_SOFTWARE=1 ./test/test_render_gles2   # Mesa
 
 **手元専用**（Wayland セッション、GPU、fcitx5 が要る。クラウドでは走らない）:
 `test_wayland_protocols`、`test_wayland_window`、`test_pointer_constraints`、`test_touch_cursor`、
-`test_fcitx_textinput`、`test_key_routing`、`test_gl_window`、`test_render_gles2` のウィンドウの区間、
+`test_fcitx_textinput`、`test_key_routing`、`test_wayland_textinput`、`test_gl_window`、`test_render_gles2` のウィンドウの区間、
 スパイク 2 本、対話のデモ（`demo_japanese_input`、`demo_pointer_constraints`、`demo_render_window`）。
+
+**IBus の隔離環境**（`tools/ibus-sandbox/setup.sh` を一度。CI でも同じ検査がランナーの上で走る）:
+`tools/ibus-sandbox/run.sh sh -c 'mkdir -p /tmp/lib && fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FU/tmp/lib -o/tmp/t test/test_ibus_textinput.pas && /tmp/t'`
 
 ### 5.1 手元で流す検査（2026-10-05〜06 に手元で流した。自動の分も対話の分もすべて合格）
 
@@ -125,7 +128,7 @@ env -u WAYLAND_DISPLAY LIBGL_ALWAYS_SOFTWARE=1 ./test/test_render_gles2   # Mesa
 cd papimela && mkdir -p lib
 B='fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib'
 # 0. 表示サーバ無しの分（CI と同じ。手元の新しい Mesa でも通るか）
-for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_time test_keyboard test_textinput_v3 test_ime_keys test_backends test_umbrella; do
+for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_backends test_umbrella; do
   $B -otest/$t test/$t.pas && ./test/$t | tail -1
 done
 # 1. 実機の Wayland（自動判定。最後の行が「結論」で終わればよい）

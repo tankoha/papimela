@@ -83,6 +83,8 @@ type
     procedure BackendLost(const AReason: String);
     // FilterKey で Deferred を返したキーの結果（ATicket は FilterKey に渡した番号）。
     procedure KeyResolved(ATicket: LongWord; AConsumed: Boolean);
+    // IME が周辺テキストを求めた。アプリから取り直して UpdateSurroundingText で送る。
+    procedure SurroundingTextRequested;
   end;
 
   { バックエンドの契約。実装は PaPiMeLa.TextInput.Backend の抽象クラス。
@@ -194,6 +196,7 @@ type
       ASelected: Integer; AHorizontal: Boolean);
     procedure BackendLost(const AReason: String);
     procedure KeyResolved(ATicket: LongWord; AConsumed: Boolean);
+    procedure SurroundingTextRequested;
 
     property BackendName: String read FSelectedName;
     property Backend    : IPMLTextInputBackend read FBackend;
@@ -546,6 +549,11 @@ begin
   Ev.Strings := ACandidates;
   Ev.Edit.FocusedSegment := ASelected;
   FQueue.Push(Ev);
+end;
+
+procedure TPMLTextInputSystem.SurroundingTextRequested;
+begin
+  PushSurroundingText;
 end;
 
 procedure TPMLTextInputSystem.KeyResolved(ATicket: LongWord; AConsumed: Boolean);

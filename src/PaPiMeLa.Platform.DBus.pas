@@ -207,6 +207,9 @@ type
     constructor Create(ABusType: LongInt = DBUS_BUS_SESSION);
     // アドレスを指定して繋ぐ（IBus の私設バスなど）。Hello（bus_register）まで済ませる。
     constructor CreateForAddress(const AAddress: String);
+    // どこにも繋がない。メッセージの組み立てと読み取りだけに使う（表示サーバも
+    // IME も無しで IBusText の読み書きを検査するため）。送る操作は使えない。
+    constructor CreateOffline;
     destructor Destroy; override;
 
     function IsConnected: Boolean;
@@ -550,6 +553,15 @@ begin
     raise EPMLTextInputError.CreateNative('D-Bus connection is nil', 0, 'dbus');
   // プロセスが D-Bus 切断で終了しないようにする。切断は EPMLBackendLost で扱う。
   FAPI.connection_set_exit_on_disconnect(FConn, 0);
+end;
+
+constructor TPMLDBusConnection.CreateOffline;
+begin
+  inherited Create;
+  FLib := TPMLDynLib.Create(LIBDBUS_NAMES);
+  LoadAPI;
+  FAPI.error_init(@FErr);
+  FConn := nil;
 end;
 
 constructor TPMLDBusConnection.CreateForAddress(const AAddress: String);

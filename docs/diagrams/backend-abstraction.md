@@ -240,6 +240,13 @@ classDiagram
     class TPMLNullTextInputBackend {
         +BackendName()
     }
+    class TPMLIBusTextInputBackend {
+        +InputContextPath
+        +PendingKeyCount
+    }
+    class TPMLIBusSegmenter {
+        +Build()
+    }
     class TPMLWaylandTextInputBackend {
         +Entered()
         +Enabled
@@ -258,6 +265,8 @@ classDiagram
     IPMLTextInputBackend <|.. TPMLTextInputBackend
     TPMLTextInputBackend <|-- TPMLFcitxTextInputBackend
     TPMLTextInputBackend <|-- TPMLNullTextInputBackend
+    TPMLTextInputBackend <|-- TPMLIBusTextInputBackend
+    TPMLIBusTextInputBackend ..> TPMLIBusSegmenter : attributes to segments
     TPMLTextInputBackend <|-- TPMLWaylandTextInputBackend
     TPMLWaylandTextInputBackend ..> IPMLWaylandSeatProvider : uses (text-input-v3)
 
