@@ -41,6 +41,10 @@ uses
   PaPiMeLa.Video,
   PaPiMeLa.Events;
 
+const
+  // IME がキーに返信しないとき、消費されなかったものとして出すまでの時間。
+  PML_IME_KEY_TIMEOUT_NS = Int64(2000) * 1000 * 1000;
+
 type
   TPMLTextInputCapability = (
     Segments,           // 文節境界を提供できる
@@ -77,6 +81,8 @@ type
     procedure CandidatesChanged(const ACandidates: TPMLStringArray;
       ASelected: Integer; AHorizontal: Boolean);
     procedure BackendLost(const AReason: String);
+    // FilterKey で Deferred を返したキーの結果（ATicket は FilterKey に渡した番号）。
+    procedure KeyResolved(ATicket: LongWord; AConsumed: Boolean);
   end;
 
   { バックエンドの契約。実装は PaPiMeLa.TextInput.Backend の抽象クラス。
@@ -98,7 +104,9 @@ type
     procedure ResetComposition;
     procedure UpdateSurroundingText(const AText: String; ACursorByte, AAnchorByte: Integer);
     procedure UpdateCursorRect(const ARect: TPMLRect; AScale: Double);
-    function  FilterKey(const AKey: TPMLKeyEventData; AIsRelease: Boolean): TPMLKeyFilterResult;
+    // Deferred を返したら、結果が出たときに Sink.KeyResolved(ATicket, ...) を呼ぶ。
+    function  FilterKey(const AKey: TPMLKeyEventData; AIsRelease: Boolean;
+      ATicket: LongWord): TPMLKeyFilterResult;
     procedure Pump(ATimeoutMs: Integer);
   end;
 
@@ -170,7 +178,8 @@ type
     procedure Stop;
     // IPMLKeyFilter。キーを IME に通す。Consumed なら KeyDown / KeyUp を積んではならない。
     function  KeyFilterActive: Boolean;
-    function  FilterKey(const AKey: TPMLKeyEventData; AIsRelease: Boolean): TPMLKeyFilterResult;
+    function  FilterKey(const AKey: TPMLKeyEventData; AIsRelease: Boolean;
+      ATicket: LongWord): TPMLKeyFilterResult;
     procedure NotifyFocus(AWindowID: TPMLWindowID; AGained: Boolean);
 
     // IPMLEventPumpSource
@@ -184,6 +193,7 @@ type
     procedure CandidatesChanged(const ACandidates: TPMLStringArray;
       ASelected: Integer; AHorizontal: Boolean);
     procedure BackendLost(const AReason: String);
+    procedure KeyResolved(ATicket: LongWord; AConsumed: Boolean);
 
     property BackendName: String read FSelectedName;
     property Backend    : IPMLTextInputBackend read FBackend;
@@ -351,6 +361,9 @@ end;
 
 procedure TPMLTextInputSystem.PumpEvents(ATimeoutMs: Integer);
 begin
+  // IME が返信しないキーを打ち切る（固まった IME でキーが失われないように）。
+  if Assigned(FQueue.Keyboard) then
+    FQueue.Keyboard.ExpireDeferred(PMLNowNS, PML_IME_KEY_TIMEOUT_NS);
   if FResendArmed then
   begin
     FResendArmed := False;
@@ -386,6 +399,9 @@ begin
   FFocused := False;
   FResendRequested := False;
   FResendArmed := False;
+  // 返信を待っていたキーは、IME 抜きで出す（文字は出さない）。
+  if Assigned(FQueue.Keyboard) then
+    FQueue.Keyboard.FlushDeferred;
   FreeAndNil(FSession);
 end;
 
@@ -428,13 +444,13 @@ begin
 end;
 
 function TPMLTextInputSystem.FilterKey(const AKey: TPMLKeyEventData;
-  AIsRelease: Boolean): TPMLKeyFilterResult;
+  AIsRelease: Boolean; ATicket: LongWord): TPMLKeyFilterResult;
 begin
   if not Assigned(FSession) or not Assigned(FBackend) then
     Exit(TPMLKeyFilterResult.PassThrough);
   if not (TPMLTextInputCapability.KeyFilter in FBackend.Capabilities) then
     Exit(TPMLKeyFilterResult.PassThrough);
-  Result := FBackend.FilterKey(AKey, AIsRelease);
+  Result := FBackend.FilterKey(AKey, AIsRelease, ATicket);
 end;
 
 procedure TPMLTextInputSystem.PushComposition(const AComposition: TPMLComposition);
@@ -532,9 +548,18 @@ begin
   FQueue.Push(Ev);
 end;
 
+procedure TPMLTextInputSystem.KeyResolved(ATicket: LongWord; AConsumed: Boolean);
+begin
+  if Assigned(FQueue.Keyboard) then
+    FQueue.Keyboard.ResolveKey(ATicket, AConsumed);
+end;
+
 procedure TPMLTextInputSystem.BackendLost(const AReason: String);
 begin
   // §5.2: まずイベントで穏やかに知らせ、次に例外で強制的に知らせる。
+  // 返信を待っていたキーは、もう返信が来ないので IME 抜きで出す。
+  if Assigned(FQueue.Keyboard) then
+    FQueue.Keyboard.FlushDeferred;
   FQueue.PushSimple(TPMLEventKind.BackendLost);
   raise EPMLBackendLost.CreateNative('text input backend lost', 0,
     FSelectedName, AReason);

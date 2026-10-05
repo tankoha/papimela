@@ -27,6 +27,7 @@ uses
   PaPiMeLa.Types,
   PaPiMeLa.Errors,
   PaPiMeLa.Events,
+  PaPiMeLa.Events.Keymap,
   PaPiMeLa.Video,
   PaPiMeLa.TextInput,
   PaPiMeLa.Core,
@@ -62,6 +63,7 @@ var
   Editor   : TFakeEditor;
   Failures : Integer = 0;
   KeyDowns : Integer = 0;
+  KeyUps   : Integer = 0;
   TextInputs: Integer = 0;
   Editings : Integer = 0;
   MaxSegs  : Integer = 0;
@@ -86,6 +88,8 @@ begin
     case Ev.Kind of
       TPMLEventKind.KeyDown:
         Inc(KeyDowns);
+      TPMLEventKind.KeyUp:
+        Inc(KeyUps);
       TPMLEventKind.TextEditing:
         begin
           Inc(Editings);
@@ -108,6 +112,7 @@ begin
   FillChar(K, SizeOf(K), 0);
   K.Keysym := AKeysym;
   K.Raw := AEvdevCode + 8;
+  K.Scancode := PMLScancodeFromEvdev(AEvdevCode);   // シートと同じ（KeyUp の規則がスキャンコードで働く）
   K.Modifiers := [];
   Ctx.Events.Keyboard.SendKey(1, K, True, AText);
   Ctx.Events.Keyboard.SendKey(1, K, False, '');
@@ -166,7 +171,7 @@ begin
 
       WriteLn;
       WriteLn('4. ローマ字を流す（IME が消費するはず）');
-      KeyDowns := 0; TextInputs := 0; Editings := 0;
+      KeyDowns := 0; KeyUps := 0; TextInputs := 0; Editings := 0;
       ConsumedBefore := Ctx.Events.Keyboard.ConsumedCount;
       for I := Low(Keys) to High(Keys) do
         SendKey(Keys[I][0], Keys[I][1], Chr(Keys[I][0]));
@@ -179,6 +184,7 @@ begin
       Check(Ctx.Events.Keyboard.ConsumedCount - ConsumedBefore > 0,
         'IME がキーを消費した');
       Check(KeyDowns = 0, '消費されたキーは KeyDown にならない');
+      Check(KeyUps = 0, Format('KeyDown を出さなかったキーの KeyUp も出さない（KeyUp %d 件）', [KeyUps]));
       Check(TextInputs = 0, '消費されたキーは TextInput にならない（変換中なので）');
       Check(Editings > 0, Format('TextEditing が %d 件届いた', [Editings]));
 

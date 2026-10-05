@@ -172,8 +172,8 @@ begin
   K.Raw := AKeycode;
   K.Modifiers := [];
   // IME が消費したキーは KeyDown / KeyUp を積まない（§7.9）。
-  Ctx.TextInput.FilterKey(K, False);
-  Ctx.TextInput.FilterKey(K, True);
+  Ctx.TextInput.FilterKey(K, False, 0);
+  Ctx.TextInput.FilterKey(K, True, 0);
   DrainEvents;
 end;
 

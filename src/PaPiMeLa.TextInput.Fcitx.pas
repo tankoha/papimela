@@ -86,7 +86,8 @@ type
     procedure ResetComposition; override;
     procedure UpdateSurroundingText(const AText: String; ACursorByte, AAnchorByte: Integer); override;
     procedure UpdateCursorRect(const ARect: TPMLRect; AScale: Double); override;
-    function  FilterKey(const AKey: TPMLKeyEventData; AIsRelease: Boolean): TPMLKeyFilterResult; override;
+    function  FilterKey(const AKey: TPMLKeyEventData; AIsRelease: Boolean;
+      ATicket: LongWord): TPMLKeyFilterResult; override;
     procedure Pump(ATimeoutMs: Integer); override;
 
     // 直近の「無視したが記録した」エラー。空なら何も起きていない。
@@ -374,7 +375,8 @@ begin
   if TPMLKeyModifier.Super    in AMods then Result := Result or X_SUPER;
 end;
 
-function TPMLFcitxTextInputBackend.FilterKey(const AKey: TPMLKeyEventData; AIsRelease: Boolean): TPMLKeyFilterResult;
+function TPMLFcitxTextInputBackend.FilterKey(const AKey: TPMLKeyEventData; AIsRelease: Boolean;
+  ATicket: LongWord): TPMLKeyFilterResult;
 var
   Msg, Reply: PDBusMessage;
   W: TPMLDBusWriter;

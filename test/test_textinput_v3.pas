@@ -47,6 +47,7 @@ type
     procedure CandidatesChanged(const ACandidates: TPMLStringArray;
       ASelected: Integer; AHorizontal: Boolean);
     procedure BackendLost(const AReason: String);
+    procedure KeyResolved(ATicket: LongWord; AConsumed: Boolean);
   end;
 
   { 周辺テキストを送り直す時機を見るためのバックエンド。Pump で 1 回だけ確定を流す。 }
@@ -144,6 +145,11 @@ end;
 function TEditor.GetCursorRect: TPMLRect;
 begin
   Result := TPMLRect.Make(0, 0, 2, 18);
+end;
+
+procedure TRecordingSink.KeyResolved(ATicket: LongWord; AConsumed: Boolean);
+begin
+  Log := Log + 'R';
 end;
 
 procedure Check(ACondition: Boolean; const ALabel: String);

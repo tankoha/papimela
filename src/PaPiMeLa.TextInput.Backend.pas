@@ -47,7 +47,8 @@ type
     procedure ResetComposition; virtual;
     procedure UpdateSurroundingText(const AText: String; ACursorByte, AAnchorByte: Integer); virtual;
     procedure UpdateCursorRect(const ARect: TPMLRect; AScale: Double); virtual;
-    function  FilterKey(const AKey: TPMLKeyEventData; AIsRelease: Boolean): TPMLKeyFilterResult; virtual;
+    function  FilterKey(const AKey: TPMLKeyEventData; AIsRelease: Boolean;
+      ATicket: LongWord): TPMLKeyFilterResult; virtual;
     procedure Pump(ATimeoutMs: Integer); virtual;
   end;
 
@@ -119,7 +120,8 @@ procedure TPMLTextInputBackend.UpdateCursorRect(const ARect: TPMLRect; AScale: D
 begin
 end;
 
-function TPMLTextInputBackend.FilterKey(const AKey: TPMLKeyEventData; AIsRelease: Boolean): TPMLKeyFilterResult;
+function TPMLTextInputBackend.FilterKey(const AKey: TPMLKeyEventData; AIsRelease: Boolean;
+  ATicket: LongWord): TPMLKeyFilterResult;
 begin
   Result := TPMLKeyFilterResult.PassThrough;
 end;

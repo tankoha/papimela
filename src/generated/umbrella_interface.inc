@@ -91,6 +91,8 @@ type
   IPMLEventPumpSource = PaPiMeLa.Events.IPMLEventPumpSource;
   IPMLEventWatch = PaPiMeLa.Events.IPMLEventWatch;
   IPMLKeyFilter = PaPiMeLa.Events.IPMLKeyFilter;
+  TPMLDeferredKey = PaPiMeLa.Events.TPMLDeferredKey;
+  TPMLDeferredKeyQueue = PaPiMeLa.Events.TPMLDeferredKeyQueue;
   TPMLKeyboardState = PaPiMeLa.Events.TPMLKeyboardState;
   TPMLMouseState = PaPiMeLa.Events.TPMLMouseState;
   TPMLTouchState = PaPiMeLa.Events.TPMLTouchState;
@@ -615,6 +617,8 @@ type
   IPMLTextInputBackend = PaPiMeLa.TextInput.IPMLTextInputBackend;
   TPMLTextInputSession = PaPiMeLa.TextInput.TPMLTextInputSession;
   TPMLTextInputSystem = PaPiMeLa.TextInput.TPMLTextInputSystem;
+const
+  PML_IME_KEY_TIMEOUT_NS = PaPiMeLa.TextInput.PML_IME_KEY_TIMEOUT_NS;
 
 // ---- PaPiMeLa.Time
 type

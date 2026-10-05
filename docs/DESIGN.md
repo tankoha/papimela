@@ -980,7 +980,11 @@ TPMLKeyboardState.SendKey(Window, TS, Scancode, Keycode, Down, Repeat)
 ```
 
 - text-input-v3 バックエンドの `FilterKey` は常に `PassThrough`（コンポジタが IME 処理済みのキーだけを送ってくるため）。
-- IBus / Fcitx バックエンドは `Deferred` を返す。`TPMLKeyboardState` は Deferred 中のキーとその後に来たキーを順序を保って保留し、返信で解決する。保留中に `WindowFocusLost` が来たら全部 `PassThrough` で解放する。
+- IBus バックエンドは `Deferred` を返す（Fcitx は今は同期で `Consumed` / `PassThrough`）。`TPMLKeyboardState` は Deferred 中のキーとその後に来たキーを順序を保って保留し（`TPMLDeferredKeyQueue`）、返信で解決する。**実装で決めたこと**（2026-10-06）:
+  - キーごとに番号（Ticket）を振って `FilterKey` に渡し、バックエンドは `Sink.KeyResolved(Ticket, Consumed)` で答える。返信の順番が入れ替わっても届いた順に出す。すぐ結果の出たキーも、待っているキーがあればその後ろに並べる
+  - 保留中に `WindowFocusLost` が来たとき、およびセッションを止めたときは、全部を消費されなかったものとして出すが、**文字（TextInput）は出さない**（IME 向けだった生のローマ字をアプリへ入れない）。後から来た返信は番号が合わないので捨てる
+  - 返信が `PML_IME_KEY_TIMEOUT_NS`（2 秒）来なければ、消費されなかったもの（文字も出す）とする。IME が固まってもキーが失われない。`TPMLTextInputSystem` の Pump が `ExpireDeferred` を呼ぶ
+  - **KeyUp は KeyDown を出したキーにだけ出す**（D-47）。IME は押すほうを消費しても離すほうは消費しないことが多い（fcitx5-mozc・ibus-mozc とも実測）。KeyDown を出した後で離すほうが消費されても KeyUp は出す
 - **修飾キー単独押下**（Shift 等）も IBus に送る必要がある（エンジンがモード切替に使う）。
 - キーリピートは Wayland 側（`wl_keyboard.repeat_info`）で生成されるので、リピートキーも同じ経路を通る。
 - **二重入力の防止**: IBus 直結を選んだときは、Wayland text-input-v3 を**有効化しない**（`zwp_text_input_v3.enable` を送らない）。GNOME（mutter）はそれ自身が IBus クライアントであり、text-input-v3 を有効化したサーフェスに対してだけ IBus を仲介する。無効なら仲介しないため、アプリの直結と競合しない **[要検証: GNOME 46+ / KDE Plasma 6 + fcitx5 / Sway + fcitx5 の 3 環境で、IBus 直結時に text-input-v3 を無効にしたまま IME が動くこと。GTK4 アプリで `GTK_IM_MODULE=ibus` を指定した場合と同じ状況なので動く見込み]**。
