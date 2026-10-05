@@ -156,6 +156,16 @@ type
       read FOnGrabsChanged write FOnGrabsChanged;
   end;
 
+  { Wayland の接続とウィンドウのサーフェスを IME 軸へ貸す（§3.6、§7.7）。
+    Wayland のビデオバックエンドが実装する。text-input-v3 のバックエンドは
+    これだけを見るので、ビデオのバックエンドの実体（Video.Wayland）を参照しない。 }
+  IPMLWaylandSeatProvider = interface
+    ['{6C0E2B7D-91A4-4F35-B8E2-3D57A1C9F046}']
+    function WaylandConnection: TPMLWaylandConnection;
+    // AWindow が Wayland のウィンドウでなければ nil。
+    function WaylandSurfaceOf(AWindow: TPMLWindowBackend): Pwl_surface;
+  end;
+
 implementation
 
 { TPMLWaylandOutput }

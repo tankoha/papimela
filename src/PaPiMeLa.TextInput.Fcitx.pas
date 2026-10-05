@@ -48,6 +48,7 @@ uses
   PaPiMeLa.Core.Base,
   PaPiMeLa.Events,
   PaPiMeLa.Platform.DBus,
+  PaPiMeLa.Video,
   PaPiMeLa.TextInput,
   PaPiMeLa.TextInput.Backend;
 
@@ -79,7 +80,8 @@ type
     function  Capabilities: TPMLTextInputCapabilities; override;
     function  Connect(ASink: IPMLTextInputSink): Boolean; override;
     procedure Disconnect; override;
-    procedure Activate(AType: TPMLTextInputType; AHints: TPMLTextInputHints); override;
+    procedure Activate(AWindow: TPMLWindow; AType: TPMLTextInputType;
+      AHints: TPMLTextInputHints); override;
     procedure Deactivate; override;
     procedure ResetComposition; override;
     procedure UpdateSurroundingText(const AText: String; ACursorByte, AAnchorByte: Integer); override;
@@ -251,8 +253,8 @@ begin
   inherited Disconnect;
 end;
 
-procedure TPMLFcitxTextInputBackend.Activate(AType: TPMLTextInputType;
-  AHints: TPMLTextInputHints);
+procedure TPMLFcitxTextInputBackend.Activate(AWindow: TPMLWindow;
+  AType: TPMLTextInputType; AHints: TPMLTextInputHints);
 begin
   if not Assigned(FConn) then
     Exit;

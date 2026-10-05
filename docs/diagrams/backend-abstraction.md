@@ -219,6 +219,7 @@ classDiagram
         <<interface>>
         +BackendName()
         +Capabilities()
+        +AttachVideo()
         +Connect()
         +Disconnect()
         +Activate()
@@ -239,6 +240,15 @@ classDiagram
     class TPMLNullTextInputBackend {
         +BackendName()
     }
+    class TPMLWaylandTextInputBackend {
+        +Entered()
+        +Enabled
+    }
+    class IPMLWaylandSeatProvider {
+        <<interface>>
+        +WaylandConnection()
+        +WaylandSurfaceOf()
+    }
     class IPMLEventPumpSource {
         <<interface>>
         +PumpSourceName()
@@ -248,6 +258,8 @@ classDiagram
     IPMLTextInputBackend <|.. TPMLTextInputBackend
     TPMLTextInputBackend <|-- TPMLFcitxTextInputBackend
     TPMLTextInputBackend <|-- TPMLNullTextInputBackend
+    TPMLTextInputBackend <|-- TPMLWaylandTextInputBackend
+    TPMLWaylandTextInputBackend ..> IPMLWaylandSeatProvider : uses (text-input-v3)
 
     IPMLTextInputSink <|.. TPMLTextInputSystem
     IPMLEventPumpSource <|.. TPMLTextInputSystem

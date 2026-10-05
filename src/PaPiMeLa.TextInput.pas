@@ -87,9 +87,13 @@ type
     ['{B3F6A012-5E84-4C79-A1D3-60B85F2E9C47}']
     function  BackendName: String;
     function  Capabilities: TPMLTextInputCapabilities;
+    // Connect の前に呼ばれる。ビデオのサブシステム（無ければ nil）。text-input-v3 のように
+    // ウィンドウの仕組みに乗る IME は、これでウィンドウとその接続に触れる。
+    procedure AttachVideo(AVideo: TPMLVideoSystem);
     function  Connect(ASink: IPMLTextInputSink): Boolean;
     procedure Disconnect;
-    procedure Activate(AType: TPMLTextInputType; AHints: TPMLTextInputHints);
+    // AWindow はセッションのウィンドウ（nil もありうる）。
+    procedure Activate(AWindow: TPMLWindow; AType: TPMLTextInputType; AHints: TPMLTextInputHints);
     procedure Deactivate;
     procedure ResetComposition;
     procedure UpdateSurroundingText(const AText: String; ACursorByte, AAnchorByte: Integer);
@@ -146,11 +150,18 @@ type
     FSession      : TPMLTextInputSession;
     FSelectedName : String;
     FFocused      : Boolean;
+    // 確定・周辺削除の後の周辺テキストの送り直し（D-46）。Requested は通知を
+    // 受けた Pump で立ち、その Pump の終わりに Armed へ移り、次の Pump の
+    // 始めに送る。間にアプリが確定をバッファへ取り込む。
+    FResendRequested: Boolean;
+    FResendArmed    : Boolean;
     procedure PushSurroundingText;
     procedure PushComposition(const AComposition: TPMLComposition);
   public
+    // AVideo はバックエンドへ渡す（AttachVideo）。ビデオを使わないなら nil。
     constructor Create(AContextRef: TObject; AOwner: TPMLObject;
-      AQueue: TPMLEventQueue; const APreferred: String = '');
+      AQueue: TPMLEventQueue; const APreferred: String = '';
+      AVideo: TPMLVideoSystem = nil);
     destructor Destroy; override;
 
     function  Start(AWindow: TPMLWindow; AClient: IPMLTextInputClient;
@@ -176,6 +187,8 @@ type
 
     property BackendName: String read FSelectedName;
     property Backend    : IPMLTextInputBackend read FBackend;
+    // テストと診断用。バックエンドの実体（型を見て固有の状態を読む）。
+    property BackendInstance: TObject read FBackendObject;
     property Session    : TPMLTextInputSession read FSession;
   end;
 
@@ -252,7 +265,7 @@ end;
 { TPMLTextInputSystem }
 
 constructor TPMLTextInputSystem.Create(AContextRef: TObject; AOwner: TPMLObject;
-  AQueue: TPMLEventQueue; const APreferred: String);
+  AQueue: TPMLEventQueue; const APreferred: String; AVideo: TPMLVideoSystem);
 var
   Wanted: String;
   Names: TStringArray;
@@ -265,6 +278,7 @@ var
     Result := False;
     if ACandidate = nil then
       Exit;
+    ACandidate.AttachVideo(AVideo);
     if not ACandidate.Connect(Self as IPMLTextInputSink) then
     begin
       ACandidate.Free;
@@ -337,8 +351,18 @@ end;
 
 procedure TPMLTextInputSystem.PumpEvents(ATimeoutMs: Integer);
 begin
+  if FResendArmed then
+  begin
+    FResendArmed := False;
+    PushSurroundingText;
+  end;
   if Assigned(FBackend) then
     FBackend.Pump(ATimeoutMs);
+  if FResendRequested then
+  begin
+    FResendRequested := False;
+    FResendArmed := True;
+  end;
 end;
 
 function TPMLTextInputSystem.Start(AWindow: TPMLWindow; AClient: IPMLTextInputClient;
@@ -348,7 +372,7 @@ begin
   if Assigned(FSession) then
     Stop;
   FSession := TPMLTextInputSession.Create(Self, AWindow, AClient, AType, AHints);
-  FBackend.Activate(AType, AHints);
+  FBackend.Activate(AWindow, AType, AHints);
   FFocused := True;
   PushSurroundingText;
   Result := FSession;
@@ -360,6 +384,8 @@ begin
     Exit;
   FBackend.Deactivate;
   FFocused := False;
+  FResendRequested := False;
+  FResendArmed := False;
   FreeAndNil(FSession);
 end;
 
@@ -388,7 +414,7 @@ begin
   FFocused := AGained;
   if AGained then
   begin
-    FBackend.Activate(FSession.InputType, FSession.Hints);
+    FBackend.Activate(FSession.Window, FSession.InputType, FSession.Hints);
     PushSurroundingText;
   end
   else
@@ -468,10 +494,10 @@ begin
   Ev.Segments := nil;
   Ev.Strings := nil;
   FQueue.Push(Ev);
-  // 確定後はアプリのバッファが変わっているので周辺テキストを送り直す（§7.3）。
-  // アプリは同じ Pump 内で TextInput を処理するので、ここでの再送は
-  // 次の Pump 以降に効く。
-  PushSurroundingText;
+  // 確定後はアプリのバッファが変わるので周辺テキストを送り直す（§7.3）。
+  // ただしここで取り直すと、アプリはまだ TextInput を取り込んでいないので
+  // 古いテキストになる（D-46）。アプリが Poll した後の、次の Pump で送る。
+  FResendRequested := True;
 end;
 
 procedure TPMLTextInputSystem.DeleteSurroundingRequested(const AData: TPMLDeleteSurroundingData);
@@ -487,6 +513,7 @@ begin
   Ev.Strings := nil;
   Ev.DeleteSurrounding := AData;
   FQueue.Push(Ev);
+  FResendRequested := True;
 end;
 
 procedure TPMLTextInputSystem.CandidatesChanged(const ACandidates: TPMLStringArray;

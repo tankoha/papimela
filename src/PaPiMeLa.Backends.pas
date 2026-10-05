@@ -30,6 +30,7 @@ uses
   PaPiMeLa.Video.Wayland,       // ビデオ 'wayland'
   PaPiMeLa.Video.Dummy,         // ビデオ 'dummy'（表示サーバ無し。既定では最後）
   PaPiMeLa.TextInput.Fcitx,     // IME 'fcitx'
+  PaPiMeLa.TextInput.WaylandTI,  // IME 'wayland'（text-input-v3。Fcitx に繋がらないとき）
   PaPiMeLa.Render.GLES2;        // レンダラ 'gles2'
 
 implementation

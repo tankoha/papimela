@@ -27,18 +27,22 @@ uses
   SysUtils,
   PaPiMeLa.Types,
   PaPiMeLa.Events,
+  PaPiMeLa.Video,
   PaPiMeLa.TextInput;
 
 type
   TPMLTextInputBackend = class abstract(TObject, IPMLTextInputBackend)
   strict protected
     FSink: IPMLTextInputSink;
+    FVideo: TPMLVideoSystem;     // 借りている。AttachVideo で受け取る（nil もありうる）
   public
     function  BackendName: String; virtual; abstract;
     function  Capabilities: TPMLTextInputCapabilities; virtual;
+    procedure AttachVideo(AVideo: TPMLVideoSystem); virtual;
     function  Connect(ASink: IPMLTextInputSink): Boolean; virtual; abstract;
     procedure Disconnect; virtual;
-    procedure Activate(AType: TPMLTextInputType; AHints: TPMLTextInputHints); virtual;
+    procedure Activate(AWindow: TPMLWindow; AType: TPMLTextInputType;
+      AHints: TPMLTextInputHints); virtual;
     procedure Deactivate; virtual;
     procedure ResetComposition; virtual;
     procedure UpdateSurroundingText(const AText: String; ACursorByte, AAnchorByte: Integer); virtual;
@@ -88,7 +92,13 @@ begin
   FSink := nil;
 end;
 
-procedure TPMLTextInputBackend.Activate(AType: TPMLTextInputType; AHints: TPMLTextInputHints);
+procedure TPMLTextInputBackend.AttachVideo(AVideo: TPMLVideoSystem);
+begin
+  FVideo := AVideo;
+end;
+
+procedure TPMLTextInputBackend.Activate(AWindow: TPMLWindow; AType: TPMLTextInputType;
+  AHints: TPMLTextInputHints);
 begin
 end;
 

@@ -440,7 +440,7 @@ type
 ```
 
 - IME バックエンドは **ビデオバックエンドの型を知らない**。フォーカスウィンドウ・カーソル矩形・キーイベントは `TPMLTextInputSystem` が公開層の型（`TPMLWindow`、`TPMLRect`、`TPMLKeyEventData`）で渡す。
-- text-input-v3 バックエンド（`PaPiMeLa.TextInput.WaylandTI`）だけが `wl_seat` と `wl_surface` を必要とする。これは `PaPiMeLa.Video.Wayland.Types` の `IPMLWaylandSeatProvider`（`GetDisplay: Pwl_display; GetSeats: array of Pwl_seat; GetSurfaceOf(Window): Pwl_surface`）で受け取り、Wayland ビデオバックエンドがこのインターフェースを実装する。他のビデオバックエンド下では WaylandTI は `Connect` で `False` を返して選ばれない。
+- text-input-v3 バックエンド（`PaPiMeLa.TextInput.WaylandTI`）だけが `wl_seat` と `wl_surface` を必要とする。これは `PaPiMeLa.Video.Wayland.Types` の `IPMLWaylandSeatProvider`（`WaylandConnection: TPMLWaylandConnection`（display・シート・`zwp_text_input_manager_v3` を持つ）、`WaylandSurfaceOf(WindowBackend): Pwl_surface`）で受け取り、Wayland ビデオバックエンドがこのインターフェースを実装する。他のビデオバックエンド下では WaylandTI は `Connect` で `False` を返して選ばれない。
 - 選択は `TPMLTextInputSystem` が起動時と `PAPIMELA_IME` 環境変数で行う（7.6）。
 
 ### 3.7 将来の軸の追加
@@ -1005,6 +1005,15 @@ TPMLTextInputSystem.SelectBackend:
 - `preedit_string` / `commit_string` / `delete_surrounding_text` を受けて `done(serial)` で**まとめて適用**する（プロトコルの規定。SDL は `has_preedit` フラグで部分的にしか守っていない）。`done` 時の適用順序: 周辺削除 → 確定 → 変換中テキスト、の順でイベント発行。これは仕様書の "The application must proceed by evaluating the changes in the following order: 1. Replace existing preedit string with the cursor. 2. Delete requested surrounding text. 3. Insert commit string with the cursor at its end. 4. Calculate surrounding text to send. 5. Insert new preedit text in cursor position. 6. Place cursor inside preedit text." に従う。
 - `preedit_string` の `cursor_begin` / `cursor_end` から単一の `Focused` 文節を作り、残りは `Unconverted`。`SegmentsReliable = False`。
 - `set_surrounding_text` は 4000 バイト制限があるため、`Client.GetSurroundingText` の結果をカーソルを中心に文字境界で切り詰める。
+- **実装で決めたこと**（2026-10-06）:
+  - バックエンドは `AttachVideo` でビデオのサブシステムを受け取り、その実体が `IPMLWaylandSeatProvider` を実装していれば繋がる（`WaylandConnection`、`WaylandSurfaceOf(WindowBackend)`）。`Activate` はセッションのウィンドウを受け取る
+  - `enable` は「Activate されている」かつ「enter を受けたサーフェスがセッションのウィンドウ」のときだけ送る。enable は状態を初期化するので、入力の種類・周辺テキスト・カーソル矩形を同じ `commit` で送り直す。leave の後はコンポジタが要求を無視するので disable は送らない
+  - 要求は溜めておき、バックエンドの `Pump` で 1 回の `commit` にまとめる（Activate の直後に System が周辺テキストを送るので、その場で commit すると 2 回になる）
+  - `cursor_begin = cursor_end` は線のカーソル（文節は全体 1 つ）、違えば範囲を `Focused` にして前後を `Unconverted`、線のカーソルは描かない（`CursorByte = -1`）。プロトコルの「同じなら線、違えば強調」に従う
+  - 周辺削除のバイト数は、最後に送った（切り詰めた）周辺テキストの上で文字数へ直す。送ったテキストの外へはみ出す分と、文字の途中までの分は切り捨てる
+  - 周辺テキストの変更理由は、直前の done が確定か削除を適用していれば `input_method`、それ以外は `other`
+  - v3 に変換のリセット要求は無い。`ResetComposition` は手元の変換中テキストを消し、周辺テキストを `other` で送り直すだけ
+  - 確定・周辺削除の後の周辺テキストの送り直しは、通知した Pump の**次の** Pump で行う（D-46。全バックエンド共通で `TPMLTextInputSystem` が行う）
 
 ### 7.8 Fcitx5 バックエンド（`PaPiMeLa.TextInput.Fcitx`、P2）
 
@@ -1273,7 +1282,7 @@ wayland-scanner の Pascal 版。C の `wayland-scanner` が生成する `*-clie
 | 46 | `PaPiMeLa.TextInput`（公開モデル、`TPMLTextInputSystem`、`TPMLTextInputSession`、バックエンド選択） | — | 中 | 2, 4, 22, 24 | P1 | クリーンルーム | **High** | Opus | 7.3 / 7.6。`IPMLTextInputClient` の呼び出しタイミング、周辺削除→確定の順序保証、`IPMLFocusObserver`。**本プロジェクトの中核** |
 | 47 | `PaPiMeLa.TextInput.Backend`、`.TextInput.Null` | — | 小 | 46 | P1 | クリーンルーム | **High** | Opus | 3.6 の抽象クラス、`IPMLTextInputSink`、能力集合。#46 と同一担当で同時に設計する |
 | 48 | `PaPiMeLa.TextInput.IBus` | （`core/linux/SDL_ibus.c` (743) は接続手順の参考のみ。バグあり: 115 行目） | 大 | 16, 46, 47 | P1 | クリーンルーム | **High** | Opus | 7.4。アドレス解決と inotify 追従、`IBusText` の完全解析、`TPMLIBusSegmenter`、非同期 `ProcessKeyEvent`、`SetSurroundingText` / `DeleteSurroundingText`、`SetCursorLocationRelative`、埋め込み候補。**未解決 1〜4 の実機検証を伴う** |
-| 49 | `PaPiMeLa.TextInput.WaylandTI` | （`SDL_waylandevents.c` の `text_input_*` は参考のみ） | 中 | 14, 46, 47, `Video.Wayland.Types` | P1 | クリーンルーム | **High** | Opus | 7.7。`done` での一括適用順序、`set_surrounding_text` の 4000 バイト切り詰め、`enter` / `leave` によるウィンドウ判定。IBus 直結時は `enable` を送らない |
+| 49 | `PaPiMeLa.TextInput.WaylandTI` | （`SDL_waylandevents.c` の `text_input_*` は参考のみ） | 中 | 14, 46, 47, `Video.Wayland.Types` | P1 | クリーンルーム | **High** | Opus | 7.7。`done` での一括適用順序、`set_surrounding_text` の 4000 バイト切り詰め、`enter` / `leave` によるウィンドウ判定。IBus 直結時は `enable` を送らない。**実装済み（Opus、2026-10-06）**: 受信側の状態を `TPMLTextInputV3State` に分けて表示サーバ無しで検査（T-27）、手順は labwc で確認（T-28）。シートとサーフェスは `IPMLWaylandSeatProvider` で借りる。要求は Pump で 1 回の commit にまとめる |
 | 50 | `PaPiMeLa.TextInput.Fcitx` | （`core/linux/SDL_fcitx.c` (441) は参考のみ） | 中 | 16, 46, 47 | P2 | クリーンルーム | Medium | Sonnet | 7.8。#48 を手本に。`UpdateFormattedPreedit` のフラグ → 文節状態 |
 | 51 | `PaPiMeLa.Audio.Backend`、`PaPiMeLa.Audio`（公開 API） | `audio/SDL_audio.c` (2765)、`SDL_sysaudio.h`、`SDL_audiodev.c` | 大 | 2, 8, 22, 53 | P2 | 移植 | **High** | Opus | 物理/論理デバイス、デバイススレッド、bind、ロック順序、破棄とコールバックの競合、hotplug イベント。全オーディオバックエンドの土台 |
 | 52 | `PaPiMeLa.Audio.Convert` | `SDL_audiocvt.c` (1590)、`SDL_audiotypecvt.c` (986)、`SDL_audioresample.c` (706) | 大 | 3 | P2 | 移植 | Low | qwen | スカラー版のみ。リサンプラの係数表はそのまま |

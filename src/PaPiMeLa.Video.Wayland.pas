@@ -69,7 +69,7 @@ type
     function GetDesktopMode: TPMLDisplayMode; override;
   end;
 
-  TPMLWaylandVideoBackend = class(TPMLVideoBackend)
+  TPMLWaylandVideoBackend = class(TPMLVideoBackend, IPMLWaylandSeatProvider)
   strict private
     FConn : TPMLWaylandConnection;
     FQueue: TPMLEventQueue;
@@ -94,7 +94,10 @@ type
     procedure WaitEvents(ATimeoutMs: Integer); override;
     procedure WakeEventLoop; override;
 
-    // IME バックエンド（TextInput.WaylandTI、#49）が seat を得るために使う。
+    // IPMLWaylandSeatProvider。IME バックエンド（TextInput.WaylandTI、#49）が使う。
+    function WaylandConnection: TPMLWaylandConnection;
+    function WaylandSurfaceOf(AWindow: TPMLWindowBackend): Pwl_surface;
+
     property Connection: TPMLWaylandConnection read FConn;
     // テストと診断用。拘束の状態はシートが持つ。
     property Seats: TPMLWaylandSeats read FSeats;
@@ -356,6 +359,21 @@ begin
   // flush だけ行い、待ちは poll のタイムアウトで抜ける。
   if FConn.Display <> nil then
     wl_display_flush(FConn.Display);
+end;
+
+{ IPMLWaylandSeatProvider }
+
+function TPMLWaylandVideoBackend.WaylandConnection: TPMLWaylandConnection;
+begin
+  Result := FConn;
+end;
+
+function TPMLWaylandVideoBackend.WaylandSurfaceOf(AWindow: TPMLWindowBackend): Pwl_surface;
+begin
+  if AWindow is TPMLWaylandWindowBackend then
+    Result := TPMLWaylandWindowBackend(AWindow).Surface
+  else
+    Result := nil;
 end;
 
 { ---- 登録 ---- }

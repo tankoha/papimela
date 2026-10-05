@@ -42,3 +42,5 @@ test/test_gl_window
 test/test_render_gles2
 test/demo_render_window
 examples/pong
+test/test_textinput_v3
+test/test_wayland_textinput

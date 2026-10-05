@@ -199,8 +199,9 @@ begin
 
   if TPMLSubsystem.TextInput in ASubsystems then
   begin
+    // ビデオ（あれば）を渡す。text-input-v3 はウィンドウの接続の上で動く。
     FTextInput := TPMLTextInputSystem.Create(Self, Self, FEvents,
-      AOptions.PreferredTextInput);
+      AOptions.PreferredTextInput, FVideo);
     FEvents.KeyFilter := FTextInput as IPMLKeyFilter;
     LogFmt(TPMLLogLevel.Info, 'text input backend: %s', [FTextInput.BackendName]);
   end;
