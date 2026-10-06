@@ -21,8 +21,6 @@
 
   NOT RESOLVED:
     - Audio / Joysticks は未実装のため常に nil。要求されたら EPMLUnsupported を投げる
-    - TPMLTimerService は時刻と待つことだけ。タイマースレッドと Timer.AddTimer は
-      PaPiMeLa.Threading（#8）の後
     - TPMLHints / TPMLLog は未実装。Log は当面 Context.LogInfo で標準出力へ
 
   Copyright (C) 2026 papimela contributors
@@ -40,6 +38,7 @@ uses
   PaPiMeLa.Errors,
   PaPiMeLa.Core.Base,
   PaPiMeLa.Events,
+  PaPiMeLa.Time,
   PaPiMeLa.Video,
   PaPiMeLa.TextInput;
 
@@ -53,7 +52,17 @@ type
     （TPMLTimerService.Delay(16) とも Ctx.Timer.Delay(16) とも書ける）。
     待つ処理は PaPiMeLa.Time にある。 }
   TPMLTimerService = class sealed(TPMLSystemObject)
+  strict private
+    FQueue: TPMLTimerQueue;
   public
+    constructor Create(AContextRef: TObject; AOwner: TPMLObject);
+    destructor Destroy; override;
+    // タイマー（SDL_AddTimer / SDL_AddTimerNS / SDL_RemoveTimer）。約束は PaPiMeLa.Time の
+    // TPMLTimerQueue。コールバックはタイマーのスレッドで呼ばれる。
+    function  AddTimer(AIntervalMs: LongWord; ACallback: TPMLTimerCallback): TPMLTimerID;
+    function  AddTimerNS(AIntervalNS: UInt64; ACallback: TPMLTimerCallbackNS): TPMLTimerID;
+    function  RemoveTimer(AID: TPMLTimerID): Boolean;
+    property  Queue: TPMLTimerQueue read FQueue;
     class function TicksNS: UInt64; static;
     class function TicksMS: UInt64; static;
     class procedure Delay(AMs: LongWord); static;
@@ -116,9 +125,6 @@ type
 
 implementation
 
-uses
-  PaPiMeLa.Time;
-
 // 既定値の正本。Default と Initialize 演算子の両方がここを通る。
 class procedure TPMLContextOptions.SetDefaults(var AOptions: TPMLContextOptions);
 begin
@@ -140,6 +146,33 @@ begin
   // Initialize 演算子から Default を呼ぶ形にはできない（互いに呼び合って落ちる。実測）。
   Result.PreferredVideo := '';
   SetDefaults(Result);
+end;
+
+constructor TPMLTimerService.Create(AContextRef: TObject; AOwner: TPMLObject);
+begin
+  inherited Create(AContextRef, AOwner);
+  FQueue := TPMLTimerQueue.Create;
+end;
+
+destructor TPMLTimerService.Destroy;
+begin
+  FreeAndNil(FQueue);
+  inherited Destroy;
+end;
+
+function TPMLTimerService.AddTimer(AIntervalMs: LongWord; ACallback: TPMLTimerCallback): TPMLTimerID;
+begin
+  Result := FQueue.Add(AIntervalMs, ACallback);
+end;
+
+function TPMLTimerService.AddTimerNS(AIntervalNS: UInt64; ACallback: TPMLTimerCallbackNS): TPMLTimerID;
+begin
+  Result := FQueue.AddNS(AIntervalNS, ACallback);
+end;
+
+function TPMLTimerService.RemoveTimer(AID: TPMLTimerID): Boolean;
+begin
+  Result := FQueue.Remove(AID);
 end;
 
 class function TPMLTimerService.TicksNS: UInt64;

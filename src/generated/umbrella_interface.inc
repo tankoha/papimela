@@ -637,6 +637,10 @@ type
   TPMLNowFunc = PaPiMeLa.Time.TPMLNowFunc;
   TPMLSleepProc = PaPiMeLa.Time.TPMLSleepProc;
   TPMLPauseProc = PaPiMeLa.Time.TPMLPauseProc;
+  TPMLTimerID = PaPiMeLa.Time.TPMLTimerID;
+  TPMLTimerCallback = PaPiMeLa.Time.TPMLTimerCallback;
+  TPMLTimerCallbackNS = PaPiMeLa.Time.TPMLTimerCallbackNS;
+  TPMLTimerQueue = PaPiMeLa.Time.TPMLTimerQueue;
 const
   PML_NS_PER_MS = PaPiMeLa.Time.PML_NS_PER_MS;
   PML_NS_PER_SECOND = PaPiMeLa.Time.PML_NS_PER_SECOND;

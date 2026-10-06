@@ -51,3 +51,4 @@ test/test_clipboard
 test/test_wayland_clipboard
 test/test_protocol_types
 test/test_threading
+test/test_timer
