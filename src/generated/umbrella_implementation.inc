@@ -17,6 +17,7 @@
 //   PaPiMeLa.Render
 //   PaPiMeLa.TextInput
 //   PaPiMeLa.Time
+//   PaPiMeLa.Threading
 //   PaPiMeLa.App
 //   PaPiMeLa.Video.Backend
 //   PaPiMeLa.TextInput.Backend

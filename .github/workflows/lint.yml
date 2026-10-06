@@ -85,9 +85,12 @@ jobs:
       # ダミーバックエンドで動く公開 API の検証だけをここで回す。
       # 実機のコンポジタが要るテスト（T-04/T-05/T-08/T-10）はローカル専用。
       - name: Run headless tests
+        env:
+          # ランナーには RealtimeKit が無いので、優先度を上げる検査だけ飛ばしてよい（test_threading）
+          PAPIMELA_RTKIT_OPTIONAL: "1"
         run: |
           set -eu
-          for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_protocol_types test_backends test_umbrella; do
+          for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_protocol_types test_threading test_backends test_umbrella; do
             fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/$t test/$t.pas
             ./test/$t
           done

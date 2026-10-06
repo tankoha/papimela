@@ -24,7 +24,6 @@
     - TPMLTimerService は時刻と待つことだけ。タイマースレッドと Timer.AddTimer は
       PaPiMeLa.Threading（#8）の後
     - TPMLHints / TPMLLog は未実装。Log は当面 Context.LogInfo で標準出力へ
-    - RunOnMainThread は Threading 着手時
 
   Copyright (C) 2026 papimela contributors
   （zlib ライセンス本文は papimela.inc を参照）
@@ -103,6 +102,10 @@ type
 
     procedure Log(ALevel: TPMLLogLevel; const AMsg: String);
     procedure LogFmt(ALevel: TPMLLogLevel; const AFmt: String; const AArgs: array of const);
+    // AProc をメインスレッドで動かす（SDL_RunOnMainThread）。どのスレッドから呼んでもよい。
+    // 他のスレッドからなら次の Events.Pump（Poll / Wait の中も）で動く。AWait なら動き終わる
+    // まで待ち、動いたら True（Context が先に壊れたら False）。
+    function  RunOnMainThread(AProc: TPMLMainThreadProc; AWait: Boolean = False): Boolean;
 
     property Events    : TPMLEventQueue      read FEvents;
     property Timer     : TPMLTimerService    read FTimer;
@@ -227,6 +230,11 @@ begin
     Exit;
   // TPMLLog（#11 章の Log ユニット）ができたらそちらへ委譲する。
   WriteLn(ErrOutput, Format('[papimela/%s] %s', [Names[ALevel], AMsg]));
+end;
+
+function TPMLContext.RunOnMainThread(AProc: TPMLMainThreadProc; AWait: Boolean): Boolean;
+begin
+  Result := FEvents.RunOnMainThread(AProc, AWait);
 end;
 
 procedure TPMLContext.LogFmt(ALevel: TPMLLogLevel; const AFmt: String;

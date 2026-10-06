@@ -33,9 +33,9 @@ EGL の GL コンテキスト、ヘッドレスのダミーのビデオ、待つ
 済み（一部を含む）: #1–4、#10、#12–17（#17 の `.GL` は未）、#22、#24（`Events.Keymap`。押下状態は
 `PaPiMeLa.Events` の `TPMLKeyboardState`）、#25 の一部（マウスとタッチの状態機械は `PaPiMeLa.Events`）、
 #26–29、#31–39（#38 の D&D は未）、#41–43（#41 の残りは描画先テクスチャ、回転、9-grid / タイル）、
-#45、#46、#47、#48、#49、#50、#64、#70。
+#8、#45、#46、#47、#48、#49、#50、#64、#70。
 
-未着手: #5–8（Log、Properties、Atomic、Threading）、#9 Time のタイマー（待つ API は済み）、#11、#18–21、#23、#30、#38 の D&D、#40、#44、
+未着手: #5–7（Log、Properties、Atomic）、#9 Time のタイマー（待つ API は済み。#8 が済んだので着手できる）、#11、#18–21、#23、#30、#38 の D&D、#40、#44、
 #51–63（オーディオ、ジョイスティック、ゲームパッド、ハプティクス）、#65–69。
 
 ## 2. 前のセッション（2026-10-02〜05）でしたこと
@@ -69,7 +69,7 @@ D-45（検査で `setitimer` へ `const` の record を渡し、C に NULL が�
 
 ## 3. 次の候補（おすすめ順）
 
-1. **Threading（#8、High）**: これが済むと #9 のタイマー（`AddTimer`）と `RunOnMainThread` に進める。クリップボード（#38 のうちクリップボードとプライマリ選択）は 2026-10-06 に済んだ。残りの D&D 受信は `PaPiMeLa.Video.Wayland.Data` のデバイスのリスナーに足せる形にしてある（手で動かす確認が要る: ファイルマネージャからドラッグ）。IME は IBus（#48）・text-input-v3（#49）とも 2026-10-06 に済んだ。
+1. **タイマー（#9 の残り、Medium）**: Threading（#8）と `RunOnMainThread` は 2026-10-06 に済んだ。タイマースレッド 1 本と `AddTimer` / `AddTimerNS` / `RemoveTimer`（`timer/SDL_timer.c`）。部品は `PaPiMeLa.Threading` の `TPMLThread` / `TPMLCondition` で揃う。クリップボード（#38 のうちクリップボードとプライマリ選択）は 2026-10-06 に済んだ。残りの D&D 受信は `PaPiMeLa.Video.Wayland.Data` のデバイスのリスナーに足せる形にしてある（手で動かす確認が要る: ファイルマネージャからドラッグ）。IME は IBus（#48）・text-input-v3（#49）とも 2026-10-06 に済んだ。
    IME の残り: 埋め込み候補（`TextEditingCandidates`）、IBus の ForwardKeyEvent、ibus-anthy など他のエンジンの属性の実測、GNOME / KDE での IBus 直結（§7.5 の要検証）。IBus の検査環境は `tools/ibus-sandbox/`（ibus + ibus-mozc を入れた Ubuntu 24.04 の最小 rootfs を bwrap で隔離。デスクトップの fcitx5 と混ざらない）。実測の結果は `spikes/RESULTS.md` のスパイク 3
 2. **D&D 受信（#38 の残り、Medium）**: DropBegin / DropFile / DropText / DropPosition / DropComplete。text/uri-list の解釈は表示サーバ無しで検査できる
 3. **レンダラの残り（#41）**: 描画先テクスチャ（SetRenderTarget。テクスチャごとの view が要るので、
@@ -102,7 +102,7 @@ Pong もすべて書き換え、今は `uses SysUtils, Math, PaPiMeLa` だけで
 表示サーバ無しで通るもの（CI と同じ）:
 
 ```bash
-for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_protocol_types test_backends test_umbrella; do
+for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_protocol_types test_threading test_backends test_umbrella; do
   fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/$t test/$t.pas && ./test/$t
 done
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -oexamples/pong examples/pong.pas && ./examples/pong --selftest
@@ -128,7 +128,7 @@ env -u WAYLAND_DISPLAY LIBGL_ALWAYS_SOFTWARE=1 ./test/test_render_gles2   # Mesa
 cd papimela && mkdir -p lib
 B='fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib'
 # 0. 表示サーバ無しの分（CI と同じ。手元の新しい Mesa でも通るか）
-for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_protocol_types test_backends test_umbrella; do
+for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_protocol_types test_threading test_backends test_umbrella; do
   $B -otest/$t test/$t.pas && ./test/$t | tail -1
 done
 # 1. 実機の Wayland（自動判定。最後の行が「結論」で終わればよい）

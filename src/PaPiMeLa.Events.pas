@@ -27,7 +27,6 @@
       dbus_connection_read_write のタイムアウトで正しく行える。Wayland バックエンド
       が 2 本目の fd を持ち込む時点で統合する
     - WakeUp は eventfd ではなくフラグ。上記と同じ時点で eventfd にする
-    - 排他は SyncObjs。PaPiMeLa.Threading（#8）が TPMLMutex を提供したら差し替える
     - 状態機械（TPMLKeyboardState / TPMLMouseState / TPMLTouchState）は Video 着手時
     - リングバッファはキュー内部の配列。TPMLRingBuffer<T> の汎用化は必要になってから
 
@@ -41,10 +40,11 @@ unit PaPiMeLa.Events;
 interface
 
 uses
-  SysUtils, Classes, SyncObjs,
+  SysUtils, Classes,
   PaPiMeLa.Types,
   PaPiMeLa.Errors,
   PaPiMeLa.Core.Base,
+  PaPiMeLa.Threading,
   PaPiMeLa.Keycodes,
   PaPiMeLa.Events.Keymap;
 
@@ -240,6 +240,9 @@ type
     property  Count: Integer read GetCount;
   end;
 
+  // RunOnMainThread で動かす手続き。
+  TPMLMainThreadProc = procedure of object;
+
   TPMLEventQueue = class;
 
   { キーボードの状態機械。バックエンドは Push を直接呼ばず、ここを通す（§6.3）。
@@ -368,7 +371,8 @@ type
 
   TPMLEventQueue = class sealed(TPMLSystemObject)
   strict private
-    FLock      : TCriticalSection;
+    FLock      : TPMLMutex;
+    FCalls     : array of Pointer;   // PPMLMainThreadCall。FLock で守る
     FRing      : array of TPMLEvent;
     FHead      : Integer;        // 次に読む位置
     FCount     : Integer;
@@ -385,6 +389,8 @@ type
     function  TakeLocked(out AEvent: TPMLEvent): Boolean;
     function  NotifyWatches(const AEvent: TPMLEvent): Boolean;
     function  GetCapacity: Integer;
+    procedure RunMainThreadCalls;
+    procedure CancelMainThreadCalls;
   public
     constructor Create(AContextRef: TObject; AOwner: TPMLObject;
       ACapacity: Integer = 256);
@@ -414,6 +420,13 @@ type
     procedure AddWatch(AWatch: IPMLEventWatch);
     procedure RemoveWatch(AWatch: IPMLEventWatch);
     procedure WakeUp;
+
+    // AProc をメインスレッドで動かす（SDL_RunOnMainThread）。メインスレッドから呼べば
+    // その場で動かす。他のスレッドからなら次の Pump の始めに動かす。AWait なら動き終わる
+    // まで待ち、動いたら True。キューが先に壊れたら動かさずに False（待たないなら
+    // 積めたら True）。メインスレッドが Pump しない間は動かないので、AWait で待つ側は
+    // メインスレッドが止まっていると戻らない。
+    function  RunOnMainThread(AProc: TPMLMainThreadProc; AWait: Boolean): Boolean;
 
     property Enabled[AKind: TPMLEventKind]: Boolean read GetEnabled write SetEnabled;
     property PendingCount: Integer read FCount;
@@ -463,7 +476,7 @@ begin
   if ACapacity < 16 then
     ACapacity := 16;
   SetLength(FRing, ACapacity);
-  FLock := TCriticalSection.Create;
+  FLock := TPMLMutex.Create;
   for K := Low(TPMLEventKind) to High(TPMLEventKind) do
     FEnabled[K] := True;
   FNextUser := 0;
@@ -478,8 +491,30 @@ begin
   Result := Length(FRing);
 end;
 
+type
+  { RunOnMainThread の 1 件。AWait のときだけ Done を作り、待つ側が捨てる。 }
+  TPMLMainThreadCall = record
+    Proc    : TPMLMainThreadProc;
+    Done    : TPMLSemaphore;
+    Executed: Boolean;
+  end;
+  PPMLMainThreadCall = ^TPMLMainThreadCall;
+
+{ 待っている呼び出しを動かさずに片付ける。待つ側には False で知らせる。 }
+procedure CancelCall(ACall: PPMLMainThreadCall);
+begin
+  if Assigned(ACall^.Done) then
+  begin
+    ACall^.Executed := False;
+    ACall^.Done.Signal;      // 以後 ACall は待つ側のもの
+  end
+  else
+    Dispose(ACall);
+end;
+
 destructor TPMLEventQueue.Destroy;
 begin
+  CancelMainThreadCalls;
   FKeyFilter := nil;
   FreeAndNil(FKeyboard);
   FreeAndNil(FMouse);
@@ -510,7 +545,7 @@ begin
   if not NotifyWatches(AEvent) then
     Exit;
 
-  FLock.Acquire;
+  FLock.Lock;
   try
     if FCount = Length(FRing) then
     begin
@@ -523,7 +558,7 @@ begin
     FRing[Slot] := AEvent;
     Inc(FCount);
   finally
-    FLock.Release;
+    FLock.Unlock;
   end;
 end;
 
@@ -543,7 +578,7 @@ end;
 
 function TPMLEventQueue.TakeLocked(out AEvent: TPMLEvent): Boolean;
 begin
-  FLock.Acquire;
+  FLock.Lock;
   try
     if FCount = 0 then
       Exit(False);
@@ -554,7 +589,7 @@ begin
     Dec(FCount);
     Result := True;
   finally
-    FLock.Release;
+    FLock.Unlock;
   end;
 end;
 
@@ -563,6 +598,7 @@ var
   I: Integer;
 begin
   CheckMainThread;
+  RunMainThreadCalls;
   for I := 0 to High(FSources) do
   begin
     // 待ちを許すのは最初のソースだけ（§6.3）。
@@ -628,13 +664,13 @@ var
   I: Integer;
 begin
   Result := False;
-  FLock.Acquire;
+  FLock.Lock;
   try
     for I := 0 to FCount - 1 do
       if FRing[(FHead + I) mod Length(FRing)].Kind = AKind then
         Exit(True);
   finally
-    FLock.Release;
+    FLock.Unlock;
   end;
 end;
 
@@ -643,7 +679,7 @@ var
   I, W: Integer;
   Kept: array of TPMLEvent;
 begin
-  FLock.Acquire;
+  FLock.Lock;
   try
     SetLength(Kept, FCount);
     W := 0;
@@ -660,7 +696,7 @@ begin
     for I := 0 to W - 1 do
       FRing[I] := Kept[I];
   finally
-    FLock.Release;
+    FLock.Unlock;
   end;
 end;
 
@@ -668,14 +704,14 @@ procedure TPMLEventQueue.FlushAll;
 var
   I: Integer;
 begin
-  FLock.Acquire;
+  FLock.Lock;
   try
     for I := 0 to FCount - 1 do
       FRing[(FHead + I) mod Length(FRing)] := Default(TPMLEvent);
     FHead := 0;
     FCount := 0;
   finally
-    FLock.Release;
+    FLock.Unlock;
   end;
 end;
 
@@ -742,6 +778,102 @@ end;
 procedure TPMLEventQueue.WakeUp;
 begin
   FWokenUp := True;
+end;
+
+function TPMLEventQueue.RunOnMainThread(AProc: TPMLMainThreadProc; AWait: Boolean): Boolean;
+var
+  Call: PPMLMainThreadCall;
+begin
+  if not Assigned(AProc) then
+    raise EPMLArgument.Create('RunOnMainThread: no procedure');
+  // メインスレッドからならその場で（SDL と同じ）。
+  if GetCurrentThreadID = MainThreadID then
+  begin
+    AProc();
+    Exit(True);
+  end;
+  New(Call);
+  Call^.Proc := AProc;
+  Call^.Executed := False;
+  Call^.Done := nil;
+  if AWait then
+    Call^.Done := TPMLSemaphore.Create(0);
+  FLock.Lock;
+  try
+    SetLength(FCalls, Length(FCalls) + 1);
+    FCalls[High(FCalls)] := Call;
+  finally
+    FLock.Unlock;
+  end;
+  if not AWait then
+    Exit(True);
+  // 動き終わる（か、キューが壊れる）まで待つ。待ち終わったら Call はこちらのもの。
+  Call^.Done.Wait;
+  Result := Call^.Executed;
+  Call^.Done.Free;
+  Dispose(Call);
+end;
+
+{ 動かし終わった（か、例外で抜けた）呼び出しを片付ける。待つ側がいれば起こす。 }
+procedure FinishCall(ACall: PPMLMainThreadCall);
+begin
+  if Assigned(ACall^.Done) then
+    ACall^.Done.Signal      // 以後 ACall は待つ側のもの
+  else
+    Dispose(ACall);
+end;
+
+{ メインスレッドで、積まれた呼び出しを積まれた順に動かす。動かしている間に積まれた分は
+  次の Pump に回す。手続きが例外を出したら、その呼び出しは動いていない（Executed = False）
+  として待つ側を起こし、残りを次の Pump に回してから外へ出す。 }
+procedure TPMLEventQueue.RunMainThreadCalls;
+var
+  Calls, Rest: array of Pointer;
+  I: Integer;
+  Call: PPMLMainThreadCall;
+begin
+  FLock.Lock;
+  try
+    Calls := FCalls;
+    FCalls := nil;
+  finally
+    FLock.Unlock;
+  end;
+  for I := 0 to High(Calls) do
+  begin
+    Call := PPMLMainThreadCall(Calls[I]);
+    try
+      Call^.Proc();
+    except
+      FinishCall(Call);
+      Rest := Copy(Calls, I + 1, Length(Calls) - I - 1);
+      FLock.Lock;
+      try
+        FCalls := Concat(Rest, FCalls);
+      finally
+        FLock.Unlock;
+      end;
+      raise;
+    end;
+    Call^.Executed := True;
+    FinishCall(Call);
+  end;
+end;
+
+procedure TPMLEventQueue.CancelMainThreadCalls;
+var
+  Calls: array of Pointer;
+  I: Integer;
+begin
+  FLock.Lock;
+  try
+    Calls := FCalls;
+    FCalls := nil;
+  finally
+    FLock.Unlock;
+  end;
+  for I := 0 to High(Calls) do
+    CancelCall(PPMLMainThreadCall(Calls[I]));
 end;
 
 { TPMLDeferredKeyQueue }

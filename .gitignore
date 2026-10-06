@@ -50,3 +50,4 @@ test/test_ibus_textinput
 test/test_clipboard
 test/test_wayland_clipboard
 test/test_protocol_types
+test/test_threading

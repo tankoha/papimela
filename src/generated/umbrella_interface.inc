@@ -17,6 +17,7 @@
 //   PaPiMeLa.Render
 //   PaPiMeLa.TextInput
 //   PaPiMeLa.Time
+//   PaPiMeLa.Threading
 //   PaPiMeLa.App
 //   PaPiMeLa.Video.Backend
 //   PaPiMeLa.TextInput.Backend
@@ -95,6 +96,7 @@ type
   IPMLKeyFilter = PaPiMeLa.Events.IPMLKeyFilter;
   TPMLDeferredKey = PaPiMeLa.Events.TPMLDeferredKey;
   TPMLDeferredKeyQueue = PaPiMeLa.Events.TPMLDeferredKeyQueue;
+  TPMLMainThreadProc = PaPiMeLa.Events.TPMLMainThreadProc;
   TPMLKeyboardState = PaPiMeLa.Events.TPMLKeyboardState;
   TPMLMouseState = PaPiMeLa.Events.TPMLMouseState;
   TPMLTouchState = PaPiMeLa.Events.TPMLTouchState;
@@ -646,6 +648,18 @@ procedure PMLDelayPreciseWith(
   ANow: TPMLNowFunc;
   ASleep: TPMLSleepProc;
   APause: TPMLPauseProc); inline;
+
+// ---- PaPiMeLa.Threading
+type
+  TPMLPthreadStorage = PaPiMeLa.Threading.TPMLPthreadStorage;
+  TPMLMutex = PaPiMeLa.Threading.TPMLMutex;
+  TPMLRWLock = PaPiMeLa.Threading.TPMLRWLock;
+  TPMLSemaphore = PaPiMeLa.Threading.TPMLSemaphore;
+  TPMLCondition = PaPiMeLa.Threading.TPMLCondition;
+  TPMLLockGuard = PaPiMeLa.Threading.TPMLLockGuard;
+  TPMLThreadPriority = PaPiMeLa.Threading.TPMLThreadPriority;
+  TPMLThreadFunc = PaPiMeLa.Threading.TPMLThreadFunc;
+  TPMLThread = PaPiMeLa.Threading.TPMLThread;
 
 // ---- PaPiMeLa.App
 type
