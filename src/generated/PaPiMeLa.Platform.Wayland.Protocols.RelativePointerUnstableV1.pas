@@ -140,6 +140,8 @@ begin
   GInitialized := True;
   PaPiMeLa.Platform.Wayland.Protocols.Wayland.EnsureProtocolInitialized;
 
+  zwp_relative_pointer_manager_v1_interface := @GIface_zwp_relative_pointer_manager_v1;
+  zwp_relative_pointer_v1_interface := @GIface_zwp_relative_pointer_v1;
   FillChar(GTypes, SizeOf(GTypes), 0);
   GTypes[6] := zwp_relative_pointer_v1_interface;
   GTypes[7] := wl_pointer_interface;
@@ -156,7 +158,6 @@ begin
   GIface_zwp_relative_pointer_manager_v1.methods := @GReq_zwp_relative_pointer_manager_v1[0];
   GIface_zwp_relative_pointer_manager_v1.event_count := 0;
   GIface_zwp_relative_pointer_manager_v1.events := nil;
-  zwp_relative_pointer_manager_v1_interface := @GIface_zwp_relative_pointer_manager_v1;
 
   GReq_zwp_relative_pointer_v1[0].name := 'destroy';
   GReq_zwp_relative_pointer_v1[0].signature := '';
@@ -170,7 +171,6 @@ begin
   GIface_zwp_relative_pointer_v1.methods := @GReq_zwp_relative_pointer_v1[0];
   GIface_zwp_relative_pointer_v1.event_count := 1;
   GIface_zwp_relative_pointer_v1.events := @GEvt_zwp_relative_pointer_v1[0];
-  zwp_relative_pointer_v1_interface := @GIface_zwp_relative_pointer_v1;
 
   GThunks_zwp_relative_pointer_v1.relative_motion := @Thunk_zwp_relative_pointer_v1_relative_motion;
 end;

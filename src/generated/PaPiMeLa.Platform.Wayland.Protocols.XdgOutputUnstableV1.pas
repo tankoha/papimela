@@ -191,6 +191,8 @@ begin
   GInitialized := True;
   PaPiMeLa.Platform.Wayland.Protocols.Wayland.EnsureProtocolInitialized;
 
+  zxdg_output_manager_v1_interface := @GIface_zxdg_output_manager_v1;
+  zxdg_output_v1_interface := @GIface_zxdg_output_v1;
   FillChar(GTypes, SizeOf(GTypes), 0);
   GTypes[2] := zxdg_output_v1_interface;
   GTypes[3] := wl_output_interface;
@@ -207,7 +209,6 @@ begin
   GIface_zxdg_output_manager_v1.methods := @GReq_zxdg_output_manager_v1[0];
   GIface_zxdg_output_manager_v1.event_count := 0;
   GIface_zxdg_output_manager_v1.events := nil;
-  zxdg_output_manager_v1_interface := @GIface_zxdg_output_manager_v1;
 
   GReq_zxdg_output_v1[0].name := 'destroy';
   GReq_zxdg_output_v1[0].signature := '';
@@ -233,7 +234,6 @@ begin
   GIface_zxdg_output_v1.methods := @GReq_zxdg_output_v1[0];
   GIface_zxdg_output_v1.event_count := 5;
   GIface_zxdg_output_v1.events := @GEvt_zxdg_output_v1[0];
-  zxdg_output_v1_interface := @GIface_zxdg_output_v1;
 
   GThunks_zxdg_output_v1.logical_position := @Thunk_zxdg_output_v1_logical_position;
   GThunks_zxdg_output_v1.logical_size := @Thunk_zxdg_output_v1_logical_size;

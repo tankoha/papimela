@@ -293,6 +293,10 @@ begin
   GInitialized := True;
   PaPiMeLa.Platform.Wayland.Protocols.Wayland.EnsureProtocolInitialized;
 
+  zwp_primary_selection_device_manager_v1_interface := @GIface_zwp_primary_selection_device_manager_v1;
+  zwp_primary_selection_device_v1_interface := @GIface_zwp_primary_selection_device_v1;
+  zwp_primary_selection_offer_v1_interface := @GIface_zwp_primary_selection_offer_v1;
+  zwp_primary_selection_source_v1_interface := @GIface_zwp_primary_selection_source_v1;
   FillChar(GTypes, SizeOf(GTypes), 0);
   GTypes[2] := zwp_primary_selection_source_v1_interface;
   GTypes[3] := zwp_primary_selection_device_v1_interface;
@@ -316,7 +320,6 @@ begin
   GIface_zwp_primary_selection_device_manager_v1.methods := @GReq_zwp_primary_selection_device_manager_v1[0];
   GIface_zwp_primary_selection_device_manager_v1.event_count := 0;
   GIface_zwp_primary_selection_device_manager_v1.events := nil;
-  zwp_primary_selection_device_manager_v1_interface := @GIface_zwp_primary_selection_device_manager_v1;
 
   GReq_zwp_primary_selection_device_v1[0].name := 'set_selection';
   GReq_zwp_primary_selection_device_v1[0].signature := '?ou';
@@ -336,7 +339,6 @@ begin
   GIface_zwp_primary_selection_device_v1.methods := @GReq_zwp_primary_selection_device_v1[0];
   GIface_zwp_primary_selection_device_v1.event_count := 2;
   GIface_zwp_primary_selection_device_v1.events := @GEvt_zwp_primary_selection_device_v1[0];
-  zwp_primary_selection_device_v1_interface := @GIface_zwp_primary_selection_device_v1;
 
   GReq_zwp_primary_selection_offer_v1[0].name := 'receive';
   GReq_zwp_primary_selection_offer_v1[0].signature := 'sh';
@@ -353,7 +355,6 @@ begin
   GIface_zwp_primary_selection_offer_v1.methods := @GReq_zwp_primary_selection_offer_v1[0];
   GIface_zwp_primary_selection_offer_v1.event_count := 1;
   GIface_zwp_primary_selection_offer_v1.events := @GEvt_zwp_primary_selection_offer_v1[0];
-  zwp_primary_selection_offer_v1_interface := @GIface_zwp_primary_selection_offer_v1;
 
   GReq_zwp_primary_selection_source_v1[0].name := 'offer';
   GReq_zwp_primary_selection_source_v1[0].signature := 's';
@@ -373,7 +374,6 @@ begin
   GIface_zwp_primary_selection_source_v1.methods := @GReq_zwp_primary_selection_source_v1[0];
   GIface_zwp_primary_selection_source_v1.event_count := 2;
   GIface_zwp_primary_selection_source_v1.events := @GEvt_zwp_primary_selection_source_v1[0];
-  zwp_primary_selection_source_v1_interface := @GIface_zwp_primary_selection_source_v1;
 
   GThunks_zwp_primary_selection_device_v1.data_offer := @Thunk_zwp_primary_selection_device_v1_data_offer;
   GThunks_zwp_primary_selection_device_v1.selection := @Thunk_zwp_primary_selection_device_v1_selection;

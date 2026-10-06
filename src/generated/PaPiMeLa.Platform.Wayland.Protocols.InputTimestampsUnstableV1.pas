@@ -157,6 +157,8 @@ begin
   GInitialized := True;
   PaPiMeLa.Platform.Wayland.Protocols.Wayland.EnsureProtocolInitialized;
 
+  zwp_input_timestamps_manager_v1_interface := @GIface_zwp_input_timestamps_manager_v1;
+  zwp_input_timestamps_v1_interface := @GIface_zwp_input_timestamps_v1;
   FillChar(GTypes, SizeOf(GTypes), 0);
   GTypes[3] := zwp_input_timestamps_v1_interface;
   GTypes[4] := wl_keyboard_interface;
@@ -183,7 +185,6 @@ begin
   GIface_zwp_input_timestamps_manager_v1.methods := @GReq_zwp_input_timestamps_manager_v1[0];
   GIface_zwp_input_timestamps_manager_v1.event_count := 0;
   GIface_zwp_input_timestamps_manager_v1.events := nil;
-  zwp_input_timestamps_manager_v1_interface := @GIface_zwp_input_timestamps_manager_v1;
 
   GReq_zwp_input_timestamps_v1[0].name := 'destroy';
   GReq_zwp_input_timestamps_v1[0].signature := '';
@@ -197,7 +198,6 @@ begin
   GIface_zwp_input_timestamps_v1.methods := @GReq_zwp_input_timestamps_v1[0];
   GIface_zwp_input_timestamps_v1.event_count := 1;
   GIface_zwp_input_timestamps_v1.events := @GEvt_zwp_input_timestamps_v1[0];
-  zwp_input_timestamps_v1_interface := @GIface_zwp_input_timestamps_v1;
 
   GThunks_zwp_input_timestamps_v1.timestamp := @Thunk_zwp_input_timestamps_v1_timestamp;
 end;

@@ -153,6 +153,8 @@ begin
   GInitialized := True;
   PaPiMeLa.Platform.Wayland.Protocols.Wayland.EnsureProtocolInitialized;
 
+  zwp_keyboard_shortcuts_inhibit_manager_v1_interface := @GIface_zwp_keyboard_shortcuts_inhibit_manager_v1;
+  zwp_keyboard_shortcuts_inhibitor_v1_interface := @GIface_zwp_keyboard_shortcuts_inhibitor_v1;
   FillChar(GTypes, SizeOf(GTypes), 0);
   GTypes[0] := zwp_keyboard_shortcuts_inhibitor_v1_interface;
   GTypes[1] := wl_surface_interface;
@@ -170,7 +172,6 @@ begin
   GIface_zwp_keyboard_shortcuts_inhibit_manager_v1.methods := @GReq_zwp_keyboard_shortcuts_inhibit_manager_v1[0];
   GIface_zwp_keyboard_shortcuts_inhibit_manager_v1.event_count := 0;
   GIface_zwp_keyboard_shortcuts_inhibit_manager_v1.events := nil;
-  zwp_keyboard_shortcuts_inhibit_manager_v1_interface := @GIface_zwp_keyboard_shortcuts_inhibit_manager_v1;
 
   GReq_zwp_keyboard_shortcuts_inhibitor_v1[0].name := 'destroy';
   GReq_zwp_keyboard_shortcuts_inhibitor_v1[0].signature := '';
@@ -187,7 +188,6 @@ begin
   GIface_zwp_keyboard_shortcuts_inhibitor_v1.methods := @GReq_zwp_keyboard_shortcuts_inhibitor_v1[0];
   GIface_zwp_keyboard_shortcuts_inhibitor_v1.event_count := 2;
   GIface_zwp_keyboard_shortcuts_inhibitor_v1.events := @GEvt_zwp_keyboard_shortcuts_inhibitor_v1[0];
-  zwp_keyboard_shortcuts_inhibitor_v1_interface := @GIface_zwp_keyboard_shortcuts_inhibitor_v1;
 
   GThunks_zwp_keyboard_shortcuts_inhibitor_v1.active := @Thunk_zwp_keyboard_shortcuts_inhibitor_v1_active;
   GThunks_zwp_keyboard_shortcuts_inhibitor_v1.inactive := @Thunk_zwp_keyboard_shortcuts_inhibitor_v1_inactive;

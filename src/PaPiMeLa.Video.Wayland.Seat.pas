@@ -65,6 +65,8 @@ uses
 type
   TPMLWaylandSeat = class;
 
+  // 入力に伴う serial が更新されたときに呼ばれる（クリップボードの set_selection が使う）。
+  TPMLWaylandSerialProc = procedure(ASerial: LongWord) of object;
 
   TPMLWaylandKeyboardFwd = class(Twl_keyboard_listener)
   strict private
@@ -135,6 +137,10 @@ type
     FKeyFocus : TPMLWindowID;
     FPtrFocus : TPMLWindowID;
     FPtrSerial: LongWord;      // 直近の wl_pointer.enter の serial。set_cursor に要る
+    // 直近の入力（キーボードの enter / キー、ポインタのボタン押下、タッチの down）の
+    // serial。set_selection に要る。SDL の last_implicit_grab_serial に当たる。
+    FInputSerial  : LongWord;
+    FOnInputSerial: TPMLWaylandSerialProc;
     FTouchDeviceID: LongWord;  // wl_touch はシートに 1 つ。シートを識別子にする
 
     // カーソル形状（cursor-shape-v1）。要求は TPMLWaylandCursorBackend から来る。
@@ -152,12 +158,14 @@ type
     procedure StopRepeat;
     function  GetHasKeyboard: Boolean;
     function  GetHasTouch: Boolean;
+    function  GetHasKeyFocus: Boolean;
     procedure ReapplyCursor;
     function  WindowOf(ASurface: Pwl_surface): TPMLWaylandWindowBackend;
     function  WindowIDOf(ASurface: Pwl_surface): TPMLWindowID;
     procedure DeliverKey(AEvdevCode: LongWord; ADown, AIsRepeat: Boolean);
     procedure NotifyKeyFocusToGrab;
   private
+    procedure NoteInputSerial(ASerial: LongWord);
     procedure HandleKeymap(AFormat: LongWord; AFD: LongInt; ASize: LongWord);
     procedure HandleKeyEnter(ASurface: Pwl_surface);
     procedure HandleKeyLeave(ASurface: Pwl_surface);
@@ -197,7 +205,14 @@ type
     function  MillisecondsUntilRepeat: Integer;
 
     property SeatName: String read FName;
+    // 生の wl_seat。データデバイスのようにシートから作るものが使う。
+    property Handle: Pwl_seat read FSeat;
+    // 直近の入力の serial（まだ入力が無ければ 0）。
+    property InputSerial: LongWord read FInputSerial;
+    property OnInputSerial: TPMLWaylandSerialProc read FOnInputSerial write FOnInputSerial;
     property HasKeyboard: Boolean read GetHasKeyboard;
+    // いまキーボードフォーカスがこのシートのウィンドウにあるか。
+    property HasKeyFocus: Boolean read GetHasKeyFocus;
     property HasTouch: Boolean read GetHasTouch;
     // ポインタ拘束。ポインタが無いシートでは nil。
     property Grab: TPMLWaylandPointerGrab read FGrab;
@@ -229,6 +244,7 @@ end;
 procedure TPMLWaylandKeyboardFwd.enter(AProxy: Pwl_keyboard; serial: LongWord;
   surface: Pwl_surface; keys: Pwl_array);
 begin
+  FOwner.NoteInputSerial(serial);
   FOwner.HandleKeyEnter(surface);
 end;
 
@@ -241,6 +257,7 @@ end;
 procedure TPMLWaylandKeyboardFwd.key(AProxy: Pwl_keyboard; serial: LongWord;
   time: LongWord; key_: LongWord; state: LongWord);
 begin
+  FOwner.NoteInputSerial(serial);
   FOwner.HandleKey(key_, state = WL_KEYBOARD_KEY_STATE_PRESSED);
 end;
 
@@ -284,6 +301,9 @@ end;
 procedure TPMLWaylandPointerFwd.button(AProxy: Pwl_pointer; serial: LongWord;
   time: LongWord; button_: LongWord; state: LongWord);
 begin
+  // 押下だけ（SDL と同じ）。離したときの serial は選択の根拠にしない。
+  if state = 1 then
+    FOwner.NoteInputSerial(serial);
   FOwner.HandlePointerButton(button_, state = 1);
 end;
 
@@ -304,6 +324,7 @@ procedure TPMLWaylandTouchFwd.down(AProxy: Pwl_touch; serial: LongWord;
   time: LongWord; surface: Pwl_surface; id: LongInt; x: wl_fixed_t;
   y: wl_fixed_t);
 begin
+  FOwner.NoteInputSerial(serial);
   FOwner.HandleTouchDown(surface, id, x, y);
 end;
 
@@ -369,9 +390,29 @@ begin
   Result := FKeyboard <> nil;
 end;
 
+function TPMLWaylandSeat.GetHasKeyFocus: Boolean;
+begin
+  Result := FKeyFocus <> 0;
+end;
+
 function TPMLWaylandSeat.GetHasTouch: Boolean;
 begin
   Result := FTouch <> nil;
+end;
+
+{ 入力の serial を覚える。大きくなったときだけ更新して知らせる（SDL の
+  Wayland_UpdateImplicitGrabSerial）。
+
+  PORT-NOTE: SDL は wl_keyboard.enter の serial を覚えない（キー・ボタン押下・タッチだけ）。
+  papimela は enter の serial も覚える。フォーカスを得た直後（まだ何も押していない）に
+  クリップボードへ置いても、選択を保留にせず送れるようにするため。 }
+procedure TPMLWaylandSeat.NoteInputSerial(ASerial: LongWord);
+begin
+  if ASerial <= FInputSerial then
+    Exit;
+  FInputSerial := ASerial;
+  if Assigned(FOnInputSerial) then
+    FOnInputSerial(ASerial);
 end;
 
 { ---- カーソル形状（cursor-shape-v1） ---- }

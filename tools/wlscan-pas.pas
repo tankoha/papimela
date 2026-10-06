@@ -1021,6 +1021,13 @@ begin
     end
     else
     begin
+      // 記述子のアドレスは、types 配列を埋める前に全部確定させる。同じプロトコルの中の
+      // インターフェースを指す型（例: primary selection の data_offer が返す offer）が
+      // 後から代入される nil のままコピーされると、libwayland がイベントの new_id から
+      // プロキシを作るときに NULL を引いて落ちる。
+      for I := 0 to High(AProto.Interfaces) do
+        E.AddFmt('  %s_interface := @GIface_%s;',
+          [AProto.Interfaces[I].Name, AProto.Interfaces[I].Name]);
       E.Add('  FillChar(GTypes, SizeOf(GTypes), 0);');
       for I := 0 to High(AProto.PoolSlots) do
         if AProto.PoolSlots[I] <> '' then
@@ -1056,7 +1063,6 @@ begin
           E.AddFmt('  GIface_%s.events := @GEvt_%s[0];', [Iface.Name, Iface.Name])
         else
           E.AddFmt('  GIface_%s.events := nil;', [Iface.Name]);
-        E.AddFmt('  %s_interface := @GIface_%s;', [Iface.Name, Iface.Name]);
         E.Blank;
       end;
     end;

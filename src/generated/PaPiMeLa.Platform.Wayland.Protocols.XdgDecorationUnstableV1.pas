@@ -163,6 +163,8 @@ begin
   GInitialized := True;
   PaPiMeLa.Platform.Wayland.Protocols.XdgShell.EnsureProtocolInitialized;
 
+  zxdg_decoration_manager_v1_interface := @GIface_zxdg_decoration_manager_v1;
+  zxdg_toplevel_decoration_v1_interface := @GIface_zxdg_toplevel_decoration_v1;
   FillChar(GTypes, SizeOf(GTypes), 0);
   GTypes[1] := zxdg_toplevel_decoration_v1_interface;
   GTypes[2] := xdg_toplevel_interface;
@@ -179,7 +181,6 @@ begin
   GIface_zxdg_decoration_manager_v1.methods := @GReq_zxdg_decoration_manager_v1[0];
   GIface_zxdg_decoration_manager_v1.event_count := 0;
   GIface_zxdg_decoration_manager_v1.events := nil;
-  zxdg_decoration_manager_v1_interface := @GIface_zxdg_decoration_manager_v1;
 
   GReq_zxdg_toplevel_decoration_v1[0].name := 'destroy';
   GReq_zxdg_toplevel_decoration_v1[0].signature := '';
@@ -199,7 +200,6 @@ begin
   GIface_zxdg_toplevel_decoration_v1.methods := @GReq_zxdg_toplevel_decoration_v1[0];
   GIface_zxdg_toplevel_decoration_v1.event_count := 1;
   GIface_zxdg_toplevel_decoration_v1.events := @GEvt_zxdg_toplevel_decoration_v1[0];
-  zxdg_toplevel_decoration_v1_interface := @GIface_zxdg_toplevel_decoration_v1;
 
   GThunks_zxdg_toplevel_decoration_v1.configure := @Thunk_zxdg_toplevel_decoration_v1_configure;
 end;

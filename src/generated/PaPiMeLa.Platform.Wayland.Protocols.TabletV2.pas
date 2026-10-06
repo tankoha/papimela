@@ -1021,6 +1021,14 @@ begin
   GInitialized := True;
   PaPiMeLa.Platform.Wayland.Protocols.Wayland.EnsureProtocolInitialized;
 
+  zwp_tablet_manager_v2_interface := @GIface_zwp_tablet_manager_v2;
+  zwp_tablet_seat_v2_interface := @GIface_zwp_tablet_seat_v2;
+  zwp_tablet_tool_v2_interface := @GIface_zwp_tablet_tool_v2;
+  zwp_tablet_v2_interface := @GIface_zwp_tablet_v2;
+  zwp_tablet_pad_ring_v2_interface := @GIface_zwp_tablet_pad_ring_v2;
+  zwp_tablet_pad_strip_v2_interface := @GIface_zwp_tablet_pad_strip_v2;
+  zwp_tablet_pad_group_v2_interface := @GIface_zwp_tablet_pad_group_v2;
+  zwp_tablet_pad_v2_interface := @GIface_zwp_tablet_pad_v2;
   FillChar(GTypes, SizeOf(GTypes), 0);
   GTypes[3] := zwp_tablet_seat_v2_interface;
   GTypes[4] := wl_seat_interface;
@@ -1049,7 +1057,6 @@ begin
   GIface_zwp_tablet_manager_v2.methods := @GReq_zwp_tablet_manager_v2[0];
   GIface_zwp_tablet_manager_v2.event_count := 0;
   GIface_zwp_tablet_manager_v2.events := nil;
-  zwp_tablet_manager_v2_interface := @GIface_zwp_tablet_manager_v2;
 
   GReq_zwp_tablet_seat_v2[0].name := 'destroy';
   GReq_zwp_tablet_seat_v2[0].signature := '';
@@ -1069,7 +1076,6 @@ begin
   GIface_zwp_tablet_seat_v2.methods := @GReq_zwp_tablet_seat_v2[0];
   GIface_zwp_tablet_seat_v2.event_count := 3;
   GIface_zwp_tablet_seat_v2.events := @GEvt_zwp_tablet_seat_v2[0];
-  zwp_tablet_seat_v2_interface := @GIface_zwp_tablet_seat_v2;
 
   GReq_zwp_tablet_tool_v2[0].name := 'set_cursor';
   GReq_zwp_tablet_tool_v2[0].signature := 'u?oii';
@@ -1140,7 +1146,6 @@ begin
   GIface_zwp_tablet_tool_v2.methods := @GReq_zwp_tablet_tool_v2[0];
   GIface_zwp_tablet_tool_v2.event_count := 19;
   GIface_zwp_tablet_tool_v2.events := @GEvt_zwp_tablet_tool_v2[0];
-  zwp_tablet_tool_v2_interface := @GIface_zwp_tablet_tool_v2;
 
   GReq_zwp_tablet_v2[0].name := 'destroy';
   GReq_zwp_tablet_v2[0].signature := '';
@@ -1166,7 +1171,6 @@ begin
   GIface_zwp_tablet_v2.methods := @GReq_zwp_tablet_v2[0];
   GIface_zwp_tablet_v2.event_count := 5;
   GIface_zwp_tablet_v2.events := @GEvt_zwp_tablet_v2[0];
-  zwp_tablet_v2_interface := @GIface_zwp_tablet_v2;
 
   GReq_zwp_tablet_pad_ring_v2[0].name := 'set_feedback';
   GReq_zwp_tablet_pad_ring_v2[0].signature := 'su';
@@ -1192,7 +1196,6 @@ begin
   GIface_zwp_tablet_pad_ring_v2.methods := @GReq_zwp_tablet_pad_ring_v2[0];
   GIface_zwp_tablet_pad_ring_v2.event_count := 4;
   GIface_zwp_tablet_pad_ring_v2.events := @GEvt_zwp_tablet_pad_ring_v2[0];
-  zwp_tablet_pad_ring_v2_interface := @GIface_zwp_tablet_pad_ring_v2;
 
   GReq_zwp_tablet_pad_strip_v2[0].name := 'set_feedback';
   GReq_zwp_tablet_pad_strip_v2[0].signature := 'su';
@@ -1218,7 +1221,6 @@ begin
   GIface_zwp_tablet_pad_strip_v2.methods := @GReq_zwp_tablet_pad_strip_v2[0];
   GIface_zwp_tablet_pad_strip_v2.event_count := 4;
   GIface_zwp_tablet_pad_strip_v2.events := @GEvt_zwp_tablet_pad_strip_v2[0];
-  zwp_tablet_pad_strip_v2_interface := @GIface_zwp_tablet_pad_strip_v2;
 
   GReq_zwp_tablet_pad_group_v2[0].name := 'destroy';
   GReq_zwp_tablet_pad_group_v2[0].signature := '';
@@ -1247,7 +1249,6 @@ begin
   GIface_zwp_tablet_pad_group_v2.methods := @GReq_zwp_tablet_pad_group_v2[0];
   GIface_zwp_tablet_pad_group_v2.event_count := 6;
   GIface_zwp_tablet_pad_group_v2.events := @GEvt_zwp_tablet_pad_group_v2[0];
-  zwp_tablet_pad_group_v2_interface := @GIface_zwp_tablet_pad_group_v2;
 
   GReq_zwp_tablet_pad_v2[0].name := 'set_feedback';
   GReq_zwp_tablet_pad_v2[0].signature := 'usu';
@@ -1285,7 +1286,6 @@ begin
   GIface_zwp_tablet_pad_v2.methods := @GReq_zwp_tablet_pad_v2[0];
   GIface_zwp_tablet_pad_v2.event_count := 8;
   GIface_zwp_tablet_pad_v2.events := @GEvt_zwp_tablet_pad_v2[0];
-  zwp_tablet_pad_v2_interface := @GIface_zwp_tablet_pad_v2;
 
   GThunks_zwp_tablet_seat_v2.tablet_added := @Thunk_zwp_tablet_seat_v2_tablet_added;
   GThunks_zwp_tablet_seat_v2.tool_added := @Thunk_zwp_tablet_seat_v2_tool_added;

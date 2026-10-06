@@ -54,6 +54,7 @@ uses
   PaPiMeLa.Surface.BMP,
   PaPiMeLa.IO,
   PaPiMeLa.Video,
+  PaPiMeLa.Clipboard,
   PaPiMeLa.Video.Backend,
   PaPiMeLa.Render,
   PaPiMeLa.TextInput,

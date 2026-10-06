@@ -184,6 +184,62 @@ type
     procedure SetVisible(AVisible: Boolean); virtual; abstract;
   end;
 
+  { どちらの選択か。Clipboard はコピー＆ペースト、Primary は選んだだけで入り中クリックで
+    貼る方（X11 由来。Wayland では primary-selection-unstable-v1）。 }
+  TPMLClipboardSelection = (Clipboard, Primary);
+
+  { アプリが置いたデータを、求められたときに渡す（SDL_ClipboardDataCallback と
+    SDL_ClipboardCleanupCallback に当たる）。CORBA。寿命はアプリが持つ。
+
+    GetClipboardData は、SetData で並べた MIME タイプのどれかについてだけ呼ばれる。
+    渡せなければ False。他のアプリが貼り付けるたびに呼ばれうる（Wayland では
+    Pump の中から）。
+    ClipboardDataCancelled は、別のデータに置き換えられた・消された・他のアプリが
+    選択を取った・終了した、のどれかで、もうこのデータを求めないときに 1 回だけ呼ぶ。 }
+  IPMLClipboardDataProvider = interface
+    ['{5E0A7C21-8B4F-4D93-A6E2-1F07C39B84D6}']
+    function  GetClipboardData(const AMimeType: String; out AData: TBytes): Boolean;
+    procedure ClipboardDataCancelled;
+  end;
+
+  { クリップボードの部品から公開層（TPMLClipboard）への知らせ。 }
+  IPMLClipboardSink = interface
+    ['{B7D24E90-3C1A-4F68-9E05-6A81D2C4F37B}']
+    // こちらが置いたデータを、もう配らない（他のアプリが選択を取った）。
+    procedure ClipboardOwnershipLost(ASelection: TPMLClipboardSelection);
+    // 他のアプリの選択が見えるようになった。AMimeTypes が空なら選択が無くなった。
+    // こちらが置いたデータの折り返しは知らせない（部品が見分ける）。
+    procedure ClipboardOffered(ASelection: TPMLClipboardSelection;
+      const AMimeTypes: TStringArray);
+  end;
+
+  { クリップボードの部品。TPMLVideoBackend.Clipboard が nil でなければ使える
+    （能力 Clipboard / PrimarySelection）。nil なら公開層がプロセスの中だけで持つ。
+
+    SDL_VideoDevice のクリップボード 5 個とプライマリ選択 5 個に当たる。
+    データそのものは持たない。持ち主のときは公開層から借りた AProvider から、
+    他のアプリのときは相手から読む。例外は投げず、失敗は False。 }
+  TPMLClipboardBackend = class abstract(TPMLSystemObject)
+  strict protected
+    FSink: IPMLClipboardSink;
+  public
+    // 公開層が自分を登録する。nil で外す。
+    procedure Attach(ASink: IPMLClipboardSink);
+    function  SupportsSelection(ASelection: TPMLClipboardSelection): Boolean; virtual; abstract;
+    // 選択を取って AMimeTypes を配る。AProvider が nil（AMimeTypes は空）なら手放す。
+    // AProvider は次の SetSelection か Attach(nil) まで借りる。
+    function  SetSelection(ASelection: TPMLClipboardSelection; const AMimeTypes: TStringArray;
+      AProvider: IPMLClipboardDataProvider): Boolean; virtual; abstract;
+    // 他のアプリが配っている MIME タイプ（無ければ空）。
+    function  OfferedMimeTypes(ASelection: TPMLClipboardSelection): TStringArray; virtual; abstract;
+    // 他のアプリから AMimeType のデータを受け取る（待つことがある）。持ち主が
+    // こちらのときは呼ばれない。
+    function  ReceiveOffer(ASelection: TPMLClipboardSelection; const AMimeType: String;
+      out AData: TBytes): Boolean; virtual; abstract;
+    // 文字列として配る・探す MIME タイプ（優先する順）。既定は UTF-8 の text/plain だけ。
+    function  TextMimeTypes: TStringArray; virtual;
+  end;
+
   TPMLGLProfile = (ES, Core, Compatibility);
 
   { GL のコンテキストと描画先に求める性質。SDL_GL_SetAttribute の値をまとめたもの。
@@ -264,6 +320,7 @@ type
     FCapabilities: TPMLVideoCapabilities;
     FCursors     : TPMLCursorBackend;
     FGL          : TPMLGLBackend;
+    FClipboard   : TPMLClipboardBackend;
   public
     function  BackendName: String; virtual; abstract;
     function  Connect(ASink: IPMLVideoSink): Boolean; virtual; abstract;
@@ -282,6 +339,7 @@ type
     // 部品（nil = 未搭載。能力で判定する）。所有はバックエンド。
     property Cursors     : TPMLCursorBackend read FCursors;
     property GL          : TPMLGLBackend read FGL;
+    property Clipboard   : TPMLClipboardBackend read FClipboard;
     property Capabilities: TPMLVideoCapabilities read FCapabilities;
   end;
 
@@ -405,6 +463,18 @@ begin
 end;
 
 { TPMLDisplayBackend }
+
+{ TPMLClipboardBackend }
+
+procedure TPMLClipboardBackend.Attach(ASink: IPMLClipboardSink);
+begin
+  FSink := ASink;
+end;
+
+function TPMLClipboardBackend.TextMimeTypes: TStringArray;
+begin
+  Result := ['text/plain;charset=utf-8'];
+end;
 
 function TPMLDisplayBackend.GetUsableBounds: TPMLRect;
 begin

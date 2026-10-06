@@ -849,6 +849,15 @@ begin
   GInitialized := True;
   PaPiMeLa.Platform.Wayland.Protocols.Wayland.EnsureProtocolInitialized;
 
+  wp_color_manager_v1_interface := @GIface_wp_color_manager_v1;
+  wp_color_management_output_v1_interface := @GIface_wp_color_management_output_v1;
+  wp_color_management_surface_v1_interface := @GIface_wp_color_management_surface_v1;
+  wp_color_management_surface_feedback_v1_interface := @GIface_wp_color_management_surface_feedback_v1;
+  wp_image_description_creator_icc_v1_interface := @GIface_wp_image_description_creator_icc_v1;
+  wp_image_description_creator_params_v1_interface := @GIface_wp_image_description_creator_params_v1;
+  wp_image_description_v1_interface := @GIface_wp_image_description_v1;
+  wp_image_description_info_v1_interface := @GIface_wp_image_description_info_v1;
+  wp_image_description_reference_v1_interface := @GIface_wp_image_description_reference_v1;
   FillChar(GTypes, SizeOf(GTypes), 0);
   GTypes[8] := wp_color_management_output_v1_interface;
   GTypes[9] := wl_output_interface;
@@ -914,7 +923,6 @@ begin
   GIface_wp_color_manager_v1.methods := @GReq_wp_color_manager_v1[0];
   GIface_wp_color_manager_v1.event_count := 5;
   GIface_wp_color_manager_v1.events := @GEvt_wp_color_manager_v1[0];
-  wp_color_manager_v1_interface := @GIface_wp_color_manager_v1;
 
   GReq_wp_color_management_output_v1[0].name := 'destroy';
   GReq_wp_color_management_output_v1[0].signature := '';
@@ -931,7 +939,6 @@ begin
   GIface_wp_color_management_output_v1.methods := @GReq_wp_color_management_output_v1[0];
   GIface_wp_color_management_output_v1.event_count := 1;
   GIface_wp_color_management_output_v1.events := @GEvt_wp_color_management_output_v1[0];
-  wp_color_management_output_v1_interface := @GIface_wp_color_management_output_v1;
 
   GReq_wp_color_management_surface_v1[0].name := 'destroy';
   GReq_wp_color_management_surface_v1[0].signature := '';
@@ -948,7 +955,6 @@ begin
   GIface_wp_color_management_surface_v1.methods := @GReq_wp_color_management_surface_v1[0];
   GIface_wp_color_management_surface_v1.event_count := 0;
   GIface_wp_color_management_surface_v1.events := nil;
-  wp_color_management_surface_v1_interface := @GIface_wp_color_management_surface_v1;
 
   GReq_wp_color_management_surface_feedback_v1[0].name := 'destroy';
   GReq_wp_color_management_surface_feedback_v1[0].signature := '';
@@ -971,7 +977,6 @@ begin
   GIface_wp_color_management_surface_feedback_v1.methods := @GReq_wp_color_management_surface_feedback_v1[0];
   GIface_wp_color_management_surface_feedback_v1.event_count := 2;
   GIface_wp_color_management_surface_feedback_v1.events := @GEvt_wp_color_management_surface_feedback_v1[0];
-  wp_color_management_surface_feedback_v1_interface := @GIface_wp_color_management_surface_feedback_v1;
 
   GReq_wp_image_description_creator_icc_v1[0].name := 'create';
   GReq_wp_image_description_creator_icc_v1[0].signature := 'n';
@@ -985,7 +990,6 @@ begin
   GIface_wp_image_description_creator_icc_v1.methods := @GReq_wp_image_description_creator_icc_v1[0];
   GIface_wp_image_description_creator_icc_v1.event_count := 0;
   GIface_wp_image_description_creator_icc_v1.events := nil;
-  wp_image_description_creator_icc_v1_interface := @GIface_wp_image_description_creator_icc_v1;
 
   GReq_wp_image_description_creator_params_v1[0].name := 'create';
   GReq_wp_image_description_creator_params_v1[0].signature := 'n';
@@ -1023,7 +1027,6 @@ begin
   GIface_wp_image_description_creator_params_v1.methods := @GReq_wp_image_description_creator_params_v1[0];
   GIface_wp_image_description_creator_params_v1.event_count := 0;
   GIface_wp_image_description_creator_params_v1.events := nil;
-  wp_image_description_creator_params_v1_interface := @GIface_wp_image_description_creator_params_v1;
 
   GReq_wp_image_description_v1[0].name := 'destroy';
   GReq_wp_image_description_v1[0].signature := '';
@@ -1046,7 +1049,6 @@ begin
   GIface_wp_image_description_v1.methods := @GReq_wp_image_description_v1[0];
   GIface_wp_image_description_v1.event_count := 3;
   GIface_wp_image_description_v1.events := @GEvt_wp_image_description_v1[0];
-  wp_image_description_v1_interface := @GIface_wp_image_description_v1;
 
   GEvt_wp_image_description_info_v1[0].name := 'done';
   GEvt_wp_image_description_info_v1[0].signature := '';
@@ -1087,7 +1089,6 @@ begin
   GIface_wp_image_description_info_v1.methods := nil;
   GIface_wp_image_description_info_v1.event_count := 11;
   GIface_wp_image_description_info_v1.events := @GEvt_wp_image_description_info_v1[0];
-  wp_image_description_info_v1_interface := @GIface_wp_image_description_info_v1;
 
   GReq_wp_image_description_reference_v1[0].name := 'destroy';
   GReq_wp_image_description_reference_v1[0].signature := '';
@@ -1098,7 +1099,6 @@ begin
   GIface_wp_image_description_reference_v1.methods := @GReq_wp_image_description_reference_v1[0];
   GIface_wp_image_description_reference_v1.event_count := 0;
   GIface_wp_image_description_reference_v1.events := nil;
-  wp_image_description_reference_v1_interface := @GIface_wp_image_description_reference_v1;
 
   GThunks_wp_color_manager_v1.supported_intent := @Thunk_wp_color_manager_v1_supported_intent;
   GThunks_wp_color_manager_v1.supported_feature := @Thunk_wp_color_manager_v1_supported_feature;

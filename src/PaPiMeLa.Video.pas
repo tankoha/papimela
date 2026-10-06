@@ -44,7 +44,8 @@ uses
   PaPiMeLa.Core.Base,
   PaPiMeLa.Events,
   PaPiMeLa.Pixels,
-  PaPiMeLa.Video.Backend;
+  PaPiMeLa.Video.Backend,
+  PaPiMeLa.Clipboard;
 
 type
   TPMLVideoSystem = class;
@@ -260,6 +261,7 @@ type
     FNextWindowID : TPMLWindowID;
     FSelectedName : String;
     FCursors      : TPMLCursorSystem;
+    FClipboard    : TPMLClipboard;
     function  GetCapabilities: TPMLVideoCapabilities;
     procedure RefreshDisplays;
     procedure PushWindowEvent(AKind: TPMLEventKind; AWindowID: TPMLWindowID;
@@ -297,6 +299,8 @@ type
     property Displays    : TPMLDisplayList read FDisplays;
     property Windows     : TPMLWindowList read FWindows;
     property Cursors     : TPMLCursorSystem read FCursors;
+    // クリップボードとプライマリ選択。バックエンドに部品が無ければプロセスの中だけで持つ。
+    property Clipboard   : TPMLClipboard read FClipboard;
     property Capabilities: TPMLVideoCapabilities read GetCapabilities;
   end;
 
@@ -860,6 +864,7 @@ begin
   RefreshDisplays;
   // カーソル部品はバックエンドが Connect のときに用意する。無い場合もある。
   FCursors := TPMLCursorSystem.Create(Self, FBackend.Cursors);
+  FClipboard := TPMLClipboard.Create(ContextRef, Self, FQueue, FBackend.Clipboard);
   FQueue.RegisterPumpSource(Self as IPMLEventPumpSource);
 end;
 
@@ -879,6 +884,7 @@ begin
   SetLength(FDisplays, 0);
   // 公開窓口はバックエンドの部品を借りているので、切断より先に捨てる。
   FreeAndNil(FCursors);
+  FreeAndNil(FClipboard);
   if Assigned(FBackend) then
   begin
     FBackend.Disconnect;

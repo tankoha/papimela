@@ -251,6 +251,9 @@ begin
   GInitialized := True;
   PaPiMeLa.Platform.Wayland.Protocols.Wayland.EnsureProtocolInitialized;
 
+  zwp_pointer_constraints_v1_interface := @GIface_zwp_pointer_constraints_v1;
+  zwp_locked_pointer_v1_interface := @GIface_zwp_locked_pointer_v1;
+  zwp_confined_pointer_v1_interface := @GIface_zwp_confined_pointer_v1;
   FillChar(GTypes, SizeOf(GTypes), 0);
   GTypes[2] := zwp_locked_pointer_v1_interface;
   GTypes[3] := wl_surface_interface;
@@ -278,7 +281,6 @@ begin
   GIface_zwp_pointer_constraints_v1.methods := @GReq_zwp_pointer_constraints_v1[0];
   GIface_zwp_pointer_constraints_v1.event_count := 0;
   GIface_zwp_pointer_constraints_v1.events := nil;
-  zwp_pointer_constraints_v1_interface := @GIface_zwp_pointer_constraints_v1;
 
   GReq_zwp_locked_pointer_v1[0].name := 'destroy';
   GReq_zwp_locked_pointer_v1[0].signature := '';
@@ -301,7 +303,6 @@ begin
   GIface_zwp_locked_pointer_v1.methods := @GReq_zwp_locked_pointer_v1[0];
   GIface_zwp_locked_pointer_v1.event_count := 2;
   GIface_zwp_locked_pointer_v1.events := @GEvt_zwp_locked_pointer_v1[0];
-  zwp_locked_pointer_v1_interface := @GIface_zwp_locked_pointer_v1;
 
   GReq_zwp_confined_pointer_v1[0].name := 'destroy';
   GReq_zwp_confined_pointer_v1[0].signature := '';
@@ -321,7 +322,6 @@ begin
   GIface_zwp_confined_pointer_v1.methods := @GReq_zwp_confined_pointer_v1[0];
   GIface_zwp_confined_pointer_v1.event_count := 2;
   GIface_zwp_confined_pointer_v1.events := @GEvt_zwp_confined_pointer_v1[0];
-  zwp_confined_pointer_v1_interface := @GIface_zwp_confined_pointer_v1;
 
   GThunks_zwp_locked_pointer_v1.locked := @Thunk_zwp_locked_pointer_v1_locked;
   GThunks_zwp_locked_pointer_v1.unlocked := @Thunk_zwp_locked_pointer_v1_unlocked;

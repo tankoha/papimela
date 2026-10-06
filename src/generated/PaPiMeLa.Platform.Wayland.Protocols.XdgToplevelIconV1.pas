@@ -185,6 +185,8 @@ begin
   PaPiMeLa.Platform.Wayland.Protocols.XdgShell.EnsureProtocolInitialized;
   PaPiMeLa.Platform.Wayland.Protocols.Wayland.EnsureProtocolInitialized;
 
+  xdg_toplevel_icon_manager_v1_interface := @GIface_xdg_toplevel_icon_manager_v1;
+  xdg_toplevel_icon_v1_interface := @GIface_xdg_toplevel_icon_v1;
   FillChar(GTypes, SizeOf(GTypes), 0);
   GTypes[1] := xdg_toplevel_icon_v1_interface;
   GTypes[2] := xdg_toplevel_interface;
@@ -212,7 +214,6 @@ begin
   GIface_xdg_toplevel_icon_manager_v1.methods := @GReq_xdg_toplevel_icon_manager_v1[0];
   GIface_xdg_toplevel_icon_manager_v1.event_count := 2;
   GIface_xdg_toplevel_icon_manager_v1.events := @GEvt_xdg_toplevel_icon_manager_v1[0];
-  xdg_toplevel_icon_manager_v1_interface := @GIface_xdg_toplevel_icon_manager_v1;
 
   GReq_xdg_toplevel_icon_v1[0].name := 'destroy';
   GReq_xdg_toplevel_icon_v1[0].signature := '';
@@ -229,7 +230,6 @@ begin
   GIface_xdg_toplevel_icon_v1.methods := @GReq_xdg_toplevel_icon_v1[0];
   GIface_xdg_toplevel_icon_v1.event_count := 0;
   GIface_xdg_toplevel_icon_v1.events := nil;
-  xdg_toplevel_icon_v1_interface := @GIface_xdg_toplevel_icon_v1;
 
   GThunks_xdg_toplevel_icon_manager_v1.icon_size := @Thunk_xdg_toplevel_icon_manager_v1_icon_size;
   GThunks_xdg_toplevel_icon_manager_v1.done := @Thunk_xdg_toplevel_icon_manager_v1_done;

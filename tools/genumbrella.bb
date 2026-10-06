@@ -49,6 +49,7 @@
    {:unit "PaPiMeLa.Surface.BMP"}
    {:unit "PaPiMeLa.IO"}
    {:unit "PaPiMeLa.Video"}
+   {:unit "PaPiMeLa.Clipboard"}
    {:unit "PaPiMeLa.Render"}
    {:unit "PaPiMeLa.TextInput"}
    {:unit "PaPiMeLa.Time"}

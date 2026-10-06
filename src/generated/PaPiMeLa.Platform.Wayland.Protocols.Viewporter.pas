@@ -132,6 +132,8 @@ begin
   GInitialized := True;
   PaPiMeLa.Platform.Wayland.Protocols.Wayland.EnsureProtocolInitialized;
 
+  wp_viewporter_interface := @GIface_wp_viewporter;
+  wp_viewport_interface := @GIface_wp_viewport;
   FillChar(GTypes, SizeOf(GTypes), 0);
   GTypes[4] := wp_viewport_interface;
   GTypes[5] := wl_surface_interface;
@@ -148,7 +150,6 @@ begin
   GIface_wp_viewporter.methods := @GReq_wp_viewporter[0];
   GIface_wp_viewporter.event_count := 0;
   GIface_wp_viewporter.events := nil;
-  wp_viewporter_interface := @GIface_wp_viewporter;
 
   GReq_wp_viewport[0].name := 'destroy';
   GReq_wp_viewport[0].signature := '';
@@ -165,7 +166,6 @@ begin
   GIface_wp_viewport.methods := @GReq_wp_viewport[0];
   GIface_wp_viewport.event_count := 0;
   GIface_wp_viewport.events := nil;
-  wp_viewport_interface := @GIface_wp_viewport;
 
 end;
 

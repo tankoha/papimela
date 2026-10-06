@@ -165,6 +165,8 @@ begin
   PaPiMeLa.Platform.Wayland.Protocols.Wayland.EnsureProtocolInitialized;
   PaPiMeLa.Platform.Wayland.Protocols.TabletV2.EnsureProtocolInitialized;
 
+  wp_cursor_shape_manager_v1_interface := @GIface_wp_cursor_shape_manager_v1;
+  wp_cursor_shape_device_v1_interface := @GIface_wp_cursor_shape_device_v1;
   FillChar(GTypes, SizeOf(GTypes), 0);
   GTypes[2] := wp_cursor_shape_device_v1_interface;
   GTypes[3] := wl_pointer_interface;
@@ -186,7 +188,6 @@ begin
   GIface_wp_cursor_shape_manager_v1.methods := @GReq_wp_cursor_shape_manager_v1[0];
   GIface_wp_cursor_shape_manager_v1.event_count := 0;
   GIface_wp_cursor_shape_manager_v1.events := nil;
-  wp_cursor_shape_manager_v1_interface := @GIface_wp_cursor_shape_manager_v1;
 
   GReq_wp_cursor_shape_device_v1[0].name := 'destroy';
   GReq_wp_cursor_shape_device_v1[0].signature := '';
@@ -200,7 +201,6 @@ begin
   GIface_wp_cursor_shape_device_v1.methods := @GReq_wp_cursor_shape_device_v1[0];
   GIface_wp_cursor_shape_device_v1.event_count := 0;
   GIface_wp_cursor_shape_device_v1.events := nil;
-  wp_cursor_shape_device_v1_interface := @GIface_wp_cursor_shape_device_v1;
 
 end;
 

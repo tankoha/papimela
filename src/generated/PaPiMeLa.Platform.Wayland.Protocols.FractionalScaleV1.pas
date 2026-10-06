@@ -140,6 +140,8 @@ begin
   GInitialized := True;
   PaPiMeLa.Platform.Wayland.Protocols.Wayland.EnsureProtocolInitialized;
 
+  wp_fractional_scale_manager_v1_interface := @GIface_wp_fractional_scale_manager_v1;
+  wp_fractional_scale_v1_interface := @GIface_wp_fractional_scale_v1;
   FillChar(GTypes, SizeOf(GTypes), 0);
   GTypes[1] := wp_fractional_scale_v1_interface;
   GTypes[2] := wl_surface_interface;
@@ -156,7 +158,6 @@ begin
   GIface_wp_fractional_scale_manager_v1.methods := @GReq_wp_fractional_scale_manager_v1[0];
   GIface_wp_fractional_scale_manager_v1.event_count := 0;
   GIface_wp_fractional_scale_manager_v1.events := nil;
-  wp_fractional_scale_manager_v1_interface := @GIface_wp_fractional_scale_manager_v1;
 
   GReq_wp_fractional_scale_v1[0].name := 'destroy';
   GReq_wp_fractional_scale_v1[0].signature := '';
@@ -170,7 +171,6 @@ begin
   GIface_wp_fractional_scale_v1.methods := @GReq_wp_fractional_scale_v1[0];
   GIface_wp_fractional_scale_v1.event_count := 1;
   GIface_wp_fractional_scale_v1.events := @GEvt_wp_fractional_scale_v1[0];
-  wp_fractional_scale_v1_interface := @GIface_wp_fractional_scale_v1;
 
   GThunks_wp_fractional_scale_v1.preferred_scale := @Thunk_wp_fractional_scale_v1_preferred_scale;
 end;

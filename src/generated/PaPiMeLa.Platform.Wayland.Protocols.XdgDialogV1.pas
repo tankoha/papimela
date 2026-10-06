@@ -128,6 +128,8 @@ begin
   GInitialized := True;
   PaPiMeLa.Platform.Wayland.Protocols.XdgShell.EnsureProtocolInitialized;
 
+  xdg_wm_dialog_v1_interface := @GIface_xdg_wm_dialog_v1;
+  xdg_dialog_v1_interface := @GIface_xdg_dialog_v1;
   FillChar(GTypes, SizeOf(GTypes), 0);
   GTypes[0] := xdg_dialog_v1_interface;
   GTypes[1] := xdg_toplevel_interface;
@@ -144,7 +146,6 @@ begin
   GIface_xdg_wm_dialog_v1.methods := @GReq_xdg_wm_dialog_v1[0];
   GIface_xdg_wm_dialog_v1.event_count := 0;
   GIface_xdg_wm_dialog_v1.events := nil;
-  xdg_wm_dialog_v1_interface := @GIface_xdg_wm_dialog_v1;
 
   GReq_xdg_dialog_v1[0].name := 'destroy';
   GReq_xdg_dialog_v1[0].signature := '';
@@ -161,7 +162,6 @@ begin
   GIface_xdg_dialog_v1.methods := @GReq_xdg_dialog_v1[0];
   GIface_xdg_dialog_v1.event_count := 0;
   GIface_xdg_dialog_v1.events := nil;
-  xdg_dialog_v1_interface := @GIface_xdg_dialog_v1;
 
 end;
 

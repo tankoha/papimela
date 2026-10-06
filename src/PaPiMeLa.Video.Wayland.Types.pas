@@ -53,7 +53,8 @@ uses
   PaPiMeLa.Platform.Wayland.Protocols.PointerConstraintsUnstableV1,
   PaPiMeLa.Platform.Wayland.Protocols.RelativePointerUnstableV1,
   PaPiMeLa.Platform.Wayland.Protocols.TabletV2,
-  PaPiMeLa.Platform.Wayland.Protocols.CursorShapeV1;
+  PaPiMeLa.Platform.Wayland.Protocols.CursorShapeV1,
+  PaPiMeLa.Platform.Wayland.Protocols.WpPrimarySelectionUnstableV1;
 
 type
   { 1 つの wl_output。メタデータを溜めて TPMLDisplayBackend に見せる。 }
@@ -131,6 +132,9 @@ type
     PointerConstraints: Pzwp_pointer_constraints_v1;
     RelativePointerMgr: Pzwp_relative_pointer_manager_v1;
     CursorShapeMgr    : Pwp_cursor_shape_manager_v1;
+    // クリップボード（wl_data_device_manager）とプライマリ選択
+    DataDeviceMgr     : Pwl_data_device_manager;
+    PrimarySelectionMgr: Pzwp_primary_selection_device_manager_v1;
 
     constructor Create;
     destructor Destroy; override;
@@ -255,6 +259,7 @@ begin
   PaPiMeLa.Platform.Wayland.Protocols.RelativePointerUnstableV1.EnsureProtocolInitialized;
   PaPiMeLa.Platform.Wayland.Protocols.TabletV2.EnsureProtocolInitialized;
   PaPiMeLa.Platform.Wayland.Protocols.CursorShapeV1.EnsureProtocolInitialized;
+  PaPiMeLa.Platform.Wayland.Protocols.WpPrimarySelectionUnstableV1.EnsureProtocolInitialized;
 
   FDisplay := wl_display_connect(nil);
   if FDisplay = nil then
@@ -297,6 +302,8 @@ begin
   PointerConstraints := nil;
   RelativePointerMgr := nil;
   CursorShapeMgr := nil;
+  DataDeviceMgr := nil;
+  PrimarySelectionMgr := nil;
   Compositor := nil;
   Shm := nil;
   WmBase := nil;
@@ -347,6 +354,11 @@ begin
       RelativePointerMgr := Pzwp_relative_pointer_manager_v1(B(zwp_relative_pointer_manager_v1_interface, 1));
     'zwp_text_input_manager_v3':
       TextInputMgr := Pzwp_text_input_manager_v3(B(zwp_text_input_manager_v3_interface, 1));
+    'wl_data_device_manager':
+      DataDeviceMgr := Pwl_data_device_manager(B(wl_data_device_manager_interface, 3));
+    'zwp_primary_selection_device_manager_v1':
+      PrimarySelectionMgr := Pzwp_primary_selection_device_manager_v1(
+        B(zwp_primary_selection_device_manager_v1_interface, 1));
     'wl_output':
       begin
         Output := TPMLWaylandOutput.Create(Pwl_output(B(wl_output_interface, 4)), AName);
@@ -410,6 +422,10 @@ begin
     Include(Result, TPMLVideoCapability.CursorShape);
   if (PointerConstraints <> nil) and (RelativePointerMgr <> nil) then
     Include(Result, TPMLVideoCapability.RelativeMouse);
+  if DataDeviceMgr <> nil then
+    Include(Result, TPMLVideoCapability.Clipboard);
+  if PrimarySelectionMgr <> nil then
+    Include(Result, TPMLVideoCapability.PrimarySelection);
   // xdg-shell はウィンドウ位置を持たないので WindowPositioning は入れない（§3.3）。
   Include(Result, TPMLVideoCapability.SystemMenu);
 end;

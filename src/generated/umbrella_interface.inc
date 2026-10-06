@@ -13,6 +13,7 @@
 //   PaPiMeLa.Surface.BMP
 //   PaPiMeLa.IO
 //   PaPiMeLa.Video
+//   PaPiMeLa.Clipboard
 //   PaPiMeLa.Render
 //   PaPiMeLa.TextInput
 //   PaPiMeLa.Time
@@ -86,6 +87,7 @@ type
   TPMLTouchPoint = PaPiMeLa.Events.TPMLTouchPoint;
   TPMLTouchPoints = PaPiMeLa.Events.TPMLTouchPoints;
   TPMLTouchFingerData = PaPiMeLa.Events.TPMLTouchFingerData;
+  TPMLClipboardEventData = PaPiMeLa.Events.TPMLClipboardEventData;
   TPMLUserEventData = PaPiMeLa.Events.TPMLUserEventData;
   TPMLEvent = PaPiMeLa.Events.TPMLEvent;
   IPMLEventPumpSource = PaPiMeLa.Events.IPMLEventPumpSource;
@@ -582,6 +584,14 @@ type
   TPMLWindowList = PaPiMeLa.Video.TPMLWindowList;
   TPMLDisplayList = PaPiMeLa.Video.TPMLDisplayList;
   TPMLVideoSystem = PaPiMeLa.Video.TPMLVideoSystem;
+
+// ---- PaPiMeLa.Clipboard
+type
+  TPMLClipboardSelection = PaPiMeLa.Clipboard.TPMLClipboardSelection;
+  IPMLClipboardDataProvider = PaPiMeLa.Clipboard.IPMLClipboardDataProvider;
+  TPMLTextClipboardProvider = PaPiMeLa.Clipboard.TPMLTextClipboardProvider;
+  TPMLSelectionState = PaPiMeLa.Clipboard.TPMLSelectionState;
+  TPMLClipboard = PaPiMeLa.Clipboard.TPMLClipboard;
 
 // ---- PaPiMeLa.Render
 type

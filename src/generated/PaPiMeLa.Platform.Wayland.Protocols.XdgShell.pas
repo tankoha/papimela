@@ -686,6 +686,11 @@ begin
   GInitialized := True;
   PaPiMeLa.Platform.Wayland.Protocols.Wayland.EnsureProtocolInitialized;
 
+  xdg_wm_base_interface := @GIface_xdg_wm_base;
+  xdg_positioner_interface := @GIface_xdg_positioner;
+  xdg_surface_interface := @GIface_xdg_surface;
+  xdg_toplevel_interface := @GIface_xdg_toplevel;
+  xdg_popup_interface := @GIface_xdg_popup;
   FillChar(GTypes, SizeOf(GTypes), 0);
   GTypes[4] := xdg_positioner_interface;
   GTypes[5] := xdg_surface_interface;
@@ -723,7 +728,6 @@ begin
   GIface_xdg_wm_base.methods := @GReq_xdg_wm_base[0];
   GIface_xdg_wm_base.event_count := 1;
   GIface_xdg_wm_base.events := @GEvt_xdg_wm_base[0];
-  xdg_wm_base_interface := @GIface_xdg_wm_base;
 
   GReq_xdg_positioner[0].name := 'destroy';
   GReq_xdg_positioner[0].signature := '';
@@ -761,7 +765,6 @@ begin
   GIface_xdg_positioner.methods := @GReq_xdg_positioner[0];
   GIface_xdg_positioner.event_count := 0;
   GIface_xdg_positioner.events := nil;
-  xdg_positioner_interface := @GIface_xdg_positioner;
 
   GReq_xdg_surface[0].name := 'destroy';
   GReq_xdg_surface[0].signature := '';
@@ -787,7 +790,6 @@ begin
   GIface_xdg_surface.methods := @GReq_xdg_surface[0];
   GIface_xdg_surface.event_count := 1;
   GIface_xdg_surface.events := @GEvt_xdg_surface[0];
-  xdg_surface_interface := @GIface_xdg_surface;
 
   GReq_xdg_toplevel[0].name := 'destroy';
   GReq_xdg_toplevel[0].signature := '';
@@ -849,7 +851,6 @@ begin
   GIface_xdg_toplevel.methods := @GReq_xdg_toplevel[0];
   GIface_xdg_toplevel.event_count := 4;
   GIface_xdg_toplevel.events := @GEvt_xdg_toplevel[0];
-  xdg_toplevel_interface := @GIface_xdg_toplevel;
 
   GReq_xdg_popup[0].name := 'destroy';
   GReq_xdg_popup[0].signature := '';
@@ -875,7 +876,6 @@ begin
   GIface_xdg_popup.methods := @GReq_xdg_popup[0];
   GIface_xdg_popup.event_count := 3;
   GIface_xdg_popup.events := @GEvt_xdg_popup[0];
-  xdg_popup_interface := @GIface_xdg_popup;
 
   GThunks_xdg_wm_base.ping := @Thunk_xdg_wm_base_ping;
   GThunks_xdg_surface.configure := @Thunk_xdg_surface_configure;

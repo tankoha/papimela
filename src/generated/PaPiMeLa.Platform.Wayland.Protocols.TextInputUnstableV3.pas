@@ -299,6 +299,8 @@ begin
   GInitialized := True;
   PaPiMeLa.Platform.Wayland.Protocols.Wayland.EnsureProtocolInitialized;
 
+  zwp_text_input_v3_interface := @GIface_zwp_text_input_v3;
+  zwp_text_input_manager_v3_interface := @GIface_zwp_text_input_manager_v3;
   FillChar(GTypes, SizeOf(GTypes), 0);
   GTypes[4] := wl_surface_interface;
   GTypes[5] := wl_surface_interface;
@@ -353,7 +355,6 @@ begin
   GIface_zwp_text_input_v3.methods := @GReq_zwp_text_input_v3[0];
   GIface_zwp_text_input_v3.event_count := 6;
   GIface_zwp_text_input_v3.events := @GEvt_zwp_text_input_v3[0];
-  zwp_text_input_v3_interface := @GIface_zwp_text_input_v3;
 
   GReq_zwp_text_input_manager_v3[0].name := 'destroy';
   GReq_zwp_text_input_manager_v3[0].signature := '';
@@ -367,7 +368,6 @@ begin
   GIface_zwp_text_input_manager_v3.methods := @GReq_zwp_text_input_manager_v3[0];
   GIface_zwp_text_input_manager_v3.event_count := 0;
   GIface_zwp_text_input_manager_v3.events := nil;
-  zwp_text_input_manager_v3_interface := @GIface_zwp_text_input_manager_v3;
 
   GThunks_zwp_text_input_v3.enter := @Thunk_zwp_text_input_v3_enter;
   GThunks_zwp_text_input_v3.leave := @Thunk_zwp_text_input_v3_leave;

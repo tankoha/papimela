@@ -13,6 +13,7 @@
 //   PaPiMeLa.Surface.BMP
 //   PaPiMeLa.IO
 //   PaPiMeLa.Video
+//   PaPiMeLa.Clipboard
 //   PaPiMeLa.Render
 //   PaPiMeLa.TextInput
 //   PaPiMeLa.Time

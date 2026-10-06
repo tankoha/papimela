@@ -93,6 +93,7 @@ begin
   GInitialized := True;
   PaPiMeLa.Platform.Wayland.Protocols.Wayland.EnsureProtocolInitialized;
 
+  wp_pointer_warp_v1_interface := @GIface_wp_pointer_warp_v1;
   FillChar(GTypes, SizeOf(GTypes), 0);
   GTypes[0] := wl_surface_interface;
   GTypes[1] := wl_pointer_interface;
@@ -109,7 +110,6 @@ begin
   GIface_wp_pointer_warp_v1.methods := @GReq_wp_pointer_warp_v1[0];
   GIface_wp_pointer_warp_v1.event_count := 0;
   GIface_wp_pointer_warp_v1.events := nil;
-  wp_pointer_warp_v1_interface := @GIface_wp_pointer_warp_v1;
 
 end;
 

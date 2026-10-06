@@ -140,6 +140,12 @@ type
     Pressure: Single;
   end;
 
+  // ClipboardUpdate の付随情報。MIME タイプの並びは TPMLEvent.Strings に載る。
+  TPMLClipboardEventData = record
+    Owner           : Boolean;   // True = このアプリが置いた（SetText など）。False = 他のアプリ
+    PrimarySelection: Boolean;   // True = プライマリ選択（中クリックで貼る方）
+  end;
+
   TPMLUserEventData = record
     Code        : Int32;
     Data1, Data2: Pointer;
@@ -153,7 +159,7 @@ type
     // ---- 管理型フィールド（可変部の外）。使わない Kind では空のまま
     Text     : String;                    // TextInput / TextEditing / DropFile / DropText
     Segments : TPMLCompositionSegments;   // TextEditing（§7.3）
-    Strings  : TPMLStringArray;            // TextEditingCandidates
+    Strings  : TPMLStringArray;            // TextEditingCandidates、ClipboardUpdate（MIME タイプ）
     // ---- 固定部
     case Integer of
       0: (Key              : TPMLKeyEventData);
@@ -165,6 +171,7 @@ type
       6: (Button           : TPMLMouseButtonData);
       7: (Wheel            : TPMLMouseWheelData);
       8: (Finger           : TPMLTouchFingerData);
+      9: (Clipboard        : TPMLClipboardEventData);
       // Display / JAxis / GAxis / Finger ... は各サブシステム着手時に追加する。
       // 可変部への追加は既存コードに影響しない。
   end;

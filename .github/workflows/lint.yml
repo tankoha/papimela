@@ -38,7 +38,7 @@ jobs:
           sudo apt-get install -y fpc
           # GPU のドライバ（GLES2）の検査に、Mesa のソフトウェア実装（llvmpipe）と
           # 窓の無い EGL（surfaceless）を使う。
-          sudo apt-get install -y libegl1 libgles2 libegl-mesa0 libgl1-mesa-dri
+          sudo apt-get install -y libegl1 libgles2 libegl-mesa0 libgl1-mesa-dri libwayland-client0
 
       - name: Build rawpaco
         working-directory: .rawpaco
@@ -87,7 +87,7 @@ jobs:
       - name: Run headless tests
         run: |
           set -eu
-          for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_backends test_umbrella; do
+          for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_protocol_types test_backends test_umbrella; do
             fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/$t test/$t.pas
             ./test/$t
           done
