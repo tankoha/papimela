@@ -5,6 +5,7 @@
 //   PaPiMeLa.Errors
 //   PaPiMeLa.Core
 //   PaPiMeLa.Events
+//   PaPiMeLa.Events.Drop
 //   PaPiMeLa.Events.Keymap
 //   PaPiMeLa.Keycodes
 //   PaPiMeLa.Pixels
@@ -27,6 +28,17 @@
 function PMLNowNS: UInt64;
 begin
   Result := PaPiMeLa.Events.PMLNowNS;
+end;
+
+// ---- PaPiMeLa.Events.Drop
+function PMLURIToLocalPath(const AURI: String; out APath: String): Boolean;
+begin
+  Result := PaPiMeLa.Events.Drop.PMLURIToLocalPath(AURI, APath);
+end;
+
+function PMLURIListToLocalPaths(const AList: String): TStringArray;
+begin
+  Result := PaPiMeLa.Events.Drop.PMLURIListToLocalPaths(AList);
 end;
 
 // ---- PaPiMeLa.Events.Keymap

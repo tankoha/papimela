@@ -161,7 +161,6 @@ type
     function  GetHasKeyFocus: Boolean;
     procedure ReapplyCursor;
     function  WindowOf(ASurface: Pwl_surface): TPMLWaylandWindowBackend;
-    function  WindowIDOf(ASurface: Pwl_surface): TPMLWindowID;
     procedure DeliverKey(AEvdevCode: LongWord; ADown, AIsRepeat: Boolean);
     procedure NotifyKeyFocusToGrab;
   private
@@ -201,9 +200,14 @@ type
     // カーソル部品（TPMLWaylandCursorBackend）から呼ばれる。要求を覚えて即適用し、
     // 次に wl_pointer.enter が来たときにも同じ形を張り直す。
     procedure ApplyCursor(AShape: LongWord; AVisible: Boolean);
+    // サーフェスを持つウィンドウの ID（user_data のウィンドウ backend から引く）。
+    // 解決できなければ 0。データデバイス（ドラッグ＆ドロップ）が使う。
+    function  WindowIDOf(ASurface: Pwl_surface): TPMLWindowID;
     // 次のリピートまでの残り時間（ミリ秒）。リピート中でなければ -1。
     function  MillisecondsUntilRepeat: Integer;
 
+    // イベントを流す先。データデバイスがドロップのイベントを流すのに使う。
+    property Queue: TPMLEventQueue read FQueue;
     property SeatName: String read FName;
     // 生の wl_seat。データデバイスのようにシートから作るものが使う。
     property Handle: Pwl_seat read FSeat;

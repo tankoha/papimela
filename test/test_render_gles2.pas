@@ -358,6 +358,94 @@ begin
   Result := Max(Max(Abs(A.R - B.R), Abs(A.G - B.G)), Max(Abs(A.B - B.B), Abs(A.A - B.A)));
 end;
 
+{ 回す・写す（#41）。90 度刻みと反転は辺が画素にそろう。30 度と平行四辺形は辺の画素で
+  GL とソフトウェアのラスタライズの規則の差が出うる。 }
+procedure SceneRotated(R: TPMLRenderer);
+var
+  T: TPMLTexture;
+begin
+  Background(R);
+  T := R.CreateTextureFromSurface(Checker);
+  R.RenderTextureRotated(T, FR(0, 0, 0, 0), FR(4, 4, 16, 16), 90);
+  R.RenderTextureRotated(T, FR(0, 0, 0, 0), FR(24, 4, 16, 16), 180, [TPMLFlip.Horizontal]);
+  R.RenderTextureRotated(T, FR(4, 4, 8, 8), FR(44, 4, 16, 16), 0, [TPMLFlip.Vertical]);
+  R.RenderTextureRotated(T, FR(0, 0, 0, 0), FR(8, 30, 24, 24), 30);
+  R.RenderTextureAffine(T, FR(0, 0, 0, 0), TPMLFPoint.Make(36, 30), TPMLFPoint.Make(60, 36),
+    TPMLFPoint.Make(34, 58));
+end;
+
+{ 敷き詰める・9 つに分ける（#41）。どちらも RenderTexture を並べるだけなので、差は出ない。 }
+procedure SceneTiled9Grid(R: TPMLRenderer);
+var
+  T: TPMLTexture;
+begin
+  Background(R);
+  T := R.CreateTextureFromSurface(Checker);
+  R.RenderTextureTiled(T, FR(2, 2, 8, 8), 1, FR(2, 2, 28, 20));
+  R.RenderTexture9Grid(T, FR(0, 0, 0, 0), 4, 4, 4, 4, 1, FR(34, 2, 28, 26));
+  R.RenderTexture9GridTiled(T, FR(0, 0, 0, 0), 4, 4, 4, 4, 1, FR(2, 30, 40, 30), 1);
+end;
+
+{ 描画先のテクスチャ（#41）。4 つの形式の描画先へ、塗り・アルファ付きと X の形式の
+  テクスチャ・ビューポートとクリップで描き、描画先どうしでも写し合ってから、出力へ
+  拡大して並べる。GPU では FBO のメモリが描画先の形式の並びになっていないと、
+  あとで写したときに R と B が入れ替わる。 }
+procedure SceneRenderTargets(R: TPMLRenderer);
+var
+  Fmt: array[0..3] of TPMLPixelFormat;
+  T: array[0..3] of TPMLTexture;
+  Src, Grad: TPMLTexture;
+  XS: TPMLSurface;
+  XT: TPMLTexture;
+  I, X, Y: Integer;
+begin
+  Fmt[0] := PML_PIXELFORMAT_ARGB8888;
+  Fmt[1] := PML_PIXELFORMAT_ABGR8888;
+  Fmt[2] := PML_PIXELFORMAT_XRGB8888;
+  Fmt[3] := PML_PIXELFORMAT_XBGR8888;
+  Src := R.CreateTextureFromSurface(Checker);
+  Grad := R.CreateTextureFromSurface(Gradient);
+  XS := TPMLSurface.Create(6, 6, PML_PIXELFORMAT_XRGB8888);
+  try
+    for Y := 0 to 5 do
+      for X := 0 to 5 do
+        XS.WritePixel(X, Y, TPMLColor.Make(250 - X * 40, 30 + Y * 40, 90, 255));
+    XT := R.CreateTextureFromSurface(XS);
+  finally
+    XS.Free;
+  end;
+
+  for I := 0 to 3 do
+  begin
+    T[I] := R.CreateTexture(Fmt[I], TPMLTextureAccess.Target, 14, 14);
+    R.RenderTarget := T[I];
+    R.BlendMode := TPMLBlendMode.None;
+    R.DrawColor := TPMLColor.Make(200, 60, 20, 255);    // R と B を見分けられる色
+    R.Clear;
+    R.DrawColor := TPMLColor.Make(20, 180, 250, 255);
+    R.FillRect(FR(1, 1, 5, 3));
+    R.RenderTexture(Src, FR(0, 0, 8, 8), FR(7, 1, 6, 6));
+    R.RenderTexture(Grad, FR(0, 0, 0, 0), FR(1, 7, 12, 6));   // アルファで合成
+    R.Viewport := TPMLRect.Make(2, 4, 8, 8);
+    R.ClipRect := TPMLRect.Make(1, 1, 4, 4);
+    R.RenderTexture(XT, FR(0, 0, 0, 0), FR(0, 0, 6, 6));     // X の形式。クリップで切る
+    R.ClipRect := TPMLRect.Make(0, 0, 0, 0);
+    R.Viewport := TPMLRect.Make(0, 0, 0, 0);
+  end;
+  // 描画先から描画先へ（形式の組で色の写し方が変わる）。
+  R.RenderTarget := T[1];
+  R.RenderTexture(T[0], FR(0, 0, 0, 0), FR(8, 8, 6, 6));
+  R.RenderTarget := T[2];
+  R.RenderTexture(T[3], FR(0, 0, 0, 0), FR(0, 8, 6, 6));
+  R.RenderTarget := T[3];
+  R.RenderTexture(T[1], FR(0, 0, 7, 7), FR(7, 0, 7, 7));
+
+  R.RenderTarget := nil;
+  Background(R);
+  for I := 0 to 3 do
+    R.RenderTexture(T[I], FR(0, 0, 0, 0), FR(2 + (I mod 2) * 31, 2 + (I div 2) * 31, 28, 28));
+end;
+
 procedure Compare(const AName: String; AScene: TScene; ATolerance: Integer;
   AMaxBad: Integer = 0);
 var
@@ -433,6 +521,7 @@ procedure OffscreenSection;
 var
   G: TPMLRenderer;
   Full, Part: TPMLSurface;
+  T: TPMLTexture;
   Ok: Boolean;
   X, Y, OW, OH: Integer;
   M: TPMLBlendMode;
@@ -485,6 +574,29 @@ begin
       Part.Free;
       Full.Free;
     end;
+
+    // 描画先のテクスチャの読み戻し（#41）。BGRA の並びの描画先でも色が入れ替わらない。
+    // 描画先は出力（W x H）より大きくして、読む範囲が描画先の大きさで決まることも見る。
+    Check(G.Driver.SupportsRenderTargets, '描画先のテクスチャを持てる');
+    T := G.CreateTexture(PML_PIXELFORMAT_ARGB8888, TPMLTextureAccess.Target, W + 16, H + 6);
+    G.RenderTarget := T;
+    G.DrawColor := TPMLColor.Make(200, 60, 20, 255);
+    G.Clear;
+    G.DrawColor := TPMLColor.Make(10, 20, 250, 255);
+    G.FillRect(FR(0, H + 5, 1, 1));
+    Part := G.ReadPixels(TPMLRect.Make(0, 0, 0, 0));
+    try
+      Check((Part.Width = W + 16) and (Part.Height = H + 6)
+        and Part.ReadPixel(W + 15, 0).Equals(TPMLColor.Make(200, 60, 20, 255))
+        and Part.ReadPixel(W + 15, H + 5).Equals(TPMLColor.Make(200, 60, 20, 255))
+        and Part.ReadPixel(0, H + 5).Equals(TPMLColor.Make(10, 20, 250, 255)),
+        Format('描画先の読み戻しは描画先の大きさ（出力より大きい）で、色と上下がそのまま（%s %s）',
+          [IntToHex(LongWord(Part.ReadPixel(W + 15, 0)), 8), IntToHex(LongWord(Part.ReadPixel(0, H + 5)), 8)]));
+    finally
+      Part.Free;
+    end;
+    G.RenderTarget := nil;
+    Check(G.GetOutputSize(OW, OH) and (OW = W) and (OH = H), '描画先を戻すと出力の大きさに戻る');
   finally
     G.Free;
   end;
@@ -507,6 +619,9 @@ begin
   Compare('論理解像度の線（三角形。斜め・閉じた半透明）', @SceneLogicalLines, 2);
   Compare('倍率だけの線（矩形の並びとブレゼンハム）', @SceneScaleLines, 0);
   Compare('DebugText（等倍・2 倍・色の切り替え）', @SceneDebugText, 2);
+  Compare('回す（90 度・反転・30 度）と平行四辺形', @SceneRotated, 0, 40);
+  Compare('敷き詰めと 9 つ分け（9GridTiled を含む）', @SceneTiled9Grid, 0);
+  Compare('描画先のテクスチャ（4 形式・合成・クリップ・描画先どうし）', @SceneRenderTargets, 2);
 end;
 
 { ---- ウィンドウ ---- }
@@ -524,6 +639,7 @@ var
   N, OW, OH: Integer;
   Refresh, Fps1, Fps0: Double;
   Ev: TPMLEvent;
+  Tgt: TPMLTexture;
 
   procedure Pump(AMs: Integer);
   var
@@ -604,6 +720,38 @@ begin
     finally
       S.Free;
     end;
+
+    // ウィンドウのレンダラでも、描画先のテクスチャ（FBO）は上下を反転させない。
+    // 上の行に赤、下の行に緑を描いた描画先を、ウィンドウの左上へ写して読む。
+    Tgt := R.CreateTexture(PML_PIXELFORMAT_ARGB8888, TPMLTextureAccess.Target, 4, 6);
+    R.RenderTarget := Tgt;
+    R.DrawColor := TPMLColor.Make(0, 0, 255, 255);
+    R.Clear;
+    R.DrawColor := TPMLColor.Make(255, 0, 0, 255);
+    R.FillRect(FR(0, 0, 4, 1));
+    R.DrawColor := TPMLColor.Make(0, 255, 0, 255);
+    R.FillRect(FR(0, 5, 4, 1));
+    S := R.ReadPixels(TPMLRect.Make(0, 0, 0, 0));
+    try
+      Check((S.Width = 4) and S.ReadPixel(0, 0).Equals(TPMLColor.Make(255, 0, 0, 255))
+        and S.ReadPixel(3, 5).Equals(TPMLColor.Make(0, 255, 0, 255)),
+        'ウィンドウのレンダラの描画先は、上に描いたものが上に読める');
+    finally
+      S.Free;
+    end;
+    R.RenderTarget := nil;
+    Background(R);
+    R.RenderTexture(Tgt, FR(0, 0, 0, 0), FR(0, 0, 4, 6));
+    S := R.ReadPixels(TPMLRect.Make(0, 0, 8, 8));
+    try
+      Check(S.ReadPixel(1, 0).Equals(TPMLColor.Make(255, 0, 0, 255))
+        and S.ReadPixel(1, 5).Equals(TPMLColor.Make(0, 255, 0, 255))
+        and S.ReadPixel(1, 2).Equals(TPMLColor.Make(0, 0, 255, 255)),
+        '描画先をウィンドウへ写しても上下がそのまま');
+    finally
+      S.Free;
+    end;
+    Tgt.Free;
     R.Present;
 
     R.VSync := 1;

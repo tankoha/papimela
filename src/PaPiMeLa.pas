@@ -46,6 +46,7 @@ uses
   PaPiMeLa.Errors,
   PaPiMeLa.Core,
   PaPiMeLa.Events,
+  PaPiMeLa.Events.Drop,
   PaPiMeLa.Events.Keymap,
   PaPiMeLa.Keycodes,
   PaPiMeLa.Pixels,

@@ -24,7 +24,8 @@ Wayland のウィンドウ（xdg-shell、configure の往復、最大化・最�
 SDL と同じ値のスキャンコード・キーコード（配列ごとのキーマップ）、イベントキュー、
 fcitx5 経由の IME（全文節・周辺テキスト・周辺削除）、ピクセル形式、サーフェス、BMP、
 ブリッタ、レンダラ（ソフトウェアと OpenGL ES 2.0。どちらもウィンドウへ VSync つき。拡大率、論理解像度 5 方式、
-ウィンドウ座標との変換、DebugText）、
+ウィンドウ座標との変換、DebugText、回転・反転・平行四辺形・敷き詰め・9 つ分け、描画先テクスチャ）、
+クリップボードとプライマリ選択、ドラッグ＆ドロップの受信（ファイルとテキスト）、
 EGL の GL コンテキスト、ヘッドレスのダミーのビデオ、待つ API（Delay / DelayNS / DelayPrecise）、
 バックエンドの登録（`PaPiMeLa.Backends`）、アンブレラ（`uses PaPiMeLa`）、`TPMLApplication`、サンプルの Pong。
 
@@ -32,10 +33,10 @@ EGL の GL コンテキスト、ヘッドレスのダミーのビデオ、待つ
 
 済み（一部を含む）: #1–4、#10、#12–17（#17 の `.GL` は未）、#22、#24（`Events.Keymap`。押下状態は
 `PaPiMeLa.Events` の `TPMLKeyboardState`）、#25 の一部（マウスとタッチの状態機械は `PaPiMeLa.Events`）、
-#26–29、#31–39（#38 の D&D は未）、#41–43（#41 の残りは描画先テクスチャ、回転、9-grid / タイル）、
+#26–29、#31–39（#38 の D&D は受信のみ。送り側は未）、#41–43（#41 の残りは YUV・パレット・PIXELART などのテクスチャの種類）、
 #7、#8、#9、#45、#46、#47、#48、#49、#50、#64、#70。
 
-未着手: #5–6（Log、Properties）、#11、#18–21、#23、#30、#38 の D&D、#40、#44、
+未着手: #5–6（Log、Properties）、#11、#18–21、#23、#30、#40、#44、
 #51–63（オーディオ、ジョイスティック、ゲームパッド、ハプティクス）、#65–69。
 
 ## 2. 前のセッション（2026-10-02〜05）でしたこと
@@ -69,12 +70,14 @@ D-45（検査で `setitimer` へ `const` の record を渡し、C に NULL が�
 
 ## 3. 次の候補（おすすめ順）
 
-1. **Log（#5、Low）・Properties とヒント（#6、Low）**: 基盤の残り。Atomic（#7）は 2026-10-09 に済んだ（一度だけの初期化 `TPMLInitState` もあるので、Log と Properties の遅延初期化に使える）。Threading（#8）・RunOnMainThread・タイマー（#9）は 2026-10-06 に済んだ。ヒントが入ると SDL の THREAD_PRIORITY_POLICY（実時間スケジューリング）などに進める。クリップボード（#38 のうちクリップボードとプライマリ選択）は 2026-10-06 に済んだ。残りの D&D 受信は `PaPiMeLa.Video.Wayland.Data` のデバイスのリスナーに足せる形にしてある（手で動かす確認が要る: ファイルマネージャからドラッグ）。IME は IBus（#48）・text-input-v3（#49）とも 2026-10-06 に済んだ。
+1. **Log（#5、Low）・Properties とヒント（#6、Low）**: 基盤の残り。Atomic（#7）は 2026-10-09 に済んだ（一度だけの初期化 `TPMLInitState` もあるので、Log と Properties の遅延初期化に使える）。Threading（#8）・RunOnMainThread・タイマー（#9）は 2026-10-06 に済んだ。ヒントが入ると SDL の THREAD_PRIORITY_POLICY（実時間スケジューリング）などに進める。クリップボード（#38 のうちクリップボードとプライマリ選択）は 2026-10-06、D&D の受信は 2026-10-09 に済んだ（送り側の start_drag と document-portal の枝は未）。IME は IBus（#48）・text-input-v3（#49）とも 2026-10-06 に済んだ。
    IME の残り: 埋め込み候補（`TextEditingCandidates`）、IBus の ForwardKeyEvent、ibus-anthy など他のエンジンの属性の実測、GNOME / KDE での IBus 直結（§7.5 の要検証）。IBus の検査環境は `tools/ibus-sandbox/`（ibus + ibus-mozc を入れた Ubuntu 24.04 の最小 rootfs を bwrap で隔離。デスクトップの fcitx5 と混ざらない）。実測の結果は `spikes/RESULTS.md` のスパイク 3
-2. **D&D 受信（#38 の残り、Medium）**: DropBegin / DropFile / DropText / DropPosition / DropComplete。text/uri-list の解釈は表示サーバ無しで検査できる
-3. **レンダラの残り（#41）**: 描画先テクスチャ（SetRenderTarget。テクスチャごとの view が要るので、
-   今レンダラに直接持っている拡大率・論理解像度のフィールドを record にまとめるところから）、回転、9-grid / タイル
-4. **オーディオ（#51 以降）**: 大きな段階。PipeWire から
+2. **オーディオ（#51 以降）**: 大きな段階。PipeWire から
+3. **レンダラのテクスチャの種類（#41 / #43）**: YUV、パレット（INDEX8）、PIXELART の拡大。描画先テクスチャ・回転・9-grid / タイルは 2026-10-09 に済んだ
+
+済んだもの（2026-10-09）: D&D の受信（#38。T-38、対話の `demo_drop` は T-41。複数のファイルを 1 回で落とす・落とさずに出ていくの 2 つは未観測）、レンダラの回転・平行四辺形・敷き詰め・9 つ分け（T-39）と
+描画先テクスチャ（T-40。ソフトウェアと GLES2。GLES2 は T-22 に 3 場面）。SDL_SendDrop と SDL_URIToLocal を写した部分は
+`PaPiMeLa.Events.Drop` に分けた（`PaPiMeLa.Events` はクリーンルームなので、移植の部分を混ぜない）。
 
 済んだもの（2026-10-02）: 論理解像度と DebugText（F-4 / F-5）、待つ API（F-6、#9 の一部）、
 Context のオプションを値型に（F-7）、アンブレラ・バックエンドの登録・TPMLApplication（#45）。
@@ -102,7 +105,7 @@ Pong もすべて書き換え、今は `uses SysUtils, Math, PaPiMeLa` だけで
 表示サーバ無しで通るもの（CI と同じ）:
 
 ```bash
-for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella; do
+for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_render_transform test_render_target test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_drop test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella; do
   fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/$t test/$t.pas && ./test/$t
 done
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -oexamples/pong examples/pong.pas && ./examples/pong --selftest
@@ -147,6 +150,7 @@ $B -otest/demo_render_window test/demo_render_window.pas
 ./test/demo_render_window 5 vsync 640x400 gles2       # #45 で GLES2 を明示的にリンクするよう直した
 $B -otest/demo_japanese_input test/demo_japanese_input.pas && ./test/demo_japanese_input 30
 $B -otest/demo_pointer_constraints test/demo_pointer_constraints.pas && ./test/demo_pointer_constraints 60
+$B -otest/demo_drop test/demo_drop.pas && ./test/demo_drop 60          # ファイルマネージャやブラウザからドラッグして落とす（見方はファイルの頭）
 $B -oexamples/pong examples/pong.pas && ./examples/pong
 ```
 

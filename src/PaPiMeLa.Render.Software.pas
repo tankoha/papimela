@@ -54,7 +54,9 @@ uses
 type
   TPMLSoftwareRenderDriver = class(TPMLRenderDriver)
   strict private
-    FTarget  : TPMLSurface;      // 借りている
+    FMain    : TPMLSurface;      // 出力（ウィンドウかサーフェス）。借りている
+    FTarget  : TPMLSurface;      // いま描く先。FMain か、描画先のテクスチャの中身
+    FTargetTexture: TPMLTexture; // 描画先のテクスチャ。nil なら FMain に描く
     FViewport: TPMLRect;
     FClip    : TPMLRect;
     FClipOn  : Boolean;
@@ -80,6 +82,8 @@ type
     function  UpdateTexture(ATexture: TPMLTexture; const ARect: TPMLRect;
       APixels: Pointer; APitch: Integer): Boolean; override;
     procedure DestroyTexture(ATexture: TPMLTexture); override;
+    function  SupportsRenderTargets: Boolean; override;
+    function  SetRenderTarget(ATexture: TPMLTexture): Boolean; override;
 
     procedure QueueGeometry(AQueue: TPMLRenderQueue; var ACmd: TPMLRenderCommand;
       const AVertices: array of TPMLVertex); override;
@@ -145,14 +149,20 @@ end;
 constructor TPMLSoftwareRenderDriver.Create(ATarget: TPMLSurface);
 begin
   inherited Create(nil, nil);
+  FMain := ATarget;
   FTarget := ATarget;
   FViewport := TPMLRect.Make(0, 0, ATarget.Width, ATarget.Height);
 end;
 
 procedure TPMLSoftwareRenderDriver.SetTarget(ATarget: TPMLSurface);
 begin
-  FTarget := ATarget;
-  FViewport := TPMLRect.Make(0, 0, ATarget.Width, ATarget.Height);
+  FMain := ATarget;
+  // 描画先がテクスチャの間は、出力が差し替わってもテクスチャに描き続ける。
+  if FTargetTexture = nil then
+  begin
+    FTarget := ATarget;
+    FViewport := TPMLRect.Make(0, 0, ATarget.Width, ATarget.Height);
+  end;
 end;
 
 function TPMLSoftwareRenderDriver.Name: String;
@@ -162,8 +172,9 @@ end;
 
 function TPMLSoftwareRenderDriver.GetOutputSize(out AWidth, AHeight: Integer): Boolean;
 begin
-  AWidth := FTarget.Width;
-  AHeight := FTarget.Height;
+  // 出力の大きさ（描画先のテクスチャではない）。描画先の大きさはレンダラが知っている。
+  AWidth := FMain.Width;
+  AHeight := FMain.Height;
   Result := True;
 end;
 
@@ -210,7 +221,38 @@ end;
 { 中身を解放する。DriverData を解放するのはここだけ（二重解放を避ける）。 }
 procedure TPMLSoftwareRenderDriver.DestroyTexture(ATexture: TPMLTexture);
 begin
+  // 描画先のまま消されることは無い（レンダラが先に戻す）が、念のため出力へ戻す。
+  if ATexture = FTargetTexture then
+    SetRenderTarget(nil);
   FreeAndNil(ATexture.DriverData);
+end;
+
+function TPMLSoftwareRenderDriver.SupportsRenderTargets: Boolean;
+begin
+  Result := True;
+end;
+
+{ PORT-NOTE: SDL_render_sw.c の SW_SetRenderTarget。テクスチャの中身（サーフェス）を
+  そのまま描画先にする。ビューポートは次の実行で SetViewport の命令が入れ直す。 }
+function TPMLSoftwareRenderDriver.SetRenderTarget(ATexture: TPMLTexture): Boolean;
+var
+  S: TPMLSurface;
+begin
+  if ATexture = nil then
+  begin
+    FTargetTexture := nil;
+    FTarget := FMain;
+  end
+  else
+  begin
+    S := TextureSurface(ATexture);
+    if S = nil then
+      Exit(False);
+    FTargetTexture := ATexture;
+    FTarget := S;
+  end;
+  FViewport := TPMLRect.Make(0, 0, FTarget.Width, FTarget.Height);
+  Result := True;
 end;
 
 { ---- 積み込み ---- }

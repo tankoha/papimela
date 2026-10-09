@@ -20,6 +20,8 @@
     - Poll / Wait はメインスレッド専用
     - IME の返信を待つキーは TPMLDeferredKeyQueue に並べ、番号で解決して届いた順に出す（§7.5）。
       KeyUp は KeyDown を出したキーにだけ出す（D-47）
+    - ドラッグ＆ドロップの窓口（TPMLDropState）。中身（SDL_dropevents.c から写した部分）と
+      text/uri-list の変換は、由来が移植なので PaPiMeLa.Events.Drop に分けた
 
   NOT RESOLVED:
     - 設計 §6.3 は複数 fd を 1 回の poll(2) で待つため IPMLEventPumpSource.GetPollFDs
@@ -141,6 +143,12 @@ type
   end;
 
   // ClipboardUpdate の付随情報。MIME タイプの並びは TPMLEvent.Strings に載る。
+  // DropBegin / DropFile / DropText / DropPosition / DropComplete の付随情報。ファイルの
+  // パスと文字列は TPMLEvent.Text に載る。位置はウィンドウの座標（DropBegin では 0）。
+  TPMLDropEventData = record
+    X, Y: Single;
+  end;
+
   TPMLClipboardEventData = record
     Owner           : Boolean;   // True = このアプリが置いた（SetText など）。False = 他のアプリ
     PrimarySelection: Boolean;   // True = プライマリ選択（中クリックで貼る方）
@@ -172,6 +180,7 @@ type
       7: (Wheel            : TPMLMouseWheelData);
       8: (Finger           : TPMLTouchFingerData);
       9: (Clipboard        : TPMLClipboardEventData);
+      10: (Drop            : TPMLDropEventData);
       // Display / JAxis / GAxis / Finger ... は各サブシステム着手時に追加する。
       // 可変部への追加は既存コードに影響しない。
   end;
@@ -369,6 +378,31 @@ type
     property FingerCount: Integer read GetFingerCount;
   end;
 
+  { ドラッグ＆ドロップの窓口。バックエンドは Push を直接呼ばず、ここを通す。
+    中身は PaPiMeLa.Events.Drop（SDL_SendDrop を写した部分）。
+
+    約束（SDL と同じ）:
+      - そのウィンドウで落とし始めてから最初の SendFile / SendText / SendPosition の前に、
+        DropBegin を 1 回だけ積む
+      - DropFile / DropText / DropComplete の位置は、最後に SendPosition で受けた位置
+      - SendComplete で DropComplete を積み、そのウィンドウの「落とし中」と位置を戻す
+      - その種類のイベントが無効（SetEnabled で切った）なら何も積まない（DropBegin も）
+    SDL は最後の位置をウィンドウをまたいで 1 つだけ持つ。papimela はウィンドウごとに持つ
+    （同時に 2 つのウィンドウで落とすことは無いので、違いは出にくい）。 }
+  TPMLDropState = class sealed(TPMLSystemObject)
+  strict private
+    FQueue: TPMLEventQueue;
+    FImpl : TObject;   // ウィンドウごとの状態。中身は implementation 側
+  public
+    constructor Create(AContextRef: TObject; AQueue: TPMLEventQueue);
+    destructor Destroy; override;
+    procedure SendFile(AWindowID: TPMLWindowID; const APath: String);
+    procedure SendText(AWindowID: TPMLWindowID; const AText: String);
+    procedure SendPosition(AWindowID: TPMLWindowID; AX, AY: Single);
+    procedure SendComplete(AWindowID: TPMLWindowID);
+    function  IsDropping(AWindowID: TPMLWindowID): Boolean;
+  end;
+
   TPMLEventQueue = class sealed(TPMLSystemObject)
   strict private
     FLock      : TPMLMutex;
@@ -385,6 +419,7 @@ type
     FKeyboard  : TPMLKeyboardState;
     FMouse     : TPMLMouseState;
     FTouch     : TPMLTouchState;
+    FDrop      : TPMLDropState;
     FKeyFilter : IPMLKeyFilter;
     function  TakeLocked(out AEvent: TPMLEvent): Boolean;
     function  NotifyWatches(const AEvent: TPMLEvent): Boolean;
@@ -438,6 +473,7 @@ type
     property Keyboard: TPMLKeyboardState read FKeyboard;
     property Mouse   : TPMLMouseState read FMouse;
     property Touch   : TPMLTouchState read FTouch;
+    property Drop    : TPMLDropState read FDrop;
     // Context が TextInput を生成したあとに差し込む。nil なら IME 転送なし。
     property KeyFilter: IPMLKeyFilter read FKeyFilter write FKeyFilter;
   end;
@@ -448,7 +484,8 @@ function PMLNowNS: UInt64;
 implementation
 
 uses
-  BaseUnix, UnixType;
+  BaseUnix, UnixType,
+  PaPiMeLa.Events.Drop;
 
 const
   CLOCK_MONOTONIC = 1;
@@ -483,6 +520,7 @@ begin
   FKeyboard := TPMLKeyboardState.Create(AContextRef, Self);
   FMouse := TPMLMouseState.Create(AContextRef, Self);
   FTouch := TPMLTouchState.Create(AContextRef, Self);
+  FDrop := TPMLDropState.Create(AContextRef, Self);
 end;
 
 // 輪の長さは作るときに決まり、以後変わらないので、ロックは要らない。
@@ -519,6 +557,7 @@ begin
   FreeAndNil(FKeyboard);
   FreeAndNil(FMouse);
   FreeAndNil(FTouch);
+  FreeAndNil(FDrop);
   SetLength(FSources, 0);
   SetLength(FWatches, 0);
   SetLength(FRing, 0);
@@ -1444,6 +1483,46 @@ begin
     Snapshot[I].Pressure := 0.0;
     Emit(TPMLEventKind.FingerCanceled, Snapshot[I], 0, 0);
   end;
+end;
+
+{ ---- ドラッグ＆ドロップ（中身は PaPiMeLa.Events.Drop） ---- }
+
+constructor TPMLDropState.Create(AContextRef: TObject; AQueue: TPMLEventQueue);
+begin
+  inherited Create(AContextRef, AQueue);
+  FQueue := AQueue;
+  FImpl := TPMLDropImpl.Create;
+end;
+
+destructor TPMLDropState.Destroy;
+begin
+  FreeAndNil(FImpl);
+  inherited Destroy;
+end;
+
+procedure TPMLDropState.SendFile(AWindowID: TPMLWindowID; const APath: String);
+begin
+  PMLSendDrop(FQueue, TPMLDropImpl(FImpl), TPMLEventKind.DropFile, AWindowID, APath, 0, 0);
+end;
+
+procedure TPMLDropState.SendText(AWindowID: TPMLWindowID; const AText: String);
+begin
+  PMLSendDrop(FQueue, TPMLDropImpl(FImpl), TPMLEventKind.DropText, AWindowID, AText, 0, 0);
+end;
+
+procedure TPMLDropState.SendPosition(AWindowID: TPMLWindowID; AX, AY: Single);
+begin
+  PMLSendDrop(FQueue, TPMLDropImpl(FImpl), TPMLEventKind.DropPosition, AWindowID, '', AX, AY);
+end;
+
+procedure TPMLDropState.SendComplete(AWindowID: TPMLWindowID);
+begin
+  PMLSendDrop(FQueue, TPMLDropImpl(FImpl), TPMLEventKind.DropComplete, AWindowID, '', 0, 0);
+end;
+
+function TPMLDropState.IsDropping(AWindowID: TPMLWindowID): Boolean;
+begin
+  Result := TPMLDropImpl(FImpl).IndexOf(AWindowID) >= 0;
 end;
 
 end.

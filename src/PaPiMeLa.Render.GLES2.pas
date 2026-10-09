@@ -43,9 +43,13 @@
     - オフスクリーンの EGL ディスプレイは全ドライバで 1 つを数えて共有する。
       eglTerminate は参照を数えないので、ドライバごとに終了すると、ほかのドライバの
       コンテキストが巻き添えになる（実測: EGL_BAD_DISPLAY）
+    - 描画先のテクスチャ（SetRenderTarget）は、テクスチャごとに自分を付けた FBO を持つ。
+      FBO のメモリはテクスチャの形式の並びで書く（BGRA32 / BGRX32 の描画先には色の R と B を
+      入れ替えて渡す）ので、あとでそのテクスチャを描くときも、形式どおりに読める。
+      描画元と描画先の形式の組で選ぶシェーダは CopyShader の PORT-NOTE を参照
 
   NOT RESOLVED:
-    - YUV・パレット（INDEX8）・外部テクスチャ（OES）・描画先テクスチャ・
+    - YUV・パレット（INDEX8）・外部テクスチャ（OES）・
       線形補間でないスケールモード（PIXELART）は未実装
     - コンテキスト喪失（GL_CONTEXT_LOST）への対応
     - 斜めの線は GL の線の規則（菱形の出口規則）で決まる。ブレゼンハムとは
@@ -132,6 +136,8 @@ type
     FBlendValid: Boolean;
     FCurBlend  : TPMLBlendMode;
     FBoundTexture: GLuint;
+    // 描画先のテクスチャ（SetRenderTarget）。nil はウィンドウかオフスクリーンの FBO。
+    FTarget    : TObject;
 
     procedure LoadFunctions(AGetProc: TPMLGLGetProc);
     procedure CreateSurfacelessContext;
@@ -143,6 +149,10 @@ type
       AVertexShader: GLuint);
     procedure EnsureCurrent;
     procedure ReadOutputSize(out AWidth, AHeight: Integer);
+    procedure ReadDrawableSize(out AWidth, AHeight: Integer);
+    function  FlipsOutput: Boolean;
+    function  TargetSwapsRB: Boolean;
+    procedure BindDrawFramebuffer;
     procedure CheckGLErrors(const AWhere: String);
     procedure BeginRun(AQueue: TPMLRenderQueue);
     procedure ApplyViewport;
@@ -170,6 +180,8 @@ type
     function  UpdateTexture(ATexture: TPMLTexture; const ARect: TPMLRect;
       APixels: Pointer; APitch: Integer): Boolean; override;
     procedure DestroyTexture(ATexture: TPMLTexture); override;
+    function  SupportsRenderTargets: Boolean; override;
+    function  SetRenderTarget(ATexture: TPMLTexture): Boolean; override;
 
     procedure QueueGeometry(AQueue: TPMLRenderQueue; var ACmd: TPMLRenderCommand;
       const AVertices: array of TPMLVertex); override;
@@ -303,10 +315,15 @@ type
   TPMLGLES2Texture = class
   public
     Id    : GLuint;
-    Shader: TPMLGLES2Shader;
+    FBO   : GLuint;            // 描画先にできるテクスチャ（Access = Target）だけ。ほかは 0
     Filter: TPMLScaleMode;     // GL に設定してある補間
     Width : Integer;
     Height: Integer;
+    Format: TPMLPixelFormat;
+    // メモリ上の並びが B,G,R の順（BGRA32 / BGRX32）か。GL の RGBA とは R と B が逆
+    BFirst  : Boolean;
+    // アルファを持つ（BGRA32 / RGBA32）か。X の形式は A を 1 として読む
+    HasAlpha: Boolean;
   end;
 
 var
@@ -407,26 +424,42 @@ begin
   Result.TexCoord.Y := 0;
 end;
 
-{ テクスチャの形式からシェーダを決める。SDL の SetCopyState の「描画先が
-  ウィンドウのとき」の分岐（形式 → 画像の出どころ）と同じ対応。
+{ テクスチャの形式のメモリ上の並び。持てない形式なら False。
   BGRA32 などはバイト並びの名前なので、エンディアンに依らず正しい。 }
-function ShaderForFormat(AFormat: TPMLPixelFormat;
-  out AShader: TPMLGLES2Shader): Boolean;
+function LayoutOfFormat(AFormat: TPMLPixelFormat; out ABFirst, AHasAlpha: Boolean): Boolean;
 begin
   Result := True;
-  if AFormat = PML_PIXELFORMAT_BGRA32 then
-    AShader := TPMLGLES2Shader.ARGB
-  else if AFormat = PML_PIXELFORMAT_RGBA32 then
-    AShader := TPMLGLES2Shader.ABGR
-  else if AFormat = PML_PIXELFORMAT_BGRX32 then
-    AShader := TPMLGLES2Shader.RGB
-  else if AFormat = PML_PIXELFORMAT_RGBX32 then
-    AShader := TPMLGLES2Shader.BGR
-  else
-  begin
-    AShader := TPMLGLES2Shader.Solid;
+  ABFirst := (AFormat = PML_PIXELFORMAT_BGRA32) or (AFormat = PML_PIXELFORMAT_BGRX32);
+  AHasAlpha := (AFormat = PML_PIXELFORMAT_BGRA32) or (AFormat = PML_PIXELFORMAT_RGBA32);
+  if not (ABFirst or AHasAlpha or (AFormat = PML_PIXELFORMAT_RGBX32)) then
     Result := False;
-  end;
+end;
+
+{ テクスチャを描くシェーダ。
+
+  WHAT:
+    テクスチャのメモリの並びを、描画先のメモリの並びへ写す。R と B の位置が
+    違えば入れ替え、テクスチャにアルファが無ければ 1 にする。描画先が
+    ウィンドウかオフスクリーンの FBO なら、並びは GL の R,G,B,A（ATargetBFirst = False）。
+
+  PORT-NOTE: SDL の SetCopyState は、描画先がテクスチャのとき（形式の組 → 画像の出どころ）
+  の表を持つ。papimela は上の 2 つの規則から算出する。結果は SDL の表と、X の形式の
+  テクスチャを X の形式の描画先（と BGRX32 を RGBA32）へ描く組でだけ違う。SDL はそこで
+  X のバイトをアルファとして読む（ARGB / ABGR の出どころ）。papimela は A を 1 にして、
+  ソフトウェアのドライバ（X の形式は不透明）と同じ絵にする。 }
+function CopyShader(ATexBFirst, ATexHasAlpha, ATargetBFirst: Boolean): TPMLGLES2Shader;
+begin
+  if ATexBFirst <> ATargetBFirst then
+  begin
+    if ATexHasAlpha then
+      Result := TPMLGLES2Shader.ARGB
+    else
+      Result := TPMLGLES2Shader.RGB;
+  end
+  else if ATexHasAlpha then
+    Result := TPMLGLES2Shader.ABGR
+  else
+    Result := TPMLGLES2Shader.BGR;
 end;
 
 function TextureData(ATexture: TPMLTexture): TPMLGLES2Texture; inline;
@@ -804,6 +837,43 @@ begin
   end;
 end;
 
+{ いま描いている先の大きさ。描画先のテクスチャがあればその大きさ。 }
+procedure TPMLGLES2RenderDriver.ReadDrawableSize(out AWidth, AHeight: Integer);
+begin
+  if FTarget <> nil then
+  begin
+    AWidth := TPMLGLES2Texture(FTarget).Width;
+    AHeight := TPMLGLES2Texture(FTarget).Height;
+  end
+  else
+    ReadOutputSize(AWidth, AHeight);
+end;
+
+{ いま描いている先が、原点が左下のウィンドウの既定のフレームバッファか。
+  FBO（オフスクリーンと描画先のテクスチャ）は上下を反転させない。 }
+function TPMLGLES2RenderDriver.FlipsOutput: Boolean;
+begin
+  Result := (FWindow <> nil) and (FTarget = nil);
+end;
+
+{ いま描いている先のメモリの並びが B,G,R（描画先が BGRA32 / BGRX32 のテクスチャ）か。
+  GL は R,G,B,A の順に書くので、頂点の色と塗りの色の R と B を入れ替えて渡す
+  （SDL の colorswap）。 }
+function TPMLGLES2RenderDriver.TargetSwapsRB: Boolean;
+begin
+  Result := (FTarget <> nil) and TPMLGLES2Texture(FTarget).BFirst;
+end;
+
+procedure TPMLGLES2RenderDriver.BindDrawFramebuffer;
+begin
+  if FTarget <> nil then
+    FGL.glBindFramebuffer(GL_FRAMEBUFFER, TPMLGLES2Texture(FTarget).FBO)
+  else if FWindow <> nil then
+    FGL.glBindFramebuffer(GL_FRAMEBUFFER, 0)
+  else
+    FGL.glBindFramebuffer(GL_FRAMEBUFFER, FFBO);
+end;
+
 { GL の誤りを読んで捨てる。デバッグビルド（PAPIMELA_DEBUG）では例外にする。
 
   glGetError は誤りが溜まっている間は 1 回の呼び出しで 1 つずつ返すので、
@@ -853,9 +923,9 @@ end;
 
 function TPMLGLES2RenderDriver.SupportsTextureFormat(AFormat: TPMLPixelFormat): Boolean;
 var
-  S: TPMLGLES2Shader;
+  BFirst, HasAlpha: Boolean;
 begin
-  Result := ShaderForFormat(AFormat, S);
+  Result := LayoutOfFormat(AFormat, BFirst, HasAlpha);
 end;
 
 { ---- テクスチャ ---- }
@@ -868,20 +938,22 @@ end;
 function TPMLGLES2RenderDriver.CreateTexture(ATexture: TPMLTexture): Boolean;
 var
   Data: TPMLGLES2Texture;
-  Shader: TPMLGLES2Shader;
+  BFirst, HasAlpha: Boolean;
   Zero: Pointer;
   Size: PtrUInt;
   Err: GLenum;
 begin
   Result := False;
-  if not ShaderForFormat(ATexture.Format, Shader) then
+  if not LayoutOfFormat(ATexture.Format, BFirst, HasAlpha) then
     Exit;
   if (ATexture.Width > FMaxTexture) or (ATexture.Height > FMaxTexture) then
     Exit;
   EnsureCurrent;
   FGL.glGetError();
   Data := TPMLGLES2Texture.Create;
-  Data.Shader := Shader;
+  Data.Format := ATexture.Format;
+  Data.BFirst := BFirst;
+  Data.HasAlpha := HasAlpha;
   Data.Filter := TPMLScaleMode.Nearest;
   Data.Width := ATexture.Width;
   Data.Height := ATexture.Height;
@@ -901,8 +973,20 @@ begin
     FreeMem(Zero);
   end;
   Err := FGL.glGetError();
+  if (Err = GL_NO_ERROR) and (ATexture.Access = TPMLTextureAccess.Target) then
+  begin
+    // 描画先にできるテクスチャは、自分を付けた FBO を持つ（SDL の GLES2_CreateTexture）。
+    FGL.glGenFramebuffers(1, @Data.FBO);
+    FGL.glBindFramebuffer(GL_FRAMEBUFFER, Data.FBO);
+    FGL.glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, Data.Id, 0);
+    if FGL.glCheckFramebufferStatus(GL_FRAMEBUFFER) <> GL_FRAMEBUFFER_COMPLETE then
+      Err := GL_INVALID_OPERATION;
+    BindDrawFramebuffer;
+  end;
   if Err <> GL_NO_ERROR then
   begin
+    if Data.FBO <> 0 then
+      FGL.glDeleteFramebuffers(1, @Data.FBO);
     FGL.glDeleteTextures(1, @Data.Id);
     Data.Free;
     Exit;
@@ -960,12 +1044,45 @@ begin
     Exit;
   try
     EnsureCurrent;
+    if FTarget = Data then
+    begin
+      // 描画先のまま消された。描画先を元へ戻す（レンダラは先に戻している）。
+      FTarget := nil;
+      BindDrawFramebuffer;
+    end;
+    if Data.FBO <> 0 then
+      FGL.glDeleteFramebuffers(1, @Data.FBO);
     FGL.glDeleteTextures(1, @Data.Id);
   except
     on E: EPMLError do
       FLastNonFatalError := 'GLES2 texture cleanup failed: ' + E.Message;
   end;
   FreeAndNil(ATexture.DriverData);
+end;
+
+function TPMLGLES2RenderDriver.SupportsRenderTargets: Boolean;
+begin
+  Result := True;
+end;
+
+{ 描画先を切り替える（SDL の GLES2_SetRenderTarget）。束縛は次の実行の頭
+  （BeginRun）と読み戻しでも張り直す。 }
+function TPMLGLES2RenderDriver.SetRenderTarget(ATexture: TPMLTexture): Boolean;
+var
+  Data: TPMLGLES2Texture;
+begin
+  Result := False;
+  Data := nil;
+  if ATexture <> nil then
+  begin
+    Data := TextureData(ATexture);
+    if (Data = nil) or (Data.FBO = 0) then
+      Exit;
+  end;
+  EnsureCurrent;
+  FTarget := Data;
+  BindDrawFramebuffer;
+  Result := True;
 end;
 
 { ---- 積み込み ---- }
@@ -1048,15 +1165,12 @@ end;
 procedure TPMLGLES2RenderDriver.BeginRun(AQueue: TPMLRenderQueue);
 var
   I: Integer;
+  C: Single;
   S: TPMLGLES2Shader;
 begin
   EnsureCurrent;
-  ReadOutputSize(FDrawableW, FDrawableH);
-
-  if FWindow <> nil then
-    FGL.glBindFramebuffer(GL_FRAMEBUFFER, 0)
-  else
-    FGL.glBindFramebuffer(GL_FRAMEBUFFER, FFBO);
+  ReadDrawableSize(FDrawableW, FDrawableH);
+  BindDrawFramebuffer;
 
   FViewport := TPMLRect.Make(0, 0, FDrawableW, FDrawableH);
   FClipOn := False;
@@ -1078,6 +1192,15 @@ begin
       SetLength(FVertexBuf, AQueue.VertexCount * 2);
     for I := 0 to AQueue.VertexCount - 1 do
       FVertexBuf[I] := AQueue.Vertex(I);
+    // 1 回の実行は 1 つの描画先へ描く（レンダラが切り替えの前に描き切る）ので、
+    // 入れ替えは全頂点にまとめて掛けてよい。
+    if TargetSwapsRB then
+      for I := 0 to AQueue.VertexCount - 1 do
+      begin
+        C := FVertexBuf[I].Color.R;
+        FVertexBuf[I].Color.R := FVertexBuf[I].Color.B;
+        FVertexBuf[I].Color.B := C;
+      end;
     FGL.glBindBuffer(GL_ARRAY_BUFFER, FVBO);
     // 毎回作り直す。前の実行のデータを GPU が読み終わるのを待たせない。
     FGL.glBufferData(GL_ARRAY_BUFFER, AQueue.VertexCount * SizeOf(TPMLVertex),
@@ -1106,14 +1229,14 @@ begin
     Exit;
   W := Max(FViewport.W, 0);
   H := Max(FViewport.H, 0);
-  if FWindow <> nil then
+  if FlipsOutput then
     Y := FDrawableH - FViewport.Y - H
   else
     Y := FViewport.Y;
   FGL.glViewport(FViewport.X, Y, W, H);
   if (W > 0) and (H > 0) then
   begin
-    if FWindow <> nil then
+    if FlipsOutput then
       Sign := -1
     else
       Sign := 1;
@@ -1154,7 +1277,7 @@ begin
     W := Max(FClip.W, 0);
     H := Max(FClip.H, 0);
     X := FViewport.X + FClip.X;
-    if FWindow <> nil then
+    if FlipsOutput then
       Y := FDrawableH - FViewport.Y - FClip.Y - H
     else
       Y := FViewport.Y + FClip.Y;
@@ -1225,7 +1348,10 @@ end;
   glClear はビューポートに従わないが、シザーには従うので、先に切る。 }
 procedure TPMLGLES2RenderDriver.ExecClear(const ACmd: TPMLRenderCommand);
 begin
-  FGL.glClearColor(ACmd.Color.R, ACmd.Color.G, ACmd.Color.B, ACmd.Color.A);
+  if TargetSwapsRB then
+    FGL.glClearColor(ACmd.Color.B, ACmd.Color.G, ACmd.Color.R, ACmd.Color.A)
+  else
+    FGL.glClearColor(ACmd.Color.R, ACmd.Color.G, ACmd.Color.B, ACmd.Color.A);
   if FScissorOn then
   begin
     FGL.glDisable(GL_SCISSOR_TEST);
@@ -1249,7 +1375,7 @@ begin
     Data := TextureData(ACmd.Texture);
     if Data = nil then
       Exit;       // 破棄されたテクスチャ。描くものが無い
-    Shader := Data.Shader;
+    Shader := CopyShader(Data.BFirst, Data.HasAlpha, TargetSwapsRB);
   end;
   if ACmd.Count <= 0 then
     Exit;
@@ -1328,6 +1454,9 @@ end;
   ウィンドウの既定のフレームバッファは下から数えるので、読む y を換算して、
   読んだ行を上下逆にする（SDL の GLES2_RenderReadPixels）。FBO は反転させて
   いないので、そのまま読める。
+  描画先のテクスチャを読むときは、結果の形式をそのテクスチャの形式にする。FBO の
+  メモリはテクスチャの並びで書いてあるので（TargetSwapsRB）、GL_RGBA で読んだバイトが
+  そのままその形式になる（SDL も描画先の形式で返す）。
 
   PORT-NOTE: 矩形が描画先からはみ出す部分は、SDL では GL が何を返すか未定義。
   ここは描画先と重なる部分だけを読み、はみ出す部分は 0（透明な黒）のままにする。 }
@@ -1336,11 +1465,16 @@ var
   OutW, OutH, X1, Y1, X2, Y2, W, H, Row, GLY: Integer;
   Buf: PByte;
   RowBytes: PtrUInt;
+  Fmt: TPMLPixelFormat;
 begin
-  Result := TPMLSurface.Create(ARect.W, ARect.H, PML_PIXELFORMAT_RGBA32);
+  if FTarget <> nil then
+    Fmt := TPMLGLES2Texture(FTarget).Format
+  else
+    Fmt := PML_PIXELFORMAT_RGBA32;
+  Result := TPMLSurface.Create(ARect.W, ARect.H, Fmt);
   try
     EnsureCurrent;
-    ReadOutputSize(OutW, OutH);
+    ReadDrawableSize(OutW, OutH);
     X1 := Max(ARect.X, 0);
     Y1 := Max(ARect.Y, 0);
     X2 := Min(ARect.X + ARect.W, OutW);
@@ -1350,16 +1484,11 @@ begin
     if (W <= 0) or (H <= 0) then
       Exit;
 
-    if FWindow <> nil then
-    begin
-      FGL.glBindFramebuffer(GL_FRAMEBUFFER, 0);
-      GLY := OutH - Y1 - H;
-    end
+    BindDrawFramebuffer;
+    if FlipsOutput then
+      GLY := OutH - Y1 - H
     else
-    begin
-      FGL.glBindFramebuffer(GL_FRAMEBUFFER, FFBO);
       GLY := Y1;
-    end;
 
     RowBytes := PtrUInt(W) * 4;
     Buf := GetMem(RowBytes * PtrUInt(H));
@@ -1368,7 +1497,7 @@ begin
       for Row := 0 to H - 1 do
       begin
         // 結果の行 (Y1 - ARect.Y + Row) に、読んだ上から Row 行目を置く。
-        if FWindow <> nil then
+        if FlipsOutput then
           Move((Buf + PtrUInt(H - 1 - Row) * RowBytes)^,
             (PByte(Result.Pixels) + PtrUInt(Y1 - ARect.Y + Row) * PtrUInt(Result.Pitch)
               + PtrUInt(X1 - ARect.X) * 4)^, RowBytes)

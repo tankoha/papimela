@@ -5,6 +5,7 @@
 //   PaPiMeLa.Errors
 //   PaPiMeLa.Core
 //   PaPiMeLa.Events
+//   PaPiMeLa.Events.Drop
 //   PaPiMeLa.Events.Keymap
 //   PaPiMeLa.Keycodes
 //   PaPiMeLa.Pixels
@@ -89,6 +90,7 @@ type
   TPMLTouchPoint = PaPiMeLa.Events.TPMLTouchPoint;
   TPMLTouchPoints = PaPiMeLa.Events.TPMLTouchPoints;
   TPMLTouchFingerData = PaPiMeLa.Events.TPMLTouchFingerData;
+  TPMLDropEventData = PaPiMeLa.Events.TPMLDropEventData;
   TPMLClipboardEventData = PaPiMeLa.Events.TPMLClipboardEventData;
   TPMLUserEventData = PaPiMeLa.Events.TPMLUserEventData;
   TPMLEvent = PaPiMeLa.Events.TPMLEvent;
@@ -101,8 +103,13 @@ type
   TPMLKeyboardState = PaPiMeLa.Events.TPMLKeyboardState;
   TPMLMouseState = PaPiMeLa.Events.TPMLMouseState;
   TPMLTouchState = PaPiMeLa.Events.TPMLTouchState;
+  TPMLDropState = PaPiMeLa.Events.TPMLDropState;
   TPMLEventQueue = PaPiMeLa.Events.TPMLEventQueue;
 function PMLNowNS: UInt64; inline;
+
+// ---- PaPiMeLa.Events.Drop
+function PMLURIToLocalPath(const AURI: String; out APath: String): Boolean; inline;
+function PMLURIListToLocalPaths(const AList: String): TStringArray; inline;
 
 // ---- PaPiMeLa.Events.Keymap
 type
@@ -608,6 +615,9 @@ type
   TPMLRenderDriver = PaPiMeLa.Render.TPMLRenderDriver;
   TPMLTextureAccess = PaPiMeLa.Render.TPMLTextureAccess;
   TPMLLogicalPresentation = PaPiMeLa.Render.TPMLLogicalPresentation;
+  TPMLFlip = PaPiMeLa.Render.TPMLFlip;
+  TPMLFlips = PaPiMeLa.Render.TPMLFlips;
+  TPMLRenderViewState = PaPiMeLa.Render.TPMLRenderViewState;
   TPMLTexture = PaPiMeLa.Render.TPMLTexture;
   TPMLTextures = PaPiMeLa.Render.TPMLTextures;
   TPMLRenderer = PaPiMeLa.Render.TPMLRenderer;

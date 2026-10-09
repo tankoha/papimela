@@ -167,6 +167,11 @@ type
     function  UpdateTexture(ATexture: TPMLTexture; const ARect: TPMLRect;
       APixels: Pointer; APitch: Integer): Boolean; virtual; abstract;
     procedure DestroyTexture(ATexture: TPMLTexture); virtual; abstract;
+    // 描画先にできるテクスチャ（Access = Target）を持てるか。既定は False。
+    function  SupportsRenderTargets: Boolean; virtual;
+    // 描画先を ATexture に切り替える（nil ならウィンドウかサーフェスへ戻す）。
+    // 積んだ命令は描き切ってから呼ばれる。既定は nil だけを受け付ける。
+    function  SetRenderTarget(ATexture: TPMLTexture): Boolean; virtual;
 
     // 必須。頂点を積み、ACmd.Kind = Geometry のまま積み荷の位置を埋める。
     procedure QueueGeometry(AQueue: TPMLRenderQueue; var ACmd: TPMLRenderCommand;
@@ -191,7 +196,8 @@ type
     function  SetVSync(AInterval: Integer): Boolean; virtual;
   end;
 
-  TPMLTextureAccess = (Static, Streaming);
+  // Target は描画先にできる（SetRenderTarget。SDL_TEXTUREACCESS_TARGET）。
+  TPMLTextureAccess = (Static, Streaming, Target);
 
   { 論理解像度の当てはめ方（SDL_RendererLogicalPresentation と同じ 5 つ）。
       Disabled     : 論理解像度を使わない
@@ -201,8 +207,26 @@ type
       IntegerScale : 整数倍だけで収める（最低 1 倍）。余りは帯 }
   TPMLLogicalPresentation = (Disabled, Stretch, Letterbox, Overscan, IntegerScale);
 
+  // RenderTextureRotated の反転（SDL_FlipMode。両方を同時に指定できる）。
+  TPMLFlip  = (Horizontal, Vertical);
+  TPMLFlips = set of TPMLFlip;
+
   { テクスチャ。レンダラが所有する。中身の持ち方はドライバが決め、
     DriverData に置く（ソフトウェアドライバは TPMLSurface）。 }
+  { 描画先ごとの見え方（SDL_RenderViewState）。ウィンドウ（またはサーフェス）とテクスチャが
+    1 つずつ持つ。描画先を変えるとレンダラが入れ替える。論理解像度もここに入るので、
+    描画先テクスチャは自分の論理解像度を持つ（初めは無し）。 }
+  TPMLRenderViewState = record
+    Viewport   : TPMLRect;
+    ClipRect   : TPMLRect;
+    ClipEnabled: Boolean;
+    Scale      : TPMLFPoint;
+    LogicalW   : Integer;
+    LogicalH   : Integer;
+    LogicalMode: TPMLLogicalPresentation;
+    class function Default: TPMLRenderViewState; static;
+  end;
+
   TPMLTexture = class(TPMLOwnedObject)
   strict private
     FRenderer : TPMLRenderer;
@@ -214,6 +238,9 @@ type
     FColorMod : TPMLColor;
     FAlphaMod : Byte;
     FScaleMode: TPMLScaleMode;
+  private
+    // 描画先にしたときの見え方。TPMLRenderer だけが触る。
+    FView     : TPMLRenderViewState;
   protected
     procedure OwnerDestroying; override;
   public
@@ -271,6 +298,8 @@ type
     FPixelW        : Integer;         // 論理画面の出力上の大きさ（画素）
     FPixelH        : Integer;
     FDebugFont     : TPMLTexture;     // DebugText の文字の表。初めて使うときに作る
+    FTarget        : TPMLTexture;     // 描画先のテクスチャ。nil = ウィンドウかサーフェス
+    FMainView      : TPMLRenderViewState;   // 描画先がテクスチャの間、ウィンドウ側の見え方を預かる
 
     function  GetDrawColor: TPMLColor;
     procedure SetDrawColor(const AValue: TPMLColor);
@@ -281,6 +310,13 @@ type
     function  NewDrawCommand(AKind: TPMLRenderCommandKind): TPMLRenderCommand;
     procedure SetVSync(AValue: Integer);
     procedure SetScale(const AValue: TPMLFPoint);
+    procedure SetRenderTarget(AValue: TPMLTexture);
+    procedure SaveView(out AView: TPMLRenderViewState);
+    procedure LoadView(const AView: TPMLRenderViewState);
+    function  EnterMainView: TPMLTexture;
+    procedure LeaveMainView(ATarget: TPMLTexture);
+    function  FromWindowInMain(AWindowX, AWindowY: Single): TPMLFPoint;
+    function  ToWindowInMain(AX, AY: Single): TPMLFPoint;
     procedure UpdateView;
     function  PixelViewport: TPMLRect;
     function  PixelClipRect: TPMLRect;
@@ -291,6 +327,14 @@ type
     procedure DrawLinesAsGeometry(const APoints: array of TPMLFPoint);
     procedure DrawLinesAsRects(const APoints: array of TPMLFPoint);
     procedure DrawLineBresenham(AX1, AY1, AX2, AY2: Integer; ADrawLast: Boolean);
+    procedure CopyExact(ATexture: TPMLTexture; const ASrc, ADst: TPMLFRect);
+    procedure TiledExact(ATexture: TPMLTexture; const ASrc: TPMLFRect; AScale: Single;
+      const ADst: TPMLFRect);
+    function  ClampedSource(ATexture: TPMLTexture; const ASrc: TPMLFRect;
+      out AReal: TPMLFRect): Boolean;
+    procedure Do9Grid(ATexture: TPMLTexture; const ASrc: TPMLFRect;
+      ALeft, ARight, ATop, ABottom, AScale: Single; const ADst: TPMLFRect;
+      ATiled: Boolean; ATileScale: Single);
     procedure CreateDebugFont;
   private
     procedure RemoveTexture(ATexture: TPMLTexture);
@@ -330,12 +374,42 @@ type
     procedure RenderGeometry(ATexture: TPMLTexture;
       const AVertices: array of TPMLVertex; const AIndices: array of Integer);
 
+    { 回して描く（SDL_RenderTextureRotated）。AAngle は度で時計回り、中心は ADst の中の位置
+      （省いた形は ADst の中央）。反転は回す前に当てる。空の ASrc はテクスチャ全体、
+      空の ADst はビューポート全体。回さず反転もしないなら RenderTexture と同じ。
+      どちらのドライバでも三角形 2 つで描く（SDL がドライバに QueueCopyEx が無いときに
+      取る道）。 }
+    procedure RenderTextureRotated(ATexture: TPMLTexture; const ASrc, ADst: TPMLFRect;
+      AAngle: Double; AFlip: TPMLFlips = []); overload;
+    procedure RenderTextureRotated(ATexture: TPMLTexture; const ASrc, ADst: TPMLFRect;
+      AAngle: Double; const ACenter: TPMLFPoint; AFlip: TPMLFlips = []); overload;
+    { 平行四辺形へ写す（SDL_RenderTextureAffine）。転送元の左上・右上・左下が
+      AOrigin / ARight / ADown へ行き、右下は ARight + ADown - AOrigin。 }
+    procedure RenderTextureAffine(ATexture: TPMLTexture; const ASrc: TPMLFRect;
+      const AOrigin, ARight, ADown: TPMLFPoint);
+    { 敷き詰める（SDL_RenderTextureTiled）。1 枚は ASrc を AScale 倍した大きさで、ADst の
+      左上から並べ、右端と下端ははみ出す分を切る。AScale <= 0 は EPMLArgument。
+      PORT-NOTE: SDL は GPU のドライバではテクスチャの繰り返し（WRAP）で 1 回で描くが、
+      papimela はどのドライバでも 1 枚ずつ描く（SDL がソフトウェアで取る道）。 }
+    procedure RenderTextureTiled(ATexture: TPMLTexture; const ASrc: TPMLFRect; AScale: Single;
+      const ADst: TPMLFRect);
+    { 9 つに分けて描く（SDL_RenderTexture9Grid）。四隅は ALeft / ARight / ATop / ABottom の
+      大きさを AScale 倍（切り上げ）で描き、辺と中央を伸ばす。AScale <= 0 は 1 と同じ。 }
+    procedure RenderTexture9Grid(ATexture: TPMLTexture; const ASrc: TPMLFRect;
+      ALeft, ARight, ATop, ABottom, AScale: Single; const ADst: TPMLFRect);
+    { 9GridTiled（SDL_RenderTexture9GridTiled）。辺と中央を伸ばさずに ATileScale で敷き詰める。 }
+    procedure RenderTexture9GridTiled(ATexture: TPMLTexture; const ASrc: TPMLFRect;
+      ALeft, ARight, ATop, ABottom, AScale: Single; const ADst: TPMLFRect; ATileScale: Single);
+
     // 積んだコマンドを実行して空にする。
     procedure Flush;
     procedure Present;
     // 描画先の画素を読む。先に Flush する。呼び出し側が Free する。
     function  ReadPixels(const ARect: TPMLRect): TPMLSurface;
     function  GetOutputSize(out AWidth, AHeight: Integer): Boolean;
+    // いまの描画先の大きさ（SDL_GetCurrentRenderOutputSize）。描画先がテクスチャなら
+    // その大きさ、そうでなければ GetOutputSize と同じ。
+    function  GetCurrentOutputSize(out AWidth, AHeight: Integer): Boolean;
 
     { 論理解像度。以後の描画の座標は AW x AH の論理画面の上の座標になり、
       出力へは AMode に従って当てはめる。出力（ウィンドウ）の大きさが変わると
@@ -368,6 +442,13 @@ type
     property ClipEnabled: Boolean read FClipEnabled write FClipEnabled;
     // 描画の座標に掛ける倍率。既定は (1, 1)。論理解像度の倍率とは別に掛かる。
     property Scale      : TPMLFPoint read FScale write SetScale;
+    { 描画先（SDL_SetRenderTarget / SDL_GetRenderTarget）。nil はウィンドウかサーフェス。
+      Access = Target で作ったテクスチャだけを置ける（違えば EPMLArgument、ドライバが描画先の
+      テクスチャを持てなければ EPMLUnsupported）。切り替える前に積んだ命令を描き切る。
+      ビューポート・クリップ・拡大率・論理解像度は描画先ごとに別に持つ。描画先にしている
+      テクスチャを破棄すると、描画先はウィンドウかサーフェスへ戻る。描画先がテクスチャの
+      間の Present は EPMLArgument（SDL と同じく誤り）。 }
+    property RenderTarget: TPMLTexture read FTarget write SetRenderTarget;
     property Driver     : TPMLRenderDriver read FDriver;
     property Window     : TPMLWindow read FWindow;
     // 0 = Present は待たない、1 = 画面の更新を待つ。ドライバが受け付けなければ
@@ -586,6 +667,29 @@ end;
 
 { TPMLRenderDriver }
 
+{ TPMLRenderViewState }
+
+class function TPMLRenderViewState.Default: TPMLRenderViewState;
+begin
+  Result.Viewport := TPMLRect.Make(0, 0, 0, 0);
+  Result.ClipRect := TPMLRect.Make(0, 0, 0, 0);
+  Result.ClipEnabled := False;
+  Result.Scale := TPMLFPoint.Make(1, 1);
+  Result.LogicalW := 0;
+  Result.LogicalH := 0;
+  Result.LogicalMode := TPMLLogicalPresentation.Disabled;
+end;
+
+function TPMLRenderDriver.SupportsRenderTargets: Boolean;
+begin
+  Result := False;
+end;
+
+function TPMLRenderDriver.SetRenderTarget(ATexture: TPMLTexture): Boolean;
+begin
+  Result := ATexture = nil;
+end;
+
 function TPMLRenderDriver.SupportsBlendMode(AMode: TPMLBlendMode): Boolean;
 begin
   Result := True;
@@ -744,6 +848,7 @@ begin
   FWidth := AWidth;
   FHeight := AHeight;
   FBlendMode := TPMLBlendMode.None;
+  FView := TPMLRenderViewState.Default;
   FColorMod := TPMLColor.White;
   FAlphaMod := 255;
   FScaleMode := TPMLScaleMode.Nearest;
@@ -757,6 +862,10 @@ begin
     // （SDL_DestroyTexture の FlushRenderCommandsIfTextureNeeded。D-39）。
     // 吐き出さないと、Present のときに解放済みのテクスチャを読む。
     FRenderer.Flush;
+    // 描画先にしているテクスチャを消すなら、描画先をウィンドウ側へ戻してから
+    // （SDL_DestroyTextureInternal と同じ）。
+    if FRenderer.RenderTarget = Self then
+      FRenderer.RenderTarget := nil;
     FRenderer.Driver.DestroyTexture(Self);
     FRenderer.RemoveTexture(Self);
   end;
@@ -947,6 +1056,82 @@ end;
 function TPMLRenderer.GetOutputSize(out AWidth, AHeight: Integer): Boolean;
 begin
   Result := FDriver.GetOutputSize(AWidth, AHeight);
+end;
+
+function TPMLRenderer.GetCurrentOutputSize(out AWidth, AHeight: Integer): Boolean;
+begin
+  if FTarget <> nil then
+  begin
+    AWidth := FTarget.Width;
+    AHeight := FTarget.Height;
+    Result := True;
+  end
+  else
+    Result := FDriver.GetOutputSize(AWidth, AHeight);
+end;
+
+procedure TPMLRenderer.SaveView(out AView: TPMLRenderViewState);
+begin
+  AView.Viewport := FViewport;
+  AView.ClipRect := FClipRect;
+  AView.ClipEnabled := FClipEnabled;
+  AView.Scale := FScale;
+  AView.LogicalW := FLogicalW;
+  AView.LogicalH := FLogicalH;
+  AView.LogicalMode := FLogicalMode;
+end;
+
+procedure TPMLRenderer.LoadView(const AView: TPMLRenderViewState);
+begin
+  FViewport := AView.Viewport;
+  FClipRect := AView.ClipRect;
+  FClipEnabled := AView.ClipEnabled;
+  FScale := AView.Scale;
+  FLogicalW := AView.LogicalW;
+  FLogicalH := AView.LogicalH;
+  FLogicalMode := AView.LogicalMode;
+end;
+
+{ PORT-NOTE: SDL_SetRenderTarget。積んだ命令を描き切り、見え方を描画先のものに入れ替え、
+  ドライバの描画先を変える。次の描画でビューポートとクリップの命令を積み直す（Flush が
+  積んだ状態を忘れるので、QueueStateIfChanged が積む）。 }
+procedure TPMLRenderer.SetRenderTarget(AValue: TPMLTexture);
+var
+  Old: TPMLTexture;
+begin
+  if AValue <> nil then
+  begin
+    if AValue.Renderer <> Self then
+      raise EPMLArgument.Create('render target belongs to another renderer');
+    if AValue.Access <> TPMLTextureAccess.Target then
+      raise EPMLArgument.Create('render target texture was not created with Access = Target');
+  end;
+  if AValue = FTarget then
+    Exit;
+  Flush;
+  Old := FTarget;
+  if Old = nil then
+    SaveView(FMainView)
+  else
+    SaveView(Old.FView);
+  FTarget := AValue;
+  if AValue = nil then
+    LoadView(FMainView)
+  else
+    LoadView(AValue.FView);
+  if not FDriver.SetRenderTarget(AValue) then
+  begin
+    // 戻す。ドライバは描画先を変えていない。
+    FTarget := Old;
+    if Old = nil then
+      LoadView(FMainView)
+    else
+      LoadView(Old.FView);
+    raise EPMLUnsupported.CreateNative(
+      Format('driver %s could not switch the render target', [FDriver.Name]), 0, 'render');
+  end;
+  FStateQueued := False;
+  UpdateView;
 end;
 
 { 状態が最後に積んだものと違うときだけ状態コマンドを積む。
@@ -1172,6 +1357,327 @@ begin
   FQueue.Push(Cmd);
 end;
 
+{ ---- 回す・写す・敷き詰める・9 つに分ける（SDL_render.c の移植） ---- }
+
+{ 転送元をテクスチャの範囲に切る。空の ASrc はテクスチャ全体。何も残らなければ False。 }
+function TPMLRenderer.ClampedSource(ATexture: TPMLTexture; const ASrc: TPMLFRect;
+  out AReal: TPMLFRect): Boolean;
+var
+  X1, Y1, X2, Y2: Single;
+begin
+  if ASrc.IsEmpty then
+  begin
+    AReal := TPMLFRect.Make(0, 0, ATexture.Width, ATexture.Height);
+    Exit(True);
+  end;
+  X1 := ASrc.X;
+  Y1 := ASrc.Y;
+  X2 := ASrc.X + ASrc.W;
+  Y2 := ASrc.Y + ASrc.H;
+  if X1 < 0 then X1 := 0;
+  if Y1 < 0 then Y1 := 0;
+  if X2 > ATexture.Width then X2 := ATexture.Width;
+  if Y2 > ATexture.Height then Y2 := ATexture.Height;
+  AReal := TPMLFRect.Make(X1, Y1, X2 - X1, Y2 - Y1);
+  Result := not AReal.IsEmpty;
+end;
+
+{ 空の矩形を「全体」と読まずに、何も描かない RenderTexture。9 つに分けるときと敷き
+  詰めるときに使う（枠の幅が 0 のとき、RenderTexture のままだとテクスチャ全体を
+  ビューポート全体に描いてしまう。SDL は空の交わりとして何も描かない）。 }
+procedure TPMLRenderer.CopyExact(ATexture: TPMLTexture; const ASrc, ADst: TPMLFRect);
+begin
+  if ASrc.IsEmpty or ADst.IsEmpty then
+    Exit;
+  RenderTexture(ATexture, ASrc, ADst);
+end;
+
+procedure TPMLRenderer.RenderTextureRotated(ATexture: TPMLTexture; const ASrc, ADst: TPMLFRect;
+  AAngle: Double; AFlip: TPMLFlips);
+var
+  D: TPMLFRect;
+begin
+  UpdateView;
+  if ADst.IsEmpty then
+    D := ViewportSize
+  else
+    D := ADst;
+  RenderTextureRotated(ATexture, ASrc, D, AAngle, TPMLFPoint.Make(D.W / 2, D.H / 2), AFlip);
+end;
+
+procedure TPMLRenderer.RenderTextureRotated(ATexture: TPMLTexture; const ASrc, ADst: TPMLFRect;
+  AAngle: Double; const ACenter: TPMLFPoint; AFlip: TPMLFlips);
+var
+  S, D: TPMLFRect;
+  V: array[0..3] of TPMLVertex;
+  MinU, MinV, MaxU, MaxV, MinX, MinY, MaxX, MaxY, CX, CY, Rad, Sn, Cs: Single;
+  Col: TPMLFColor;
+  I: Integer;
+begin
+  if ATexture = nil then
+    Exit;
+  if ATexture.Renderer <> Self then
+    raise EPMLArgument.Create('texture belongs to another renderer');
+  // 回さず（360 度の整数倍）反転もしないなら、ふつうの転送（SDL と同じ近道）。
+  if (AFlip = []) and (Frac(AAngle / 360) = 0) then
+  begin
+    RenderTexture(ATexture, ASrc, ADst);
+    Exit;
+  end;
+  if not ClampedSource(ATexture, ASrc, S) then
+    Exit;
+  UpdateView;
+  if ADst.IsEmpty then
+    D := ViewportSize
+  else
+    D := ADst;
+
+  MinU := S.X / ATexture.Width;
+  MinV := S.Y / ATexture.Height;
+  MaxU := (S.X + S.W) / ATexture.Width;
+  MaxV := (S.Y + S.H) / ATexture.Height;
+  CX := ACenter.X + D.X;
+  CY := ACenter.Y + D.Y;
+  if TPMLFlip.Horizontal in AFlip then
+  begin
+    MinX := D.X + D.W;
+    MaxX := D.X;
+  end
+  else
+  begin
+    MinX := D.X;
+    MaxX := D.X + D.W;
+  end;
+  if TPMLFlip.Vertical in AFlip then
+  begin
+    MinY := D.Y + D.H;
+    MaxY := D.Y;
+  end
+  else
+  begin
+    MinY := D.Y;
+    MaxY := D.Y + D.H;
+  end;
+  Rad := Single((Pi * AAngle) / 180.0);
+  Sn := Sin(Rad);
+  Cs := Cos(Rad);
+  // ( c -s ) の 2x2 の行列で中心のまわりに回す（SDL と同じ式）。
+  // ( s  c )
+  V[0].Position := TPMLFPoint.Make(Cs * (MinX - CX) - Sn * (MinY - CY) + CX,
+                                   Sn * (MinX - CX) + Cs * (MinY - CY) + CY);
+  V[1].Position := TPMLFPoint.Make(Cs * (MaxX - CX) - Sn * (MinY - CY) + CX,
+                                   Sn * (MaxX - CX) + Cs * (MinY - CY) + CY);
+  V[2].Position := TPMLFPoint.Make(Cs * (MaxX - CX) - Sn * (MaxY - CY) + CX,
+                                   Sn * (MaxX - CX) + Cs * (MaxY - CY) + CY);
+  V[3].Position := TPMLFPoint.Make(Cs * (MinX - CX) - Sn * (MaxY - CY) + CX,
+                                   Sn * (MinX - CX) + Cs * (MaxY - CY) + CY);
+  V[0].TexCoord := TPMLFPoint.Make(MinU, MinV);
+  V[1].TexCoord := TPMLFPoint.Make(MaxU, MinV);
+  V[2].TexCoord := TPMLFPoint.Make(MaxU, MaxV);
+  V[3].TexCoord := TPMLFPoint.Make(MinU, MaxV);
+  // 変調色は頂点の色として持たせる（SDL の QueueCmdGeometry に texture->color を渡すのと同じ）。
+  Col := TPMLFColor.FromColor(TPMLColor.Make(ATexture.ColorMod.R, ATexture.ColorMod.G,
+    ATexture.ColorMod.B, ATexture.AlphaMod));
+  for I := 0 to 3 do
+    V[I].Color := Col;
+  RenderGeometry(ATexture, V, [0, 1, 2, 0, 2, 3]);
+end;
+
+procedure TPMLRenderer.RenderTextureAffine(ATexture: TPMLTexture; const ASrc: TPMLFRect;
+  const AOrigin, ARight, ADown: TPMLFPoint);
+var
+  S: TPMLFRect;
+  V: array[0..3] of TPMLVertex;
+  Col: TPMLFColor;
+  I: Integer;
+begin
+  if ATexture = nil then
+    Exit;
+  if ATexture.Renderer <> Self then
+    raise EPMLArgument.Create('texture belongs to another renderer');
+  if not ClampedSource(ATexture, ASrc, S) then
+    Exit;
+  V[0].Position := AOrigin;
+  V[1].Position := ARight;
+  V[3].Position := ADown;
+  V[2].Position := TPMLFPoint.Make(ARight.X + ADown.X - AOrigin.X, ARight.Y + ADown.Y - AOrigin.Y);
+  V[0].TexCoord := TPMLFPoint.Make(S.X / ATexture.Width, S.Y / ATexture.Height);
+  V[1].TexCoord := TPMLFPoint.Make((S.X + S.W) / ATexture.Width, S.Y / ATexture.Height);
+  V[2].TexCoord := TPMLFPoint.Make((S.X + S.W) / ATexture.Width, (S.Y + S.H) / ATexture.Height);
+  V[3].TexCoord := TPMLFPoint.Make(S.X / ATexture.Width, (S.Y + S.H) / ATexture.Height);
+  Col := TPMLFColor.FromColor(TPMLColor.Make(ATexture.ColorMod.R, ATexture.ColorMod.G,
+    ATexture.ColorMod.B, ATexture.AlphaMod));
+  for I := 0 to 3 do
+    V[I].Color := Col;
+  RenderGeometry(ATexture, V, [0, 1, 2, 0, 2, 3]);
+end;
+
+{ SDL_RenderTextureTiled_Iterate。行ごとに 1 枚ずつ並べ、右端と下端の端数は転送元も
+  同じ割合だけ切って描く。 }
+procedure TPMLRenderer.TiledExact(ATexture: TPMLTexture; const ASrc: TPMLFRect; AScale: Single;
+  const ADst: TPMLFRect);
+var
+  TileW, TileH, RemW, RemH, RemSrcW, RemSrcH, RemDstW, RemDstH: Single;
+  Rows, Cols, X, Y: Integer;
+  CS, CD: TPMLFRect;
+begin
+  TileW := ASrc.W * AScale;
+  TileH := ASrc.H * AScale;
+  if (TileW <= 0) or (TileH <= 0) or ADst.IsEmpty then
+    Exit;
+  Cols := Trunc(ADst.W / TileW);
+  Rows := Trunc(ADst.H / TileH);
+  RemW := Frac(ADst.W / TileW);
+  RemH := Frac(ADst.H / TileH);
+  RemSrcW := RemW * ASrc.W;
+  RemSrcH := RemH * ASrc.H;
+  RemDstW := RemW * TileW;
+  RemDstH := RemH * TileH;
+  CS := ASrc;
+  CD := TPMLFRect.Make(ADst.X, ADst.Y, TileW, TileH);
+  for Y := 0 to Rows - 1 do
+  begin
+    CD.X := ADst.X;
+    for X := 0 to Cols - 1 do
+    begin
+      CopyExact(ATexture, CS, CD);
+      CD.X := CD.X + CD.W;
+    end;
+    if RemDstW > 0 then
+    begin
+      CS.W := RemSrcW;
+      CD.W := RemDstW;
+      CopyExact(ATexture, CS, CD);
+      CS.W := ASrc.W;
+      CD.W := TileW;
+    end;
+    CD.Y := CD.Y + CD.H;
+  end;
+  if RemDstH > 0 then
+  begin
+    CS.H := RemSrcH;
+    CD.H := RemDstH;
+    CD.X := ADst.X;
+    for X := 0 to Cols - 1 do
+    begin
+      CopyExact(ATexture, CS, CD);
+      CD.X := CD.X + CD.W;
+    end;
+    if RemDstW > 0 then
+    begin
+      CS.W := RemSrcW;
+      CD.W := RemDstW;
+      CopyExact(ATexture, CS, CD);
+    end;
+  end;
+end;
+
+procedure TPMLRenderer.RenderTextureTiled(ATexture: TPMLTexture; const ASrc: TPMLFRect;
+  AScale: Single; const ADst: TPMLFRect);
+var
+  S, D: TPMLFRect;
+begin
+  if ATexture = nil then
+    Exit;
+  if ATexture.Renderer <> Self then
+    raise EPMLArgument.Create('texture belongs to another renderer');
+  if AScale <= 0 then
+    raise EPMLArgument.Create('RenderTextureTiled: scale must be > 0');
+  if not ClampedSource(ATexture, ASrc, S) then
+    Exit;
+  UpdateView;
+  if ADst.IsEmpty then
+    D := ViewportSize
+  else
+    D := ADst;
+  TiledExact(ATexture, S, AScale, D);
+end;
+
+procedure TPMLRenderer.RenderTexture9Grid(ATexture: TPMLTexture; const ASrc: TPMLFRect;
+  ALeft, ARight, ATop, ABottom, AScale: Single; const ADst: TPMLFRect);
+begin
+  Do9Grid(ATexture, ASrc, ALeft, ARight, ATop, ABottom, AScale, ADst, False, 1);
+end;
+
+procedure TPMLRenderer.RenderTexture9GridTiled(ATexture: TPMLTexture; const ASrc: TPMLFRect;
+  ALeft, ARight, ATop, ABottom, AScale: Single; const ADst: TPMLFRect; ATileScale: Single);
+begin
+  // SDL は敷き詰めの倍率が 0 以下なら SDL_RenderTextureTiled の引数の誤りで失敗する。
+  if ATileScale <= 0 then
+    raise EPMLArgument.Create('RenderTexture9GridTiled: tile scale must be > 0');
+  Do9Grid(ATexture, ASrc, ALeft, ARight, ATop, ABottom, AScale, ADst, True, ATileScale);
+end;
+
+{ 9 つの区画を SDL と同じ順（中央、四隅、左右、上下）で描く。ATiled なら中央と辺を
+  ATileScale で敷き詰め、そうでなければ伸ばす。 }
+procedure TPMLRenderer.Do9Grid(ATexture: TPMLTexture; const ASrc: TPMLFRect;
+  ALeft, ARight, ATop, ABottom, AScale: Single; const ADst: TPMLFRect;
+  ATiled: Boolean; ATileScale: Single);
+var
+  S, D, CS, CD: TPMLFRect;
+  DL, DR, DT, DB: Single;
+
+  // 中央と辺: 9Grid は伸ばし、9GridTiled は敷き詰める。
+  procedure Fill(const ASrcPart, ADstPart: TPMLFRect);
+  begin
+    if ATiled then
+    begin
+      if not ASrcPart.IsEmpty then
+        TiledExact(ATexture, ASrcPart, ATileScale, ADstPart);
+    end
+    else
+      CopyExact(ATexture, ASrcPart, ADstPart);
+  end;
+
+begin
+  if ATexture = nil then
+    Exit;
+  if ATexture.Renderer <> Self then
+    raise EPMLArgument.Create('texture belongs to another renderer');
+  if ASrc.IsEmpty then
+    S := TPMLFRect.Make(0, 0, ATexture.Width, ATexture.Height)
+  else
+    S := ASrc;
+  UpdateView;
+  if ADst.IsEmpty then
+    D := ViewportSize
+  else
+    D := ADst;
+  if (AScale <= 0) or (AScale = 1) then
+  begin
+    DL := Ceil(ALeft);  DR := Ceil(ARight);
+    DT := Ceil(ATop);   DB := Ceil(ABottom);
+  end
+  else
+  begin
+    DL := Ceil(ALeft * AScale);  DR := Ceil(ARight * AScale);
+    DT := Ceil(ATop * AScale);   DB := Ceil(ABottom * AScale);
+  end;
+
+  // 中央
+  CS := TPMLFRect.Make(S.X + ALeft, S.Y + ATop, S.W - ALeft - ARight, S.H - ATop - ABottom);
+  CD := TPMLFRect.Make(D.X + DL, D.Y + DT, D.W - DL - DR, D.H - DT - DB);
+  Fill(CS, CD);
+  // 左上・右上・右下・左下
+  CopyExact(ATexture, TPMLFRect.Make(S.X, S.Y, ALeft, ATop), TPMLFRect.Make(D.X, D.Y, DL, DT));
+  CopyExact(ATexture, TPMLFRect.Make(S.X + S.W - ARight, S.Y, ARight, ATop),
+    TPMLFRect.Make(D.X + D.W - DR, D.Y, DR, DT));
+  CopyExact(ATexture, TPMLFRect.Make(S.X + S.W - ARight, S.Y + S.H - ABottom, ARight, ABottom),
+    TPMLFRect.Make(D.X + D.W - DR, D.Y + D.H - DB, DR, DB));
+  CopyExact(ATexture, TPMLFRect.Make(S.X, S.Y + S.H - ABottom, ALeft, ABottom),
+    TPMLFRect.Make(D.X, D.Y + D.H - DB, DL, DB));
+  // 左・右
+  Fill(TPMLFRect.Make(S.X, S.Y + ATop, ALeft, S.H - ATop - ABottom),
+    TPMLFRect.Make(D.X, D.Y + DT, DL, D.H - DT - DB));
+  Fill(TPMLFRect.Make(S.X + S.W - ARight, S.Y + ATop, ARight, S.H - ATop - ABottom),
+    TPMLFRect.Make(D.X + D.W - DR, D.Y + DT, DR, D.H - DT - DB));
+  // 上・下
+  Fill(TPMLFRect.Make(S.X + ALeft, S.Y, S.W - ALeft - ARight, ATop),
+    TPMLFRect.Make(D.X + DL, D.Y, D.W - DL - DR, DT));
+  Fill(TPMLFRect.Make(S.X + ALeft, S.Y + S.H - ABottom, S.W - ALeft - ARight, ABottom),
+    TPMLFRect.Make(D.X + DL, D.Y + D.H - DB, D.W - DL - DR, DB));
+end;
+
 procedure TPMLRenderer.Flush;
 begin
   if FQueue.CommandCount = 0 then
@@ -1184,6 +1690,8 @@ end;
 
 procedure TPMLRenderer.Present;
 begin
+  if FTarget <> nil then
+    raise EPMLArgument.Create('cannot present while a texture is the render target');
   Flush;
   FDriver.Present;
 end;
@@ -1196,7 +1704,7 @@ begin
   Flush;
   if ARect.IsEmpty then
   begin
-    if not FDriver.GetOutputSize(W, H) then
+    if not GetCurrentOutputSize(W, H) then
       raise EPMLRenderError.Create('output size unknown');
     R := TPMLRect.Make(0, 0, W, H);
   end
@@ -1208,6 +1716,9 @@ end;
 function TPMLRenderer.CreateTexture(AFormat: TPMLPixelFormat;
   AAccess: TPMLTextureAccess; AWidth, AHeight: Integer): TPMLTexture;
 begin
+  if (AAccess = TPMLTextureAccess.Target) and not FDriver.SupportsRenderTargets then
+    raise EPMLUnsupported.CreateNative(
+      Format('driver %s has no render target textures', [FDriver.Name]), 0, 'render');
   Result := TPMLTexture.Create(Self, AFormat, AAccess, AWidth, AHeight);
   try
     if not FDriver.CreateTexture(Result) then
@@ -1275,7 +1786,7 @@ var
   IW, IH: Integer;
   OW, OH, LW, LH, WantAspect, RealAspect, S: Single;
 begin
-  if not FDriver.GetOutputSize(IW, IH) then
+  if not GetCurrentOutputSize(IW, IH) then
   begin
     IW := 0;
     IH := 0;
@@ -1872,7 +2383,53 @@ begin
     Result := TPMLFPoint.Make(AOutW / AWindow.Width, AOutH / AWindow.Height);
 end;
 
+{ ウィンドウの座標との変換は、描画先によらずウィンドウ側の見え方で行う（SDL も main_view を
+  使う）。描画先がテクスチャの間は、ウィンドウ側の見え方を一時的に入れ替えて求める。 }
+function TPMLRenderer.EnterMainView: TPMLTexture;
+begin
+  Result := FTarget;
+  if Result = nil then
+    Exit;
+  SaveView(Result.FView);
+  FTarget := nil;
+  LoadView(FMainView);
+end;
+
+procedure TPMLRenderer.LeaveMainView(ATarget: TPMLTexture);
+begin
+  if ATarget = nil then
+    Exit;
+  SaveView(FMainView);
+  FTarget := ATarget;
+  LoadView(ATarget.FView);
+  UpdateView;
+end;
+
 function TPMLRenderer.RenderCoordinatesFromWindow(AWindowX, AWindowY: Single): TPMLFPoint;
+var
+  T: TPMLTexture;
+begin
+  T := EnterMainView;
+  try
+    Result := FromWindowInMain(AWindowX, AWindowY);
+  finally
+    LeaveMainView(T);
+  end;
+end;
+
+function TPMLRenderer.RenderCoordinatesToWindow(AX, AY: Single): TPMLFPoint;
+var
+  T: TPMLTexture;
+begin
+  T := EnterMainView;
+  try
+    Result := ToWindowInMain(AX, AY);
+  finally
+    LeaveMainView(T);
+  end;
+end;
+
+function TPMLRenderer.FromWindowInMain(AWindowX, AWindowY: Single): TPMLFPoint;
 var
   OW, OH: Integer;
   Ratio: TPMLFPoint;
@@ -1900,7 +2457,7 @@ begin
   Result.Y := Y - FViewport.Y;
 end;
 
-function TPMLRenderer.RenderCoordinatesToWindow(AX, AY: Single): TPMLFPoint;
+function TPMLRenderer.ToWindowInMain(AX, AY: Single): TPMLFPoint;
 var
   OW, OH: Integer;
   Ratio: TPMLFPoint;

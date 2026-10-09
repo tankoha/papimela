@@ -1,12 +1,13 @@
 {
-  PaPiMeLa.Video.Wayland.Data — クリップボードとプライマリ選択（wl_data_device / primary selection）
+  PaPiMeLa.Video.Wayland.Data — クリップボード、プライマリ選択、ドラッグ＆ドロップの受信
+  （wl_data_device / primary selection）
 
   Origin : ported from SDL (src/video/wayland/SDL_waylanddatamanager.c,
            src/video/wayland/SDL_waylandclipboard.c)
            Scope: パイプでの送受信（全部書く、SIGPIPE を捨てる、タイムアウト付きで読む）、
            オファーの MIME 一覧、選択を置くときの serial の扱い、テキストの MIME タイプ 5 種。
-           SDL_waylandevents.c のデータデバイス / プライマリ選択デバイスのリスナーのうち
-           data_offer と selection の部分も含む。ドラッグ＆ドロップは含まない。
+           SDL_waylandevents.c のデータデバイス / プライマリ選択デバイスのリスナー
+           （data_offer、selection、ドラッグ＆ドロップの enter / leave / motion / drop）も含む。
            SDL revision: see docs/ORIGIN.md
   Design : docs/DESIGN.md §3.2（TPMLWaylandDataManager）、§11 #38
 
@@ -15,6 +16,8 @@
     wl_data_device と zwp_primary_selection_device_v1 を使い、選択を置く・他のアプリの
     選択を読む。データそのものは持たず、置いたデータは公開層から借りた提供者から、
     他のアプリのデータは相手からパイプで読む。
+    同じデータデバイスで、他のアプリからのドラッグ＆ドロップ（ファイルとテキスト）を受け、
+    Context.Events.Drop（TPMLDropState）へ流す。
 
   WHY:
     SDL はシートごとのデータデバイスを持ち、データを SDL_clipboard.c の内部に置く。
@@ -47,11 +50,27 @@
       1 回 2 秒。どちらも主スレッドで同期的に行う
     - 送りの最中に相手が読むのをやめても SIGPIPE で落ちない（スレッドのマスクで
       止め、溜まった分を捨ててから戻す）
+    - ドラッグ＆ドロップの受信（SDL_waylandevents.c の data_device_handle_enter / leave /
+      motion / drop）:
+        - enter: ウィンドウが DropFile か DropText を受ける設定で、オファーが text/uri-list
+          （無ければ TextMimeTypes の最初に合うもの）を持つなら、accept と
+          set_actions(copy)（バージョン 3 から）を送り、最初の位置を DropPosition にする。
+          持たなければ accept(NULL) と set_actions(none) で断る
+        - motion: DropPosition。座標はサーフェスの座標のまま（ポインタと同じ。拡大率は掛けない）
+        - drop: パイプで受け取り（クリップボードと同じ待ち）、DropFile（ローカルのパスごと）か
+          DropText（行ごと）を積み、DropComplete を積む。操作が来ていれば finish（バージョン 3
+          から）を送り、オファーを捨てる
+        - leave: ドロップ前に出ていったなら DropComplete を積み、オファーを捨てる
+          （SDL と同じ）。drop のあとの leave は何もしない
 
   NOT RESOLVED:
-    - ドラッグ＆ドロップ（wl_data_device の enter / motion / drop / leave と、ソースの
-      target / action 系）は後の段階。オファーとソースはクラスに分けてあるので、
-      デバイスのリスナーに足せる。今は enter で渡されたオファーを捨てるだけ
+    - ドラッグ＆ドロップの送り側（こちらがドラッグを始める。wl_data_source の target /
+      action / dnd_drop_performed / dnd_finished と start_drag）
+    - 受信の document-portal の枝（application/vnd.portal.filetransfer を D-Bus で開く）。
+      Flatpak など、パスが見えない環境で DropFile が積まれない。詳しくは HandleDragDrop
+    - ドロップを受けるかは DropFile / DropText が有効かだけで決まる。SDL の
+      accepts_drag_and_drop のようなウィンドウごとの切り替えは無い
+    - 受信は主スレッドを止めて読む（相手が書かないと最大 5 秒）。SDL と同じ
     - シートは最初の 1 つだけ（SDL は最後に入力を受けたシートを選ぶ）
     - フォーカスが無いときに黙って断られた set_selection は見分けられない（コンポジタは
       フォーカスの無いクライアントに echo を送らないので、sync の時点では断られたのか
@@ -77,6 +96,7 @@ uses
   PaPiMeLa.Types,
   PaPiMeLa.Core.Base,
   PaPiMeLa.Events,
+  PaPiMeLa.Events.Drop,
   PaPiMeLa.Video.Backend,
   PaPiMeLa.Video.Wayland.Types,
   PaPiMeLa.Video.Wayland.Seat,
@@ -97,7 +117,9 @@ type
   public
     constructor Create(AOffer: TPMLWaylandOffer);
     procedure offer(AProxy: Pwl_data_offer; mime_type: PAnsiChar); override;
-    // source_actions / action はドラッグ＆ドロップ用。後の段階（既定の空実装のまま）。
+    // ドラッグ＆ドロップで、コンポジタが選んだ操作（copy / move / none）。
+    procedure action(AProxy: Pwl_data_offer; dnd_action: LongWord); override;
+    // source_actions は使わない（SDL も見ない。こちらは copy だけを受け付ける）。
   end;
 
   TPMLWaylandPrimaryOfferFwd = class(Tzwp_primary_selection_offer_v1_listener)
@@ -136,8 +158,11 @@ type
     procedure data_offer(AProxy: Pwl_data_device; id: Pwl_data_offer); override;
     procedure enter(AProxy: Pwl_data_device; serial: LongWord; surface: Pwl_surface;
       x: wl_fixed_t; y: wl_fixed_t; id: Pwl_data_offer); override;
+    procedure leave(AProxy: Pwl_data_device); override;
+    procedure motion(AProxy: Pwl_data_device; time: LongWord; x: wl_fixed_t;
+      y: wl_fixed_t); override;
+    procedure drop(AProxy: Pwl_data_device); override;
     procedure selection(AProxy: Pwl_data_device; id: Pwl_data_offer); override;
-    // leave / motion / drop はドラッグ＆ドロップ用。後の段階（既定の空実装のまま）。
   end;
 
   TPMLWaylandPrimaryDeviceFwd = class(Tzwp_primary_selection_device_v1_listener)
@@ -162,6 +187,7 @@ type
     FDataFwd  : TPMLWaylandDataOfferFwd;
     FPrimFwd  : TPMLWaylandPrimaryOfferFwd;
     FMimes    : TStringArray;
+    FDndAction: LongWord;
   public
     constructor CreateData(AOwner: TPMLWaylandClipboard; AProxy: Pwl_data_offer);
     constructor CreatePrimary(AOwner: TPMLWaylandClipboard;
@@ -172,7 +198,15 @@ type
     // 相手に AFD へ書かせる。AFD は呼び出し側が閉じる。
     procedure Receive(const AMime: String; AFD: LongInt);
     function  ProxyPtr: Pointer;
+    // ---- ドラッグ＆ドロップ（wl_data_offer の要求。プライマリ選択のオファーでは何もしない）
+    // AMime が空なら断る（mime_type = NULL）。
+    procedure Accept(ASerial: LongWord; const AMime: String);
+    // バージョン 3 から。それ未満のコンポジタには送らない。
+    procedure SetActions(AActions, APreferred: LongWord);
+    procedure Finish;
     property Kind : TPMLClipboardSelection read FKind;
+    // コンポジタが最後に知らせた操作（wl_data_offer.action）。0 = none、または未着。
+    property DndAction: LongWord read FDndAction write FDndAction;
     // 相手が配っているままの MIME タイプ（echo の印を含む）。
     property Mimes: TStringArray read FMimes write FMimes;
   end;
@@ -251,6 +285,12 @@ type
     FMarkerBase: String;
     FSeq       : Integer;
     FLastError : String;
+    // ---- ドラッグ＆ドロップ（SDL_WaylandDataDevice の drag_offer / dnd_window / has_mime_*）
+    FDragOffer : TPMLWaylandOffer;    // enter で渡されたオファー。drop / leave で捨てる
+    FDragWindow: TPMLWindowID;        // 受け付けたウィンドウ。0 = 受け付けていない
+    FDragMime  : String;              // 受け取る MIME タイプ
+    FDragFiles : Boolean;             // FDragMime は text/uri-list
+    FDragText  : Boolean;             // FDragMime はテキスト
     procedure RecordError(const AWhere: String; E: Exception);
     function  NewMarker: String;
     function  CreateSource(ASelection: TPMLClipboardSelection): TPMLWaylandSource;
@@ -264,6 +304,10 @@ type
     procedure DiscardSelOffer(ASelection: TPMLClipboardSelection);
     function  EchoMarkerOf(ASelection: TPMLClipboardSelection; AOffer: TPMLWaylandOffer): String;
     function  OfferOfProxy(AProxy: Pointer): TPMLWaylandOffer;
+    function  ReceiveFromOffer(AOffer: TPMLWaylandOffer; const AMimeType: String;
+      out AData: TBytes): Boolean;
+    function  AcceptsDrops: Boolean;
+    procedure EndDrag;
     function  PublicMimes(AOffer: TPMLWaylandOffer): TStringArray;
     procedure HandleSelection(ASelection: TPMLClipboardSelection; AOffer: TPMLWaylandOffer);
     procedure HandleInputSerial(ASerial: LongWord);
@@ -274,7 +318,11 @@ type
     procedure HandlePrimaryOffer(AProxy: Pzwp_primary_selection_offer_v1);
     procedure HandleDataSelection(AProxy: Pwl_data_offer);
     procedure HandlePrimarySelection(AProxy: Pzwp_primary_selection_offer_v1);
-    procedure HandleDragEnter(AProxy: Pwl_data_offer);
+    procedure HandleDragEnter(ASerial: LongWord; ASurface: Pwl_surface; AX, AY: wl_fixed_t;
+      AProxy: Pwl_data_offer);
+    procedure HandleDragLeave;
+    procedure HandleDragMotion(AX, AY: wl_fixed_t);
+    procedure HandleDragDrop;
     procedure HandleSend(ASource: TPMLWaylandSource; const AMime: String; AFD: LongInt);
     procedure HandleCancelled(ASource: TPMLWaylandSource);
     procedure HandleOfferMime(AOffer: TPMLWaylandOffer; const AMime: String);
@@ -314,6 +362,9 @@ const
   FD_CLOEXEC_FLAG = 1;
   // 手放したソースの印を覚える数。
   RETIRED_MAX = 16;
+
+  // ドラッグ＆ドロップで、ファイルが落とされたときの MIME タイプ。SDL の FILE_MIME。
+  URI_LIST_MIME = 'text/uri-list';
 
 { ---- パイプの出入り（SDL の ReadPipe / WritePipe / SendData） ---- }
 
@@ -459,6 +510,30 @@ begin
   AList[High(AList)] := AValue;
 end;
 
+// CR / LF で分けた行（空の行は捨てる）。SDL_strtok_r(buffer, "\r\n", ...) に当たる。
+function SplitLines(const AText: String): TStringArray;
+var
+  I, Start: Integer;
+
+  procedure TakeLine;
+  begin
+    if I > Start then
+      AppendString(Result, Copy(AText, Start, I - Start));
+  end;
+
+begin
+  Result := nil;
+  Start := 1;
+  for I := 1 to Length(AText) do
+    if (AText[I] = #13) or (AText[I] = #10) then
+    begin
+      TakeLine;
+      Start := I + 1;
+    end;
+  I := Length(AText) + 1;
+  TakeLine;
+end;
+
 function ContainsString(const AList: TStringArray; const AValue: String): Boolean;
 var
   S: String;
@@ -493,6 +568,11 @@ end;
 procedure TPMLWaylandDataOfferFwd.offer(AProxy: Pwl_data_offer; mime_type: PAnsiChar);
 begin
   FOffer.AddMime(PCharToString(mime_type));
+end;
+
+procedure TPMLWaylandDataOfferFwd.action(AProxy: Pwl_data_offer; dnd_action: LongWord);
+begin
+  FOffer.DndAction := dnd_action;
 end;
 
 constructor TPMLWaylandPrimaryOfferFwd.Create(AOffer: TPMLWaylandOffer);
@@ -556,9 +636,23 @@ end;
 procedure TPMLWaylandDataDeviceFwd.enter(AProxy: Pwl_data_device; serial: LongWord;
   surface: Pwl_surface; x: wl_fixed_t; y: wl_fixed_t; id: Pwl_data_offer);
 begin
-  // ドラッグ＆ドロップは後の段階。渡されたオファーだけは捨てる（捨てないと
-  // ドラッグのたびにオファーが溜まる）。
-  FOwner.HandleDragEnter(id);
+  FOwner.HandleDragEnter(serial, surface, x, y, id);
+end;
+
+procedure TPMLWaylandDataDeviceFwd.leave(AProxy: Pwl_data_device);
+begin
+  FOwner.HandleDragLeave;
+end;
+
+procedure TPMLWaylandDataDeviceFwd.motion(AProxy: Pwl_data_device; time: LongWord;
+  x: wl_fixed_t; y: wl_fixed_t);
+begin
+  FOwner.HandleDragMotion(x, y);
+end;
+
+procedure TPMLWaylandDataDeviceFwd.drop(AProxy: Pwl_data_device);
+begin
+  FOwner.HandleDragDrop;
 end;
 
 procedure TPMLWaylandDataDeviceFwd.selection(AProxy: Pwl_data_device; id: Pwl_data_offer);
@@ -660,6 +754,30 @@ begin
     wl_data_offer_receive(FDataProxy, PAnsiChar(AMime), AFD)
   else
     zwp_primary_selection_offer_v1_receive(FPrimProxy, PAnsiChar(AMime), AFD);
+end;
+
+procedure TPMLWaylandOffer.Accept(ASerial: LongWord; const AMime: String);
+begin
+  if FDataProxy = nil then
+    Exit;
+  if AMime = '' then
+    wl_data_offer_accept(FDataProxy, ASerial, nil)
+  else
+    wl_data_offer_accept(FDataProxy, ASerial, PAnsiChar(AMime));
+end;
+
+procedure TPMLWaylandOffer.SetActions(AActions, APreferred: LongWord);
+begin
+  if (FDataProxy <> nil)
+    and (wl_proxy_get_version(Pwl_proxy(FDataProxy)) >= WL_DATA_OFFER_SET_ACTIONS_SINCE_VERSION) then
+    wl_data_offer_set_actions(FDataProxy, AActions, APreferred);
+end;
+
+procedure TPMLWaylandOffer.Finish;
+begin
+  if (FDataProxy <> nil)
+    and (wl_proxy_get_version(Pwl_proxy(FDataProxy)) >= WL_DATA_OFFER_FINISH_SINCE_VERSION) then
+    wl_data_offer_finish(FDataProxy);
 end;
 
 { ---- TPMLWaylandSource ---- }
@@ -1114,42 +1232,55 @@ begin
   end;
 end;
 
-{ 他のアプリのデータを読む。
+{ AOffer から AMimeType のデータをパイプで受け取る。例外は呼び出し側が受ける。
+  クリップボードの受け取りとドラッグ＆ドロップの受け取りの共通部分。
 
   PORT-NOTE: SDL の Wayland_DataOfferReceive は、データデバイスが処理しているイベントの
   途中でも読めるよう、パイプを非ブロックにして 14 ms / 5 秒の待ちで読む。papimela は
   公開層がメインスレッドから呼ぶので、待ちは 1 回 5 秒・全体 60 秒の 1 種類にした。 }
+function TPMLWaylandClipboard.ReceiveFromOffer(AOffer: TPMLWaylandOffer;
+  const AMimeType: String; out AData: TBytes): Boolean;
+var
+  FDs: TFildes;
+begin
+  AData := nil;
+  Result := False;
+  if (AOffer = nil) or (FConn.Display = nil) then
+    Exit;
+  if not MakeReceivePipe(FDs) then
+  begin
+    FLastError := 'ReceiveOffer: pipe failed';
+    Exit;
+  end;
+  try
+    AOffer.Receive(AMimeType, FDs[1]);
+    // 書く側は相手に渡したので、こちらは閉じる。閉じないと EOF が来ない。
+    fpclose(FDs[1]);
+    FDs[1] := -1;
+    wl_display_flush(FConn.Display);
+    Result := ReadAllFromPipe(FDs[0], AData);
+    if not Result then
+      FLastError := 'ReceiveOffer: no data (timeout or empty) for ' + AMimeType;
+  finally
+    if FDs[1] >= 0 then
+      fpclose(FDs[1]);
+    fpclose(FDs[0]);
+  end;
+end;
+
+{ 他のアプリの選択のデータを読む（待ち方は ReceiveFromOffer の PORT-NOTE のとおり）。 }
 function TPMLWaylandClipboard.ReceiveOffer(ASelection: TPMLClipboardSelection;
   const AMimeType: String; out AData: TBytes): Boolean;
 var
   Offer: TPMLWaylandOffer;
-  FDs: TFildes;
 begin
   AData := nil;
   Result := False;
   try
     Offer := FSelOffer[ASelection];
-    if (Offer = nil) or not Offer.HasMime(AMimeType) or (FConn.Display = nil) then
+    if (Offer = nil) or not Offer.HasMime(AMimeType) then
       Exit;
-    if not MakeReceivePipe(FDs) then
-    begin
-      FLastError := 'ReceiveOffer: pipe failed';
-      Exit;
-    end;
-    try
-      Offer.Receive(AMimeType, FDs[1]);
-      // 書く側は相手に渡したので、こちらは閉じる。閉じないと EOF が来ない。
-      fpclose(FDs[1]);
-      FDs[1] := -1;
-      wl_display_flush(FConn.Display);
-      Result := ReadAllFromPipe(FDs[0], AData);
-      if not Result then
-        FLastError := 'ReceiveOffer: no data (timeout or empty) for ' + AMimeType;
-    finally
-      if FDs[1] >= 0 then
-        fpclose(FDs[1]);
-      fpclose(FDs[0]);
-    end;
+    Result := ReceiveFromOffer(Offer, AMimeType, AData);
   except
     on E: Exception do
     begin
@@ -1220,13 +1351,203 @@ begin
   end;
 end;
 
-procedure TPMLWaylandClipboard.HandleDragEnter(AProxy: Pwl_data_offer);
+{ ---- ドラッグ＆ドロップの受信（data_device_handle_enter / leave / motion / drop） ---- }
+
+{ このドラッグを受け付けるか。SDL は SDL_EVENT_DROP_FILE か SDL_EVENT_DROP_TEXT が
+  有効なときだけウィンドウに accepts_drag_and_drop を立てる。papimela はウィンドウごとに
+  切り替えず、有効かどうかをドラッグが入ってきたときに見る。 }
+function TPMLWaylandClipboard.AcceptsDrops: Boolean;
+var
+  Q: TPMLEventQueue;
+begin
+  Q := FSeat.Queue;
+  Result := Q.GetEnabled(TPMLEventKind.DropFile) or Q.GetEnabled(TPMLEventKind.DropText);
+end;
+
+{ ドラッグの状態を戻し、enter で渡されたオファーを捨てる。 }
+procedure TPMLWaylandClipboard.EndDrag;
+var
+  Old: TPMLWaylandOffer;
+begin
+  Old := FDragOffer;
+  FDragOffer := nil;
+  FDragWindow := 0;
+  FDragMime := '';
+  FDragFiles := False;
+  FDragText := False;
+  DiscardOffer(Old);
+end;
+
+{ ドラッグがウィンドウに入った。
+
+  WHAT:
+    受け取る MIME タイプを選び、accept と set_actions(copy) を送って、最初の位置を知らせる。
+    受けないドラッグには accept(NULL) と set_actions(none) を送って断る。
+    どちらでも、オファーは leave か drop まで持つ（そこで捨てる）。
+
+  WHY:
+    SDL は text/uri-list を見たあとでテキストの MIME タイプも探し、両方あると
+    mime_type を後者で上書きする。その状態で drop すると、テキストのデータを
+    URI の一覧として読む。papimela は text/uri-list があればそれだけを使い、
+    無いときだけテキストを探す。
+
+  PORT-NOTE: SDL の document-portal の枝（application/vnd.portal.filetransfer を
+  D-Bus で開く）は含めない。 }
+procedure TPMLWaylandClipboard.HandleDragEnter(ASerial: LongWord; ASurface: Pwl_surface;
+  AX, AY: wl_fixed_t; AProxy: Pwl_data_offer);
+var
+  Offer: TPMLWaylandOffer;
+  Win: TPMLWindowID;
+  M: String;
 begin
   try
-    DiscardOffer(OfferOfProxy(AProxy));
+    // leave が来ないまま次の enter が来たら、前のドラッグを終わらせる（オファーが溜まらない
+    // ように）。
+    HandleDragLeave;
+
+    Offer := OfferOfProxy(AProxy);
+    FDragOffer := Offer;
+    if Offer = nil then
+      Exit;
+    Win := FSeat.WindowIDOf(ASurface);
+    if (Win <> 0) and AcceptsDrops then
+    begin
+      if Offer.HasMime(URI_LIST_MIME) then
+      begin
+        FDragFiles := True;
+        FDragMime := URI_LIST_MIME;
+      end
+      else
+        for M in TextMimeTypes do
+          if Offer.HasMime(M) then
+          begin
+            FDragText := True;
+            FDragMime := M;
+            Break;
+          end;
+    end;
+
+    if FDragFiles or FDragText then
+    begin
+      Offer.Accept(ASerial, FDragMime);
+      // SDL は copy だけを受け付ける。
+      Offer.SetActions(WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY,
+        WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY);
+      FDragWindow := Win;
+      FSeat.Queue.Drop.SendPosition(Win, PMLFixedToSingle(AX), PMLFixedToSingle(AY));
+    end
+    else
+    begin
+      Offer.Accept(ASerial, '');
+      Offer.SetActions(WL_DATA_DEVICE_MANAGER_DND_ACTION_NONE,
+        WL_DATA_DEVICE_MANAGER_DND_ACTION_NONE);
+    end;
+    if FConn.Display <> nil then
+      wl_display_flush(FConn.Display);
   except
     on E: Exception do
       RecordError('data_device.enter', E);
+  end;
+end;
+
+{ ドロップされずにポインタが出ていった（または、まだ drop が無い間に次のドラッグが来た）。
+  受け付けていたなら DropComplete を積む（SDL と同じ）。drop のあとは FDragOffer が
+  無いので何もしない。コンポジタが drop のあとにも leave を送ってくる場合に、
+  余計な DropComplete を積まないため。 }
+procedure TPMLWaylandClipboard.HandleDragLeave;
+begin
+  try
+    if FDragOffer <> nil then
+    begin
+      if FDragWindow <> 0 then
+        FSeat.Queue.Drop.SendComplete(FDragWindow);
+      EndDrag;
+    end;
+  except
+    on E: Exception do
+      RecordError('data_device.leave', E);
+  end;
+end;
+
+procedure TPMLWaylandClipboard.HandleDragMotion(AX, AY: wl_fixed_t);
+begin
+  try
+    if (FDragOffer <> nil) and (FDragWindow <> 0) then
+      FSeat.Queue.Drop.SendPosition(FDragWindow, PMLFixedToSingle(AX), PMLFixedToSingle(AY));
+  except
+    on E: Exception do
+      RecordError('data_device.motion', E);
+  end;
+end;
+
+{ ドロップされた。
+
+  WHAT:
+    データを受け取り、text/uri-list ならローカルのパスごとに DropFile、テキストなら
+    行ごとに DropText を積み、最後に DropComplete を積む。受け取りに失敗しても
+    DropComplete は積む（DropBegin を閉じるため。SDL と同じ）。そのあと finish を送って
+    オファーを捨てる。
+
+  WHY:
+    finish は、コンポジタが操作（copy / move）を知らせてきたオファーにだけ送る。
+    wl_data_offer の仕様は、操作が来ていないオファーへの finish をクライアントの
+    誤りとして接続ごと切る（invalid_finish）と定めている。SDL は確かめずに送る。
+
+  NOT RESOLVED:
+    - SDL の document-portal の枝（application/vnd.portal.filetransfer を D-Bus の
+      Documents ポータルで開く。Flatpak など、パスが見えない環境向け）。D-Bus の部品
+      （Platform.DBus）に Documents ポータルの呼び出しを足す必要がある。今は無いので、
+      そういう環境ではパスでない URI が届き、DropFile は積まれない
+    - text/uri-list にローカルのファイルが 1 つも無い（ブラウザのリンクなど）ときに、
+      同じオファーのテキストへ切り替えること（SDL もしない） }
+procedure TPMLWaylandClipboard.HandleDragDrop;
+var
+  Win: TPMLWindowID;
+  Offer: TPMLWaylandOffer;
+  Data: TBytes;
+  Text, S: String;
+  P: Integer;
+  Got: Boolean;
+begin
+  try
+    try
+      if (FDragOffer = nil) or (FDragWindow = 0) or not (FDragFiles or FDragText) then
+        Exit;
+      Win := FDragWindow;
+      Offer := FDragOffer;
+
+      Got := ReceiveFromOffer(Offer, FDragMime, Data);
+      Text := '';
+      if Got then
+      begin
+        SetString(Text, PAnsiChar(@Data[0]), Length(Data));
+        // C の文字列として扱う SDL に合わせ、最初の NUL で打ち切る。
+        P := Pos(#0, Text);
+        if P > 0 then
+          SetLength(Text, P - 1);
+      end;
+
+      if FDragFiles then
+      begin
+        for S in PMLURIListToLocalPaths(Text) do
+          FSeat.Queue.Drop.SendFile(Win, S);
+      end
+      else
+        for S in SplitLines(Text) do
+          FSeat.Queue.Drop.SendText(Win, S);
+      FSeat.Queue.Drop.SendComplete(Win);
+
+      if Offer.DndAction <> 0 then
+        Offer.Finish;
+      if FConn.Display <> nil then
+        wl_display_flush(FConn.Display);
+    finally
+      // 受け付けていなくても、drop のあとはオファーを捨てる。
+      EndDrag;
+    end;
+  except
+    on E: Exception do
+      RecordError('data_device.drop', E);
   end;
 end;
 

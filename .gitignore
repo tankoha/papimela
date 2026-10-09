@@ -53,3 +53,7 @@ test/test_protocol_types
 test/test_threading
 test/test_timer
 test/test_atomic
+test/test_drop
+test/test_render_transform
+test/demo_drop
+test/test_render_target

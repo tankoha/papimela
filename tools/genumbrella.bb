@@ -41,6 +41,7 @@
    {:unit "PaPiMeLa.Errors"}
    {:unit "PaPiMeLa.Core"}
    {:unit "PaPiMeLa.Events"}
+   {:unit "PaPiMeLa.Events.Drop" :only #{"PMLURIToLocalPath" "PMLURIListToLocalPaths"}}
    {:unit "PaPiMeLa.Events.Keymap"}
    {:unit "PaPiMeLa.Keycodes" :dir "src/generated"}
    {:unit "PaPiMeLa.Pixels"}
