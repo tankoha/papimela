@@ -55,6 +55,7 @@ uses
   PaPiMeLa.IO,
   PaPiMeLa.Video,
   PaPiMeLa.Clipboard,
+  PaPiMeLa.Atomic,
   PaPiMeLa.Threading,
   PaPiMeLa.Video.Backend,
   PaPiMeLa.Render,

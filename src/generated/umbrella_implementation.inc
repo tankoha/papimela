@@ -17,6 +17,7 @@
 //   PaPiMeLa.Render
 //   PaPiMeLa.TextInput
 //   PaPiMeLa.Time
+//   PaPiMeLa.Atomic
 //   PaPiMeLa.Threading
 //   PaPiMeLa.App
 //   PaPiMeLa.Video.Backend
@@ -379,6 +380,22 @@ procedure PMLDelayPreciseWith(
   APause: TPMLPauseProc);
 begin
   PaPiMeLa.Time.PMLDelayPreciseWith(ANs, ANow, ASleep, APause);
+end;
+
+// ---- PaPiMeLa.Atomic
+procedure PMLMemoryBarrierRelease;
+begin
+  PaPiMeLa.Atomic.PMLMemoryBarrierRelease;
+end;
+
+procedure PMLMemoryBarrierAcquire;
+begin
+  PaPiMeLa.Atomic.PMLMemoryBarrierAcquire;
+end;
+
+procedure PMLCPUPause;
+begin
+  PaPiMeLa.Atomic.PMLCPUPause;
 end;
 
 // ---- PaPiMeLa.Video.Backend

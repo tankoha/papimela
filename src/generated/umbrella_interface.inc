@@ -17,6 +17,7 @@
 //   PaPiMeLa.Render
 //   PaPiMeLa.TextInput
 //   PaPiMeLa.Time
+//   PaPiMeLa.Atomic
 //   PaPiMeLa.Threading
 //   PaPiMeLa.App
 //   PaPiMeLa.Video.Backend
@@ -652,6 +653,18 @@ procedure PMLDelayPreciseWith(
   ANow: TPMLNowFunc;
   ASleep: TPMLSleepProc;
   APause: TPMLPauseProc); inline;
+
+// ---- PaPiMeLa.Atomic
+type
+  TPMLAtomicInt = PaPiMeLa.Atomic.TPMLAtomicInt;
+  TPMLAtomicU32 = PaPiMeLa.Atomic.TPMLAtomicU32;
+  TPMLAtomicPointer = PaPiMeLa.Atomic.TPMLAtomicPointer;
+  TPMLSpinLock = PaPiMeLa.Atomic.TPMLSpinLock;
+  TPMLInitStatus = PaPiMeLa.Atomic.TPMLInitStatus;
+  TPMLInitState = PaPiMeLa.Atomic.TPMLInitState;
+procedure PMLMemoryBarrierRelease; inline;
+procedure PMLMemoryBarrierAcquire; inline;
+procedure PMLCPUPause; inline;
 
 // ---- PaPiMeLa.Threading
 type
