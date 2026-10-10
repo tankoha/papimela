@@ -36,10 +36,10 @@
     - 例外は投げない。失敗は False / nil と FLastError で返す。メッセージの
       形は SDL_EGL_SetErrorEx と同じ（呼んだ EGL 関数とエラー名を添える）
     - GetProcAddress: 下の PORT-NOTE を参照
+    - スワップ間隔はコンテキストごとに持ち、現在にするたびに描画面へ効かせる
+      （SDL は全体で 1 つ。SetSwapInterval の PORT-NOTE(bug)、D-53）
 
   NOT RESOLVED:
-    - スワップ間隔は SDL と同じく全体で 1 つ（SDL の FIXME「コンテキストごと
-      であるべき」）。EGL 自体は現在の描画面ごとである
     - EGL_KHR_create_context が無く、ES 2.0 より上や Core プロファイルを
       求められたら失敗する（SDL と同じ）
 
@@ -77,6 +77,12 @@ type
     Config : EGLConfig;
   end;
 
+  { コンテキスト 1 つ分の記録。 }
+  TPMLEGLContextRec = record
+    Context : EGLContext;
+    Interval: Integer;   // このコンテキストのスワップ間隔（D-53）
+  end;
+
   TPMLEGLBackend = class abstract(TPMLGLBackend)
   strict private
     FLibLoaded : Boolean;
@@ -86,10 +92,10 @@ type
     FGLES      : TPMLDynLib;
     FGLESTried : Boolean;
     FSurfaces  : array of TPMLEGLWindowSurface;
-    FContexts  : array of EGLContext;
+    FContexts  : array of TPMLEGLContextRec;
     FCurrentSurface: EGLSurface;
+    FCurrentContext: EGLContext;
     FApiType   : EGLenum;
-    FSwapInterval: Integer;
     FShutdownDone: Boolean;
 
     function  EnsureLoaded: Boolean;
@@ -109,6 +115,7 @@ type
     function  BuildContextAttribs(const AAttrs: TPMLGLAttributes;
       var AAttribs: array of EGLint): Boolean;
     function  ReleaseCurrent: Boolean;
+    function  IndexOfContext(AContext: EGLContext): Integer;
     function  GLESSymbol(const AName: String): Pointer;
   strict protected
     { 描画面の記録とコンテキストを畳み、eglTerminate してライブラリを手放す。
@@ -125,7 +132,14 @@ type
     { AWindow の描画面。無ければ EGL_NO_SURFACE。 }
     function  SurfaceOf(AWindow: TPMLWindowBackend): EGLSurface;
     property  EGLDisplayHandle: EGLDisplay read FDisplay;
-    property  StoredSwapInterval: Integer read FSwapInterval write FSwapInterval;
+    { 現在のコンテキストのスワップ間隔。現在のものが無ければ 0。 }
+    function  CurrentSwapInterval: Integer;
+    { AContext の間隔を覚える。知らないコンテキストなら False。EGL には何もしない。 }
+    function  StoreSwapInterval(AContext: TPMLGLContextHandle; AInterval: Integer): Boolean;
+    { 現在の描画面に AInterval を効かせる。既定は eglSwapInterval（EGL の間隔は
+      現在の描画面ごと）。現在にするたびと、現在のコンテキストの値を変えたときに呼ぶ。
+      Wayland は待ちを自前で行うので、常に 0 を渡すよう差し替える。 }
+    function  ApplySwapInterval(AInterval: Integer): Boolean; virtual;
 
     { ---- プラットフォーム固有（設計 §3.4） ---- }
     function  GetPlatform: EGLenum; virtual; abstract;
@@ -149,8 +163,9 @@ type
       AContext: TPMLGLContextHandle): Boolean; override;
     procedure DestroyContext(AContext: TPMLGLContextHandle); override;
     function  SwapWindow(AWindow: TPMLWindowBackend): Boolean; override;
-    function  SetSwapInterval(AInterval: Integer): Boolean; override;
-    function  GetSwapInterval: Integer; override;
+    function  SetSwapInterval(AContext: TPMLGLContextHandle;
+      AInterval: Integer): Boolean; override;
+    function  GetSwapInterval(AContext: TPMLGLContextHandle): Integer; override;
     procedure ReleaseWindow(AWindow: TPMLWindowBackend); override;
   end;
 
@@ -218,7 +233,7 @@ begin
   begin
     ReleaseCurrent;
     for I := High(FContexts) downto 0 do
-      eglDestroyContext(FDisplay, FContexts[I]);
+      eglDestroyContext(FDisplay, FContexts[I].Context);
     SetLength(FContexts, 0);
     for I := High(FSurfaces) downto 0 do
     begin
@@ -645,6 +660,15 @@ begin
   Result := eglMakeCurrent(FDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE,
     EGL_NO_CONTEXT) <> EGL_FALSE;
   FCurrentSurface := EGL_NO_SURFACE;
+  FCurrentContext := EGL_NO_CONTEXT;
+end;
+
+function TPMLEGLBackend.IndexOfContext(AContext: EGLContext): Integer;
+begin
+  for Result := 0 to High(FContexts) do
+    if FContexts[Result].Context = AContext then
+      Exit;
+  Result := -1;
 end;
 
 function TPMLEGLBackend.CreateContext(AWindow: TPMLWindowBackend;
@@ -677,17 +701,16 @@ begin
     SetEGLError('Could not create EGL context', 'eglCreateContext');
     Exit;
   end;
+  // EGL の既定は 1 だが、SDL の方針は「既定で VSync 無し」。MakeCurrent が
+  // この 0 を描画面に効かせる。
   SetLength(FContexts, Length(FContexts) + 1);
-  FContexts[High(FContexts)] := Ctx;
-
-  // EGL の既定は 1 だが、SDL の方針は「既定で VSync 無し」。
-  FSwapInterval := 0;
+  FContexts[High(FContexts)].Context := Ctx;
+  FContexts[High(FContexts)].Interval := 0;
   if not MakeCurrent(AWindow, Ctx) then
   begin
     DestroyContext(Ctx);
     Exit;
   end;
-  eglSwapInterval(FDisplay, 0);
   Result := Ctx;
 end;
 
@@ -725,6 +748,10 @@ begin
     Exit(False);
   end;
   FCurrentSurface := Surf;
+  FCurrentContext := AContext;
+  // EGL の間隔は描画面ごとなので、現在にするたびにこのコンテキストの値を効かせる。
+  // 効かなくても現在にはなっているので、失敗は返さない（SDL も読み捨てている）
+  ApplySwapInterval(CurrentSwapInterval);
   Result := True;
 end;
 
@@ -735,16 +762,15 @@ begin
   if (AContext = nil) or (FDisplay = EGL_NO_DISPLAY) then
     Exit;
   // 現在のコンテキストは、先に外してから壊す（壊した後も使われ続けないように）
-  if eglGetCurrentContext() = AContext then
+  if (eglGetCurrentContext() = AContext) or (FCurrentContext = AContext) then
     ReleaseCurrent;
   eglDestroyContext(FDisplay, AContext);
-  for I := 0 to High(FContexts) do
-    if FContexts[I] = AContext then
-    begin
-      FContexts[I] := FContexts[High(FContexts)];
-      SetLength(FContexts, Length(FContexts) - 1);
-      Break;
-    end;
+  I := IndexOfContext(AContext);
+  if I >= 0 then
+  begin
+    FContexts[I] := FContexts[High(FContexts)];
+    SetLength(FContexts, Length(FContexts) - 1);
+  end;
 end;
 
 function TPMLEGLBackend.SwapSurface(AWindow: TPMLWindowBackend;
@@ -772,7 +798,38 @@ begin
   Result := SwapSurface(AWindow, Surf);
 end;
 
-function TPMLEGLBackend.SetSwapInterval(AInterval: Integer): Boolean;
+function TPMLEGLBackend.CurrentSwapInterval: Integer;
+begin
+  Result := GetSwapInterval(FCurrentContext);
+end;
+
+function TPMLEGLBackend.StoreSwapInterval(AContext: TPMLGLContextHandle;
+  AInterval: Integer): Boolean;
+var
+  I: Integer;
+begin
+  I := IndexOfContext(AContext);
+  if I < 0 then
+  begin
+    FLastError := 'unknown GL context';
+    Exit(False);
+  end;
+  FContexts[I].Interval := AInterval;
+  Result := True;
+end;
+
+function TPMLEGLBackend.ApplySwapInterval(AInterval: Integer): Boolean;
+begin
+  Result := eglSwapInterval(FDisplay, AInterval) <> EGL_FALSE;
+end;
+
+{ PORT-NOTE(bug): SDL_EGL_SetSwapInterval は値を egl_data に 1 つだけ持ち、
+  SDL_EGL_CreateContext が 0 に戻す。ヘッダは「現在のコンテキストの」間隔と
+  書いているのに、2 つ目のコンテキストを作ると 1 つ目の値も消える（D-53。SDL 3.4.2
+  で実測）。papimela はコンテキストごとに持ち、現在のものなら今すぐ、そうでなければ
+  次に MakeCurrent したときに描画面へ効かせる。 }
+function TPMLEGLBackend.SetSwapInterval(AContext: TPMLGLContextHandle;
+  AInterval: Integer): Boolean;
 begin
   FLastError := '';
   if FDisplay = EGL_NO_DISPLAY then
@@ -786,20 +843,28 @@ begin
     FLastError := 'Late swap tearing currently unsupported';
     Exit(False);
   end;
-  if eglSwapInterval(FDisplay, AInterval) = EGL_FALSE then
+  if IndexOfContext(AContext) < 0 then
+  begin
+    FLastError := 'unknown GL context';
+    Exit(False);
+  end;
+  if (AContext = FCurrentContext) and not ApplySwapInterval(AInterval) then
   begin
     SetEGLError('Unable to set the EGL swap interval', 'eglSwapInterval');
     Exit(False);
   end;
-  FSwapInterval := AInterval;
-  Result := True;
+  Result := StoreSwapInterval(AContext, AInterval);
 end;
 
-function TPMLEGLBackend.GetSwapInterval: Integer;
+function TPMLEGLBackend.GetSwapInterval(AContext: TPMLGLContextHandle): Integer;
+var
+  I: Integer;
 begin
-  Result := FSwapInterval;
+  I := IndexOfContext(AContext);
+  if I < 0 then
+    Exit(0);
+  Result := FContexts[I].Interval;
 end;
-
 procedure TPMLEGLBackend.ReleaseWindow(AWindow: TPMLWindowBackend);
 var
   I, J: Integer;

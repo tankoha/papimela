@@ -322,10 +322,13 @@ type
     procedure DestroyContext(AContext: TPMLGLContextHandle); virtual; abstract;
     { 描いた絵を画面へ出す（SDL_GL_SwapWindow）。面の無いウィンドウでは False。 }
     function  SwapWindow(AWindow: TPMLWindowBackend): Boolean; virtual; abstract;
-    { 0 = 待たない、1 = 画面の更新を待つ、-1 = 適応（間に合わなければ待たない）。
-      受け付けない値なら False。 }
-    function  SetSwapInterval(AInterval: Integer): Boolean; virtual; abstract;
-    function  GetSwapInterval: Integer; virtual; abstract;
+    { AContext のスワップ間隔。0 = 待たない、1 = 画面の更新を待つ、-1 = 適応
+      （間に合わなければ待たない）。値はコンテキストごとに持ち、AContext が現在で
+      なければ、次に現在になったときに効く（D-53。SDL は全体で 1 つ）。
+      受け付けない値や知らないコンテキストなら False。新しいコンテキストは 0。 }
+    function  SetSwapInterval(AContext: TPMLGLContextHandle;
+      AInterval: Integer): Boolean; virtual; abstract;
+    function  GetSwapInterval(AContext: TPMLGLContextHandle): Integer; virtual; abstract;
     { AWindow の面を畳む。面が無ければ何もしない。ウィンドウのバックエンドを
       壊す前に必ず呼ばれる。 }
     procedure ReleaseWindow(AWindow: TPMLWindowBackend); virtual; abstract;

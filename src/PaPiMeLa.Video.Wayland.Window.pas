@@ -734,6 +734,7 @@ begin
   wl_display_flush(FConn.Display);
 end;
 
+{ xdg-shell には最小化を解く要求が無いので、最大化を解くだけ（SDL も同じ）。 }
 procedure TPMLWaylandWindowBackend.Restore;
 begin
   xdg_toplevel_unset_maximized(FToplevel);

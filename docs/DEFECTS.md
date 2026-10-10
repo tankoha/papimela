@@ -575,7 +575,7 @@
   - **X11（EGL）**: Get は 0 を返すが、A は 200 fps のまま待つ。`eglSwapInterval` は面ごとに効くので、A の面には 1 が残っている。**Get が実際と違う値を返す**
 - **実測**: システムの SDL 3.4.2（`libSDL3.so.0.4.2`。上の 3 箇所は `reference/SDL` の版と同じ中身であることを差分で確かめた）を C から呼んだ。手元の labwc（200 Hz）、radeonsi。X11 は Xwayland で `SDL_VIDEO_FORCE_EGL=1`（`EGL_PLATFORM=x11` も要る。下の補足）。`docs/TEST-LOG.md` の使い捨て検証
 - **原因**: 間隔をコンテキストごとに持っていない。SDL 自身も `Wayland_GLES_SetSwapInterval` に「`FIXME: technically, this should be per-context, right?`」と残しており、作者が知っている制限
-- **papimela への影響**: **同じ作りを写している**（コードを読んで確認。papimela での実測はしていない）。`TPMLEGLBackend.FSwapInterval` が 1 つで、`CreateContext` が 0 に戻す。しかも公開 API は `TPMLGLContext.SwapInterval` と**コンテキストの性質のように見せている**ので、SDL より誤解を招く。直すかは持ち主の判断（`docs/HANDOFF.md` §8）
+- **papimela への影響**: **同じ作りを写していた**。`TPMLEGLBackend.FSwapInterval` が 1 つで、`CreateContext` が 0 に戻していた。しかも公開 API は `TPMLGLContext.SwapInterval` と**コンテキストの性質のように見せていた**ので、SDL より誤解を招く。2026-10-10 に持ち主の判断で**コンテキストごとに直した**（`PORT-NOTE(bug)`）。間隔はコンテキストの記録に持ち、現在にするたびに描画面へ効かせる（Wayland は待ちを自前で行うので、現在のコンテキストの値で待つ）。検査は T-21 の 7.（実装より先に書き、直す前の papimela で 4 件落ちた。B の窓が約 1 万 5 千 fps、A に戻しても約 1 万 5 千 fps）
 - **状態**: **未対応**。SDL 側は FIXME として既に知られているので、報告の要否は D-18 たちとは事情が違う。2026-10-10 に README の節へ載せた
 - **補足**: SDL 3.4.2 の X11 で `SDL_VIDEO_FORCE_EGL=1` にすると、`SDL_GL_LoadLibrary` の中で Mesa が X の `Display` を `wl_display` として扱って落ちる（`wl_proxy_create_wrapper` で SIGSEGV。`WAYLAND_DISPLAY` を外しても同じ。`EGL_PLATFORM=x11` を付けると通る）。3.4.2 はプラットフォームを 0 のまま `eglGetDisplay` に推測させており、`reference/SDL` の版は X11 のドライバが `EGL_PLATFORM_X11_KHR` を明示するよう変わっている（`X11_GLES_SetDefaultProfileConfig`）。参照版では直っている見込みだが、参照版は作って確かめていないので、不具合には数えない
 

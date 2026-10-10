@@ -11,7 +11,8 @@
     4. VSync（SwapInterval 1 は画面のリフレッシュ、0 はそれより速い）
     5. 大きさの変更（最大化すると面も大きくなる）
     6. 最小化・非表示でも止まらない
-    7. 破棄の順序（ウィンドウが先でもコンテキストが先でも落ちない）とプロトコル違反
+    7. スワップ間隔はコンテキストごと（D-53。SDL は装置全体で 1 つ）
+    8. 破棄の順序（ウィンドウが先でもコンテキストが先でも落ちない）とプロトコル違反
 
   WHY:
     #33 / #39（EGL と Wayland の EGL）の受け入れ検査。実装より先に書いた。
@@ -115,12 +116,13 @@ end;
 var
   VB     : TPMLWaylandVideoBackend;
   Plain, Win, Win2: TPMLWindow;
-  C, C2  : TPMLGLContext;
+  WinA, WinB: TPMLWindow;
+  C, C2, CA, CB: TPMLGLContext;
   Raised : Boolean;
   Missing: String;
   Version: String;
   VP     : array[0..3] of GLint;
-  Refresh, Fps0, Fps1, FpsMin, FpsHidden: Double;
+  Refresh, Fps0, Fps1, FpsMin, FpsHidden, FpsA, FpsB: Double;
   R      : TPMLRect;
 begin
   WriteLn('test_gl_window — Wayland のウィンドウに OpenGL ES で描く');
@@ -229,10 +231,45 @@ begin
     Win.SwapGL;
 
     WriteLn;
-    WriteLn('7. 破棄の順序');
+    WriteLn('7. スワップ間隔はコンテキストごと（D-53）');
+    // Win は 6. で最小化したまま（Wayland では Restore で最小化を解けない）なので
+    // 合図が来ない。最小化していない新しい窓 2 枚で測る。
+    WinA := Ctx.Video.CreateWindow(TPMLWindowOptions.Make('interval A', 200, 120).OpenGL);
+    CA := WinA.CreateGLContext;
+    Pump(200);
+    CA.SwapInterval := 1;
+    WinB := Ctx.Video.CreateWindow(TPMLWindowOptions.Make('interval B', 200, 120).OpenGL);
+    CB := WinB.CreateGLContext;
+    Pump(200);
+    // CB を作った直後は CB が現在のコンテキスト
+    Check(CB.SwapInterval = 0, '新しいコンテキストは 0 から始まる');
+    Check(CA.SwapInterval = 1, '別のコンテキストを作っても、前のコンテキストの間隔は 1 のまま（SDL は 0 に戻す）');
+    FpsB := MeasureFps(WinB, 800);
+    CA.MakeCurrent;
+    FpsA := MeasureFps(WinA, 800);
+    WriteLn(Format('  [INFO] B（0）: %.1f fps、A（1）に戻して: %.1f fps', [FpsB, FpsA]));
+    Check(FpsB > Refresh * 1.5, '0 の B の窓は待たない');
+    Check((FpsA > Refresh * 0.8) and (FpsA < Refresh * 1.1), 'A に戻すと A の 1 が効く（SDL では VSync が消える）');
+    // 現在でないコンテキストの間隔を変えても、現在のものには効かない
+    CB.SwapInterval := 1;
+    CA.SwapInterval := 0;
+    Check((CB.SwapInterval = 1) and (CA.SwapInterval = 0), 'どちらのコンテキストも自分の値を返す');
+    FpsA := MeasureFps(WinA, 800);
+    CB.MakeCurrent;
+    FpsB := MeasureFps(WinB, 800);
+    WriteLn(Format('  [INFO] A（0）: %.1f fps、B（1）: %.1f fps', [FpsA, FpsB]));
+    Check(FpsA > Refresh * 1.5, '現在でない B を 1 にしても、現在の A（0）は待たない');
+    Check((FpsB > Refresh * 0.8) and (FpsB < Refresh * 1.1), 'B を現在にすると、現在でないときに決めた 1 が効く');
+    WinB.Free;
+    WinA.Free;
+    C.MakeCurrent;
+
     Win2 := Ctx.Video.CreateWindow(TPMLWindowOptions.Make('second', 200, 120).OpenGL);
     C2 := Win2.CreateGLContext;
     Pump(200);
+
+    WriteLn;
+    WriteLn('8. 破棄の順序');
     GL.glClearColor(0, 1, 0, 1);
     GL.glClear(GL_COLOR_BUFFER_BIT);
     Win2.SwapGL;

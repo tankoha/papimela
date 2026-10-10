@@ -138,6 +138,9 @@ type
     procedure Hide;
     procedure Maximize;
     procedure Minimize;
+    // 最大化を解く。Wayland では最小化は解けない（xdg-shell にその要求が無い。
+    // SDL も同じ）。最小化した窓を戻すのは利用者とコンポジタで、それまでは
+    // フレームの合図が来ないので、GL の SwapGL は 1/20 秒ごとの打ち切りで進む。
     procedure Restore;
     procedure RaiseWindow;
     procedure Sync;
@@ -214,7 +217,9 @@ type
     // レンダラのドライバのように、ウィンドウしか持っていない側が使う。
     function  GetProcAddress(const AName: String): Pointer;
     // 0 = 待たない、1 = 画面の更新を待つ、-1 = 間に合わなければ待たない。
-    // 受け付けない値なら EPMLUnsupported。
+    // 受け付けない値なら EPMLUnsupported。このコンテキストだけの値で、作った直後は 0。
+    // 現在のコンテキストでなければ、次に MakeCurrent したときに効く
+    // （SDL は全体で 1 つで、コンテキストを作るたびに 0 へ戻る。D-53）。
     property SwapInterval: Integer read GetSwapInterval write SetSwapInterval;
     property Window: TPMLWindow read FWindow;
     property Handle: TPMLGLContextHandle read FHandle;
@@ -744,12 +749,12 @@ end;
 
 function TPMLGLContext.GetSwapInterval: Integer;
 begin
-  Result := FGL.GetSwapInterval;
+  Result := FGL.GetSwapInterval(FHandle);
 end;
 
 procedure TPMLGLContext.SetSwapInterval(AValue: Integer);
 begin
-  if not FGL.SetSwapInterval(AValue) then
+  if not FGL.SetSwapInterval(FHandle, AValue) then
     raise EPMLUnsupported.CreateNative(Format('swap interval %d is not supported', [AValue]),
       0, '');
 end;

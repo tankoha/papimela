@@ -73,6 +73,7 @@ type
       ANative: EGLNativeWindowType); override;
     function  SwapSurface(AWindow: TPMLWindowBackend;
       ASurface: EGLSurface): Boolean; override;
+    function  ApplySwapInterval(AInterval: Integer): Boolean; override;
   public
     // AConn は GL の部品より長生きしなければならない（ディスプレイを借りる）。
     constructor Create(AContextRef: TObject; AOwner: TPMLObject;
@@ -84,7 +85,8 @@ type
     function  MakeCurrent(AWindow: TPMLWindowBackend;
       AContext: TPMLGLContextHandle): Boolean; override;
     procedure DestroyContext(AContext: TPMLGLContextHandle); override;
-    function  SetSwapInterval(AInterval: Integer): Boolean; override;
+    function  SetSwapInterval(AContext: TPMLGLContextHandle;
+      AInterval: Integer): Boolean; override;
   end;
 
 implementation
@@ -172,16 +174,20 @@ begin
   Flush;
 end;
 
-{ PORT-NOTE: Wayland_GLES_MakeCurrent。MakeCurrent のたびに EGL のスワップ間隔を
-  0 へ戻す。eglSwapInterval は現在の描画面に効き、Mesa の既定は 1 なので、
-  面が現在になるたびに打ち消さないと EGL の中で待つようになる。 }
 function TPMLWaylandEGL.MakeCurrent(AWindow: TPMLWindowBackend;
   AContext: TPMLGLContextHandle): Boolean;
 begin
   Result := inherited MakeCurrent(AWindow, AContext);
   Flush;
-  if Result and (AWindow <> nil) and (AContext <> nil) then
-    eglSwapInterval(EGLDisplayHandle, 0);
+end;
+
+{ PORT-NOTE: Wayland_GLES_MakeCurrent。MakeCurrent のたびに EGL のスワップ間隔を
+  0 へ戻す（基底の MakeCurrent が現在にするたびにここを呼ぶ）。eglSwapInterval は
+  現在の描画面に効き、Mesa の既定は 1 なので、面が現在になるたびに打ち消さないと
+  EGL の中で待つようになる。コンテキストの間隔は SwapSurface が自前の待ちに使う。 }
+function TPMLWaylandEGL.ApplySwapInterval(AInterval: Integer): Boolean;
+begin
+  Result := eglSwapInterval(EGLDisplayHandle, 0) <> EGL_FALSE;
 end;
 
 procedure TPMLWaylandEGL.DestroyContext(AContext: TPMLGLContextHandle);
@@ -192,8 +198,10 @@ end;
 
 { PORT-NOTE: Wayland_GLES_SetSwapInterval。値は -1 .. 1 に丸めて覚えるだけで、
   EGL には 0 を渡し続ける（ヘッダの WHY を参照）。SDL は「技術的にはコンテキスト
-  ごと」と FIXME を残しているが、ここも SDL と同じく全体で 1 つ。 }
-function TPMLWaylandEGL.SetSwapInterval(AInterval: Integer): Boolean;
+  ごと」と FIXME を残して全体で 1 つにしているが、papimela はコンテキストごとに
+  覚える（D-53）。現在の描画面にはもう 0 が効いているので、EGL は呼ばない。 }
+function TPMLWaylandEGL.SetSwapInterval(AContext: TPMLGLContextHandle;
+  AInterval: Integer): Boolean;
 begin
   if EGLDisplayHandle = EGL_NO_DISPLAY then
   begin
@@ -204,9 +212,7 @@ begin
     AInterval := 1
   else if AInterval < -1 then
     AInterval := -1;
-  StoredSwapInterval := AInterval;
-  eglSwapInterval(EGLDisplayHandle, 0);
-  Result := True;
+  Result := StoreSwapInterval(AContext, AInterval);
 end;
 
 { PORT-NOTE: Wayland_GLES_SwapWindow の、double_buffer でない経路。
@@ -230,7 +236,8 @@ begin
   if not (W.Configured and W.Visible) then
     Exit(True);
 
-  if StoredSwapInterval <> 0 then
+  // 待つかどうかは、現在のコンテキストの間隔で決める（D-53）
+  if CurrentSwapInterval <> 0 then
   begin
     W.WaitForFrame;
     W.RequestFrame;
