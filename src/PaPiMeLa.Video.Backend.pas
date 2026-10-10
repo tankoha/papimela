@@ -188,6 +188,19 @@ type
     貼る方（X11 由来。Wayland では primary-selection-unstable-v1）。 }
   TPMLClipboardSelection = (Clipboard, Primary);
 
+  // 公開層（PaPiMeLa.Events）の型を、部品の約束からも同じ名前で使う。
+  TPMLDragAction  = PaPiMeLa.Events.TPMLDragAction;
+  TPMLDragActions = PaPiMeLa.Events.TPMLDragActions;
+
+  { ドラッグ中にポインタに付ける絵。Pixels は ARGB8888（LongWord の並び、アルファは
+    掛けていない）で、行の詰め物は無い（Width * Height 個）。Width = 0 なら絵は無い。
+    HotX / HotY はポインタの先が絵のどこに来るか（絵の左上からの画素）。 }
+  TPMLDragIcon = record
+    Width, Height: Integer;
+    HotX, HotY   : Integer;
+    Pixels       : array of LongWord;
+  end;
+
   { アプリが置いたデータを、求められたときに渡す（SDL_ClipboardDataCallback と
     SDL_ClipboardCleanupCallback に当たる）。CORBA。寿命はアプリが持つ。
 
@@ -211,6 +224,10 @@ type
     // こちらが置いたデータの折り返しは知らせない（部品が見分ける）。
     procedure ClipboardOffered(ASelection: TPMLClipboardSelection;
       const AMimeTypes: TStringArray);
+    // StartDrag で始めたドラッグが終わった（落とし先が受け取り終えた・取り消された・
+    // 断られた）。1 回のドラッグにつき 1 回だけ。CancelDrag の中からも呼ぶ。
+    // ADropped が False のとき AAction は意味を持たない。
+    procedure DragEnded(ADropped: Boolean; AAction: TPMLDragAction);
   end;
 
   { クリップボードの部品。TPMLVideoBackend.Clipboard が nil でなければ使える
@@ -238,6 +255,21 @@ type
       out AData: TBytes): Boolean; virtual; abstract;
     // 文字列として配る・探す MIME タイプ（優先する順）。既定は UTF-8 の text/plain だけ。
     function  TextMimeTypes: TStringArray; virtual;
+
+    // ---- ドラッグを始める側（能力 DragAndDrop。papimela 独自で SDL には無い）
+    // 始められる部品か。既定は False（StartDrag / CancelDrag は呼ばれない）。
+    function  SupportsDrag: Boolean; virtual;
+    // AWindowID のウィンドウからドラッグを始め、AMimeTypes を配る。データは求められたら
+    // AProvider から読む（落とし先がこのアプリ自身のウィンドウでも、パイプを通さずに）。
+    // 始められなければ False（ポインタのボタンがそのウィンドウで押されていない、など）。
+    // True なら、終わったときに Sink.DragEnded を 1 回呼ぶまで AProvider を借りる。
+    // 公開層は、終わる前に次の StartDrag を呼ばない。
+    function  StartDrag(AWindowID: TPMLWindowID; const AMimeTypes: TStringArray;
+      AProvider: IPMLClipboardDataProvider; AActions: TPMLDragActions;
+      const AIcon: TPMLDragIcon): Boolean; virtual;
+    // 始めたドラッグを取り消す。その中で Sink.DragEnded(False, ...) を呼ぶ。
+    // ドラッグ中でなければ何もしない。
+    procedure CancelDrag; virtual;
   end;
 
   TPMLGLProfile = (ES, Core, Compatibility);
@@ -474,6 +506,22 @@ end;
 function TPMLClipboardBackend.TextMimeTypes: TStringArray;
 begin
   Result := ['text/plain;charset=utf-8'];
+end;
+
+function TPMLClipboardBackend.SupportsDrag: Boolean;
+begin
+  Result := False;
+end;
+
+function TPMLClipboardBackend.StartDrag(AWindowID: TPMLWindowID; const AMimeTypes: TStringArray;
+  AProvider: IPMLClipboardDataProvider; AActions: TPMLDragActions;
+  const AIcon: TPMLDragIcon): Boolean;
+begin
+  Result := False;
+end;
+
+procedure TPMLClipboardBackend.CancelDrag;
+begin
 end;
 
 function TPMLDisplayBackend.GetUsableBounds: TPMLRect;

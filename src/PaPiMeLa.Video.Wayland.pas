@@ -209,6 +209,9 @@ begin
   if (FClipboard = nil)
     or not FClipboard.SupportsSelection(TPMLClipboardSelection.Primary) then
     Exclude(FCapabilities, TPMLVideoCapability.PrimarySelection);
+  // ドラッグ＆ドロップ: 受ける側も始める側も同じデータデバイスを使う。
+  if (FClipboard <> nil) and FClipboard.SupportsDrag then
+    Include(FCapabilities, TPMLVideoCapability.DragAndDrop);
 
   // GL の部品。両方のライブラリが開ければ能力 OpenGLES を出す。開くのは確認だけで、
   // 読み込み（PMLEGLLoad）は最初のコンテキストまで遅らせる。

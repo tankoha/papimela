@@ -91,6 +91,9 @@ type
   TPMLTouchPoints = PaPiMeLa.Events.TPMLTouchPoints;
   TPMLTouchFingerData = PaPiMeLa.Events.TPMLTouchFingerData;
   TPMLDropEventData = PaPiMeLa.Events.TPMLDropEventData;
+  TPMLDragAction = PaPiMeLa.Events.TPMLDragAction;
+  TPMLDragActions = PaPiMeLa.Events.TPMLDragActions;
+  TPMLDragEventData = PaPiMeLa.Events.TPMLDragEventData;
   TPMLClipboardEventData = PaPiMeLa.Events.TPMLClipboardEventData;
   TPMLUserEventData = PaPiMeLa.Events.TPMLUserEventData;
   TPMLEvent = PaPiMeLa.Events.TPMLEvent;
@@ -599,6 +602,7 @@ type
 type
   TPMLClipboardSelection = PaPiMeLa.Clipboard.TPMLClipboardSelection;
   IPMLClipboardDataProvider = PaPiMeLa.Clipboard.IPMLClipboardDataProvider;
+  TPMLDragOptions = PaPiMeLa.Clipboard.TPMLDragOptions;
   TPMLTextClipboardProvider = PaPiMeLa.Clipboard.TPMLTextClipboardProvider;
   TPMLSelectionState = PaPiMeLa.Clipboard.TPMLSelectionState;
   TPMLClipboard = PaPiMeLa.Clipboard.TPMLClipboard;

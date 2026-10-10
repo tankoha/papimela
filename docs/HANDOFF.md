@@ -14,7 +14,7 @@
 | リポジトリ | https://github.com/tankoha/papimela（公開、Issues 有効）。手元のセッションは `master` に直接 push、クラウドのセッションは指定のブランチへ push して、手元で早送りマージする |
 | CI | 緑。rawpaco 激辛、checkorigin、アンブレラの古さ（`genumbrella.bb --check`）、図の検査、表示サーバ無しのテスト 12 本、Pong の自己検査、GLES2 と ソフトウェアのドライバの画素比較（llvmpipe）。ジョブ 60 分・GLES2 の手順 5 分の時間制限つき |
 | テスト | 23 本、724 件、すべて成功（`docs/TEST-LOG.md`。2026-10-05 に手元の実機で全部流し直した） |
-| 不具合 | 45 件。うち上流 SDL の 4 件（D-18、D-36、D-38、D-42）は未報告（方針は `CLAUDE.md`） |
+| 不具合 | 52 件。うち上流 SDL の 4 件（D-18、D-36、D-38、D-42）は未報告（方針は `CLAUDE.md`） |
 | 規模 | 手書き 42 ユニット + 生成（Wayland プロトコル 21、キーボードの表 2、EGL / GLES2 の定数 2、DebugText の字形 1、アンブレラ 2）。約 3 万行 |
 
 ### 動いているもの
@@ -25,7 +25,7 @@ SDL と同じ値のスキャンコード・キーコード（配列ごとのキ�
 fcitx5 経由の IME（全文節・周辺テキスト・周辺削除）、ピクセル形式、サーフェス、BMP、
 ブリッタ、レンダラ（ソフトウェアと OpenGL ES 2.0。どちらもウィンドウへ VSync つき。拡大率、論理解像度 5 方式、
 ウィンドウ座標との変換、DebugText、回転・反転・平行四辺形・敷き詰め・9 つ分け、描画先テクスチャ）、
-クリップボードとプライマリ選択、ドラッグ＆ドロップの受信（ファイルとテキスト）、
+クリップボードとプライマリ選択、ドラッグ＆ドロップ（受信と、こちらから始めるドラッグ。Flatpak 向けの document-portal も）、
 EGL の GL コンテキスト、ヘッドレスのダミーのビデオ、待つ API（Delay / DelayNS / DelayPrecise）、
 バックエンドの登録（`PaPiMeLa.Backends`）、アンブレラ（`uses PaPiMeLa`）、`TPMLApplication`、サンプルの Pong。
 
@@ -33,8 +33,8 @@ EGL の GL コンテキスト、ヘッドレスのダミーのビデオ、待つ
 
 済み（一部を含む）: #1–4、#10、#12–17（#17 の `.GL` は未）、#22、#24（`Events.Keymap`。押下状態は
 `PaPiMeLa.Events` の `TPMLKeyboardState`）、#25 の一部（マウスとタッチの状態機械は `PaPiMeLa.Events`）、
-#26–29、#31–39（#38 の D&D は受信のみ。送り側は未）、#41–43（#41 の残りは YUV・パレット・PIXELART などのテクスチャの種類）、
-#7、#8、#9、#45、#46、#47、#48、#49、#50、#64、#70。
+#26–29、#31–39、#41–43（#41 の残りは YUV・パレット・PIXELART などのテクスチャの種類）、
+#7、#8、#9、#45、#46、#47、#48、#49、#50、#64、#70、#71。
 
 未着手: #5–6（Log、Properties）、#11、#18–21、#23、#30、#40、#44、
 #51–63（オーディオ、ジョイスティック、ゲームパッド、ハプティクス）、#65–69。
@@ -70,10 +70,14 @@ D-45（検査で `setitimer` へ `const` の record を渡し、C に NULL が�
 
 ## 3. 次の候補（おすすめ順）
 
-1. **Log（#5、Low）・Properties とヒント（#6、Low）**: 基盤の残り。Atomic（#7）は 2026-10-09 に済んだ（一度だけの初期化 `TPMLInitState` もあるので、Log と Properties の遅延初期化に使える）。Threading（#8）・RunOnMainThread・タイマー（#9）は 2026-10-06 に済んだ。ヒントが入ると SDL の THREAD_PRIORITY_POLICY（実時間スケジューリング）などに進める。クリップボード（#38 のうちクリップボードとプライマリ選択）は 2026-10-06、D&D の受信は 2026-10-09 に済んだ（送り側の start_drag と document-portal の枝は未）。IME は IBus（#48）・text-input-v3（#49）とも 2026-10-06 に済んだ。
+1. **Log（#5、Low）・Properties とヒント（#6、Low）**: 基盤の残り。Atomic（#7）は 2026-10-09 に済んだ（一度だけの初期化 `TPMLInitState` もあるので、Log と Properties の遅延初期化に使える）。Threading（#8）・RunOnMainThread・タイマー（#9）は 2026-10-06 に済んだ。ヒントが入ると SDL の THREAD_PRIORITY_POLICY（実時間スケジューリング）などに進める。クリップボード（#38 のうちクリップボードとプライマリ選択）は 2026-10-06、D&D の受信は 2026-10-09、ドラッグを始める側と document-portal は 2026-10-10 に済んだ。IME は IBus（#48）・text-input-v3（#49）とも 2026-10-06 に済んだ。
    IME の残り: 埋め込み候補（`TextEditingCandidates`）、IBus の ForwardKeyEvent、ibus-anthy など他のエンジンの属性の実測、GNOME / KDE での IBus 直結（§7.5 の要検証）。IBus の検査環境は `tools/ibus-sandbox/`（ibus + ibus-mozc を入れた Ubuntu 24.04 の最小 rootfs を bwrap で隔離。デスクトップの fcitx5 と混ざらない）。実測の結果は `spikes/RESULTS.md` のスパイク 3
 2. **オーディオ（#51 以降）**: 大きな段階。PipeWire から
 3. **レンダラのテクスチャの種類（#41 / #43）**: YUV、パレット（INDEX8）、PIXELART の拡大。描画先テクスチャ・回転・9-grid / タイルは 2026-10-09 に済んだ
+
+済んだもの（2026-10-10）: ドラッグを始める側（`Ctx.Video.Clipboard.StartDrag`。SDL に無い papimela 独自の API。T-42、対話の `demo_drag` は T-44）と
+ document-portal（`PaPiMeLa.Platform.DocumentPortal`。鍵からパス、パスから鍵。T-43 は手元専用）。ドラッグで渡すポータルの鍵は
+通りがかったアプリも読むので、autostop を切った（D-51）。
 
 済んだもの（2026-10-09）: D&D の受信（#38。T-38、対話の `demo_drop` は T-41。6 項目とも持ち主が確認）、レンダラの回転・平行四辺形・敷き詰め・9 つ分け（T-39）と
 描画先テクスチャ（T-40。ソフトウェアと GLES2。GLES2 は T-22 に 3 場面）。SDL_SendDrop と SDL_URIToLocal を写した部分は
@@ -105,7 +109,7 @@ Pong もすべて書き換え、今は `uses SysUtils, Math, PaPiMeLa` だけで
 表示サーバ無しで通るもの（CI と同じ）:
 
 ```bash
-for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_render_transform test_render_target test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_drop test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella; do
+for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_render_transform test_render_target test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_drop test_drag_source test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella; do
   fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/$t test/$t.pas && ./test/$t
 done
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -oexamples/pong examples/pong.pas && ./examples/pong --selftest
@@ -135,7 +139,7 @@ for t in test_dummy_video test_pixels test_io test_surface test_blit test_render
   $B -otest/$t test/$t.pas && ./test/$t | tail -1
 done
 # 1. 実機の Wayland（自動判定。最後の行が「結論」で終わればよい）
-for t in test_wayland_protocols test_wayland_window test_pointer_constraints test_touch_cursor test_gl_window test_render_gles2; do
+for t in test_wayland_protocols test_wayland_window test_pointer_constraints test_touch_cursor test_gl_window test_render_gles2 test_documents_portal; do
   $B -otest/$t test/$t.pas && ./test/$t | tail -1
 done
 # 2. fcitx5（fcitx5-mozc を起動しておく）
@@ -151,6 +155,7 @@ $B -otest/demo_render_window test/demo_render_window.pas
 $B -otest/demo_japanese_input test/demo_japanese_input.pas && ./test/demo_japanese_input 30
 $B -otest/demo_pointer_constraints test/demo_pointer_constraints.pas && ./test/demo_pointer_constraints 60
 $B -otest/demo_drop test/demo_drop.pas && ./test/demo_drop 60          # ファイルマネージャやブラウザからドラッグして落とす（見方はファイルの頭）
+$B -otest/demo_drag test/demo_drag.pas && ./test/demo_drag 60          # 左半分・右半分から外へドラッグする（見方はファイルの頭）
 $B -oexamples/pong examples/pong.pas && ./examples/pong
 ```
 

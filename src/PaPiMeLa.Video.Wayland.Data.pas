@@ -1,5 +1,5 @@
 {
-  PaPiMeLa.Video.Wayland.Data — クリップボード、プライマリ選択、ドラッグ＆ドロップの受信
+  PaPiMeLa.Video.Wayland.Data — クリップボード、プライマリ選択、ドラッグ＆ドロップ（受信と開始）
   （wl_data_device / primary selection）
 
   Origin : ported from SDL (src/video/wayland/SDL_waylanddatamanager.c,
@@ -7,7 +7,11 @@
            Scope: パイプでの送受信（全部書く、SIGPIPE を捨てる、タイムアウト付きで読む）、
            オファーの MIME 一覧、選択を置くときの serial の扱い、テキストの MIME タイプ 5 種。
            SDL_waylandevents.c のデータデバイス / プライマリ選択デバイスのリスナー
-           （data_offer、selection、ドラッグ＆ドロップの enter / leave / motion / drop）も含む。
+           （data_offer、selection、ドラッグ＆ドロップの enter / leave / motion / drop と、
+           drop の document-portal の枝）も含む。
+           ドラッグを始める側（StartDrag。wl_data_source の send / action / dnd_drop_performed /
+           dnd_finished / cancelled と start_drag、絵のサーフェス）は SDL に無く、papimela が
+           wl_data_device の仕様から書いた。
            SDL revision: see docs/ORIGIN.md
   Design : docs/DESIGN.md §3.2（TPMLWaylandDataManager）、§11 #38
 
@@ -62,12 +66,32 @@
           から）を送り、オファーを捨てる
         - leave: ドロップ前に出ていったなら DropComplete を積み、オファーを捨てる
           （SDL と同じ）。drop のあとの leave は何もしない
+    - document-portal の枝（SDL_waylandevents.c の drop の FILE_PORTAL_MIME）:
+        - enter: オファーが application/vnd.portal.filetransfer を持てばファイルのドロップとして
+          受ける。text/uri-list もあればそれを accept し、無ければポータルの MIME タイプを accept する
+        - drop: ポータルの MIME タイプがあれば鍵を受け取り、Documents ポータル
+          （PaPiMeLa.Platform.DocumentPortal）で開いたパスごとに DropFile を積む。開けなければ
+          text/uri-list へ戻る（ディレクトリを含むときなど。SDL と同じ）
+    - ドラッグを始める側（StartDrag）:
+        - 始める条件: データデバイスがあり、そのウィンドウにポインタのフォーカスがあってボタンが
+          押されていること（Seat.ImplicitGrab。押下の serial を start_drag に使う）。無ければ False
+        - wl_data_source に MIME タイプと自分のドラッグだと見分ける印の MIME タイプを並べ、
+          操作（Copy = 1、Move = 2、Ask = 4）を set_actions で伝える（バージョン 3 から）
+        - 絵は ARGB8888 のバッファ（アルファを掛けた形）。ポインタの先が絵の (HotX, HotY) に
+          来るよう、原点を (-HotX, -HotY) へずらす。詳しくは StartDrag の前のコメント
+        - send は提供者から読んで書く（クリップボードと同じ書き込み）。dnd_finished で
+          DragEnded(True, 最後の action)、cancelled で DragEnded(False, Copy)
+        - CancelDrag はソースを捨てて DragEnded(False, Copy) を同期的に呼ぶ
+        - 自分のウィンドウへ落ちたとき（オファーに自分のドラッグの印がある）は、パイプを
+          通さず提供者から直接読む（自分の書き込みを自分で待って止まるのを避ける）。印の MIME
+          タイプは受け取る MIME タイプに選ばない
 
   NOT RESOLVED:
-    - ドラッグ＆ドロップの送り側（こちらがドラッグを始める。wl_data_source の target /
-      action / dnd_drop_performed / dnd_finished と start_drag）
-    - 受信の document-portal の枝（application/vnd.portal.filetransfer を D-Bus で開く）。
-      Flatpak など、パスが見えない環境で DropFile が積まれない。詳しくは HandleDragDrop
+    - ドラッグを始める側は、実際の操作でのコンポジタとの受け渡し（絵の位置、dnd_finished の
+      時機）を実機で確かめていない。タッチからのドラッグは始められない。data_source が
+      バージョン 3 未満のコンポジタでは終わりの知らせが無いので、最初の send を書き終えた
+      時点で終わりとみなす（詳しくは StartDrag の前のコメント）
+    - 受信は受け入れる操作が Copy だけ。Move だけを許すドラッグ元には落とせない（SDL と同じ）
     - ドロップを受けるかは DropFile / DropText が有効かだけで決まる。SDL の
       accepts_drag_and_drop のようなウィンドウごとの切り替えは無い
     - 受信は主スレッドを止めて読む（相手が書かないと最大 5 秒）。SDL と同じ
@@ -94,12 +118,15 @@ interface
 uses
   SysUtils, BaseUnix, ctypes,
   PaPiMeLa.Types,
+  PaPiMeLa.Errors,
   PaPiMeLa.Core.Base,
   PaPiMeLa.Events,
   PaPiMeLa.Events.Drop,
   PaPiMeLa.Video.Backend,
   PaPiMeLa.Video.Wayland.Types,
   PaPiMeLa.Video.Wayland.Seat,
+  PaPiMeLa.Video.Wayland.Shm,
+  PaPiMeLa.Platform.DocumentPortal,
   PaPiMeLa.Platform.Wayland.Client,
   PaPiMeLa.Platform.Wayland.Protocols.Wayland,
   PaPiMeLa.Platform.Wayland.Protocols.WpPrimarySelectionUnstableV1;
@@ -137,7 +164,10 @@ type
     constructor Create(ASource: TPMLWaylandSource);
     procedure send(AProxy: Pwl_data_source; mime_type: PAnsiChar; fd: LongInt); override;
     procedure cancelled(AProxy: Pwl_data_source); override;
-    // target / dnd_drop_performed / dnd_finished / action はドラッグ＆ドロップ用。後の段階。
+    // ドラッグ＆ドロップ（こちらが始めたドラッグ）。target は使わない（既定の空実装）。
+    procedure dnd_drop_performed(AProxy: Pwl_data_source); override;
+    procedure dnd_finished(AProxy: Pwl_data_source); override;
+    procedure action(AProxy: Pwl_data_source; dnd_action: LongWord); override;
   end;
 
   TPMLWaylandPrimarySourceFwd = class(Tzwp_primary_selection_source_v1_listener)
@@ -225,6 +255,7 @@ type
     FProvider : IPMLClipboardDataProvider;
     FPublished: Boolean;
     FAwaitEcho: Boolean;
+    FIsDrag   : Boolean;
   public
     constructor CreateData(AOwner: TPMLWaylandClipboard; AProxy: Pwl_data_source);
     constructor CreatePrimary(AOwner: TPMLWaylandClipboard;
@@ -233,6 +264,9 @@ type
     // wl_data_source.offer（印の MIME タイプも同じ経路で足す）。
     procedure OfferMime(const AMime: String);
     function  HasMime(const AMime: String): Boolean;
+    // wl_data_source.set_actions（バージョン 3 から。それ未満には送らない）。
+    procedure SetActions(AActions: LongWord);
+    function  Version: LongWord;
     property Owner   : TPMLWaylandClipboard read FOwner;
     property Kind    : TPMLClipboardSelection read FKind;
     property DataProxy: Pwl_data_source read FDataProxy;
@@ -245,6 +279,8 @@ type
     property IsPublished: Boolean read FPublished write FPublished;
     // 送ったが、自分の echo がまだ届いていない。
     property AwaitEcho: Boolean read FAwaitEcho write FAwaitEcho;
+    // StartDrag で作ったソース（選択ではなくドラッグに使う）。
+    property IsDrag  : Boolean read FIsDrag write FIsDrag;
   end;
 
   TPMLWaylandOffers = array of TPMLWaylandOffer;
@@ -291,6 +327,12 @@ type
     FDragMime  : String;              // 受け取る MIME タイプ
     FDragFiles : Boolean;             // FDragMime は text/uri-list
     FDragText  : Boolean;             // FDragMime はテキスト
+    // ---- ドラッグ＆ドロップの送り側（StartDrag）。受信（上の FDrag*）とは独立
+    FDragSrc   : TPMLWaylandSource;   // 始めたドラッグのソース。nil = ドラッグ中でない
+    FDragAction: LongWord;            // コンポジタが最後に知らせた操作（wl_data_source.action）
+    FDragPerformed: Boolean;          // dnd_drop_performed が来た
+    FIconSurface: Pwl_surface;        // ドラッグの絵のサーフェス。無ければ nil
+    FIconBuffer : Pwl_buffer;
     procedure RecordError(const AWhere: String; E: Exception);
     function  NewMarker: String;
     function  CreateSource(ASelection: TPMLClipboardSelection): TPMLWaylandSource;
@@ -312,7 +354,19 @@ type
     procedure HandleSelection(ASelection: TPMLClipboardSelection; AOffer: TPMLWaylandOffer);
     procedure HandleInputSerial(ASerial: LongWord);
     procedure AddOffer(AOffer: TPMLWaylandOffer);
+    // ---- ドラッグの送り側
+    procedure ReleaseDragObjects;
+    procedure FinishDrag(ADropped: Boolean; AAction: LongWord);
+    procedure BuildIconBuffer(const AIcon: TPMLDragIcon);
+    procedure PresentIcon(const AIcon: TPMLDragIcon);
+    function  IsOwnDrag(AOffer: TPMLWaylandOffer): Boolean;
+    function  FetchDropData(AOffer: TPMLWaylandOffer; const AMime: String;
+      out AData: TBytes): Boolean;
   private
+    // ---- 送り側のソースの知らせ
+    procedure HandleDragAction(ASource: TPMLWaylandSource; AAction: LongWord);
+    procedure HandleDragDropPerformed(ASource: TPMLWaylandSource);
+    procedure HandleDragFinished(ASource: TPMLWaylandSource);
     // ---- 転送クラスから呼ばれる（C からの呼び出しなので例外は出さない）
     procedure HandleDataOffer(AProxy: Pwl_data_offer);
     procedure HandlePrimaryOffer(AProxy: Pzwp_primary_selection_offer_v1);
@@ -340,6 +394,13 @@ type
     function  ReceiveOffer(ASelection: TPMLClipboardSelection; const AMimeType: String;
       out AData: TBytes): Boolean; override;
     function  TextMimeTypes: TStringArray; override;
+
+    // ---- ドラッグを始める側（papimela 独自）
+    function  SupportsDrag: Boolean; override;
+    function  StartDrag(AWindowID: TPMLWindowID; const AMimeTypes: TStringArray;
+      AProvider: IPMLClipboardDataProvider; AActions: TPMLDragActions;
+      const AIcon: TPMLDragIcon): Boolean; override;
+    procedure CancelDrag; override;
 
     // 直近の握りつぶした失敗の説明（診断用）。
     property LastNonFatalError: String read FLastError;
@@ -544,6 +605,20 @@ begin
   Result := False;
 end;
 
+{ バイト列を文字列にする。C の文字列として扱う SDL に合わせ、最初の NUL で打ち切る。 }
+function DataToCString(const AData: TBytes): String;
+var
+  P: Integer;
+begin
+  Result := '';
+  if Length(AData) = 0 then
+    Exit;
+  SetString(Result, PAnsiChar(@AData[0]), Length(AData));
+  P := Pos(#0, Result);
+  if P > 0 then
+    SetLength(Result, P - 1);
+end;
+
 function IsOriginMime(const AMime: String): Boolean;
 begin
   Result := Copy(AMime, 1, Length(ORIGIN_MIME_PREFIX)) = ORIGIN_MIME_PREFIX;
@@ -603,6 +678,22 @@ procedure TPMLWaylandDataSourceFwd.cancelled(AProxy: Pwl_data_source);
 begin
   // ソースはこの中で破棄される（このリスナー自身も）。戻ったあとは何も触らない。
   FSource.Owner.HandleCancelled(FSource);
+end;
+
+procedure TPMLWaylandDataSourceFwd.dnd_drop_performed(AProxy: Pwl_data_source);
+begin
+  FSource.Owner.HandleDragDropPerformed(FSource);
+end;
+
+procedure TPMLWaylandDataSourceFwd.dnd_finished(AProxy: Pwl_data_source);
+begin
+  // ソースはこの中で破棄される（cancelled と同じ）。戻ったあとは何も触らない。
+  FSource.Owner.HandleDragFinished(FSource);
+end;
+
+procedure TPMLWaylandDataSourceFwd.action(AProxy: Pwl_data_source; dnd_action: LongWord);
+begin
+  FSource.Owner.HandleDragAction(FSource, dnd_action);
 end;
 
 constructor TPMLWaylandPrimarySourceFwd.Create(ASource: TPMLWaylandSource);
@@ -828,6 +919,21 @@ begin
   Result := ContainsString(FMimes, AMime);
 end;
 
+procedure TPMLWaylandSource.SetActions(AActions: LongWord);
+begin
+  if (FDataProxy <> nil)
+    and (wl_proxy_get_version(Pwl_proxy(FDataProxy)) >= WL_DATA_SOURCE_SET_ACTIONS_SINCE_VERSION) then
+    wl_data_source_set_actions(FDataProxy, AActions);
+end;
+
+function TPMLWaylandSource.Version: LongWord;
+begin
+  if FDataProxy <> nil then
+    Result := wl_proxy_get_version(Pwl_proxy(FDataProxy))
+  else
+    Result := 0;
+end;
+
 { ---- TPMLWaylandClipboard ---- }
 
 constructor TPMLWaylandClipboard.Create(AContextRef: TObject; AOwner: TPMLObject;
@@ -867,6 +973,8 @@ begin
     FSyncs[I].Free;
   end;
   FSyncs := nil;
+  // ドラッグ中なら捨てる（公開層は先に CancelDrag している）。提供者へは知らせない。
+  ReleaseDragObjects;
   // 提供者はもう呼ばない。選択を手放してソースを捨てる。
   for S := Low(TPMLClipboardSelection) to High(TPMLClipboardSelection) do
   begin
@@ -1391,8 +1499,11 @@ end;
     URI の一覧として読む。papimela は text/uri-list があればそれだけを使い、
     無いときだけテキストを探す。
 
-  PORT-NOTE: SDL の document-portal の枝（application/vnd.portal.filetransfer を
-  D-Bus で開く）は含めない。 }
+
+  PORT-NOTE: SDL の document-portal の枝。SDL は application/vnd.portal.filetransfer を
+  持つオファーに FILE_PORTAL_MIME を accept し、text/uri-list もあれば後からそちらを
+  accept し直す（最後の accept が効く）。papimela は text/uri-list があればそれ、
+  無いときだけポータルの MIME タイプを accept する（同じ結果）。 }
 procedure TPMLWaylandClipboard.HandleDragEnter(ASerial: LongWord; ASurface: Pwl_surface;
   AX, AY: wl_fixed_t; AProxy: Pwl_data_offer);
 var
@@ -1416,6 +1527,13 @@ begin
       begin
         FDragFiles := True;
         FDragMime := URI_LIST_MIME;
+      end
+      else if Offer.HasMime(PML_PORTAL_FILETRANSFER_MIME) then
+      begin
+        // text/uri-list が無く、ポータルの鍵だけを配る相手（サンドボックスのアプリ）。
+        // 鍵が開けなければ何も受け取れないが、ドロップとしては受け付ける。
+        FDragFiles := True;
+        FDragMime := PML_PORTAL_FILETRANSFER_MIME;
       end
       else
         for M in TextMimeTypes do
@@ -1493,11 +1611,14 @@ end;
     wl_data_offer の仕様は、操作が来ていないオファーへの finish をクライアントの
     誤りとして接続ごと切る（invalid_finish）と定めている。SDL は確かめずに送る。
 
+  RESOLVED:
+    - document-portal の枝（Flatpak などパスが見えない環境向け）。オファーが
+      application/vnd.portal.filetransfer を持てば、まずその鍵を受け取って
+      Documents ポータルで開き、パスごとに DropFile を積む。開けなければ text/uri-list
+    - 自分のドラッグが自分のウィンドウへ落ちたときは、パイプを通さず提供者から直接読む
+      （自分が書くのを自分で待って止まるのを避ける）
+
   NOT RESOLVED:
-    - SDL の document-portal の枝（application/vnd.portal.filetransfer を D-Bus の
-      Documents ポータルで開く。Flatpak など、パスが見えない環境向け）。D-Bus の部品
-      （Platform.DBus）に Documents ポータルの呼び出しを足す必要がある。今は無いので、
-      そういう環境ではパスでない URI が届き、DropFile は積まれない
     - text/uri-list にローカルのファイルが 1 つも無い（ブラウザのリンクなど）ときに、
       同じオファーのテキストへ切り替えること（SDL もしない） }
 procedure TPMLWaylandClipboard.HandleDragDrop;
@@ -1506,9 +1627,10 @@ var
   Offer: TPMLWaylandOffer;
   Data: TBytes;
   Text, S: String;
-  P: Integer;
-  Got: Boolean;
+  Paths: TStringArray;
+  Done, OwnLegacy: Boolean;
 begin
+  OwnLegacy := False;
   try
     try
       if (FDragOffer = nil) or (FDragWindow = 0) or not (FDragFiles or FDragText) then
@@ -1516,25 +1638,42 @@ begin
       Win := FDragWindow;
       Offer := FDragOffer;
 
-      Got := ReceiveFromOffer(Offer, FDragMime, Data);
-      Text := '';
-      if Got then
+      // 自分のドラッグが自分のウィンドウへ落ちた。終わりの知らせ（dnd_finished）が来ない
+      // バージョン 3 未満では、受け取り終えた時点でこちらから終わらせる。
+      OwnLegacy := IsOwnDrag(Offer) and (FDragSrc.Version < 3);
+
+      Done := False;
+      if FDragFiles and Offer.HasMime(PML_PORTAL_FILETRANSFER_MIME) then
       begin
-        SetString(Text, PAnsiChar(@Data[0]), Length(Data));
-        // C の文字列として扱う SDL に合わせ、最初の NUL で打ち切る。
-        P := Pos(#0, Text);
-        if P > 0 then
-          SetLength(Text, P - 1);
+        // PORT-NOTE: SDL の data_device_handle_drop の document-portal の枝。鍵を受け取り、
+        // Documents ポータルで開いたパスごとに DropFile を積む。SDL は D-Bus が使えなければ
+        // 枝ごと飛ばす（papimela は PMLPortalRetrieveFiles が False を返す）。
+        // 開けなければ（ディレクトリを含む、鍵が古い、など）text/uri-list へ戻る。
+        if FetchDropData(Offer, PML_PORTAL_FILETRANSFER_MIME, Data) then
+          if PMLPortalRetrieveFiles(DataToCString(Data), Paths) then
+          begin
+            for S in Paths do
+              FSeat.Queue.Drop.SendFile(Win, S);
+            Done := True;
+          end;
       end;
 
-      if FDragFiles then
+      if not Done then
       begin
-        for S in PMLURIListToLocalPaths(Text) do
-          FSeat.Queue.Drop.SendFile(Win, S);
-      end
-      else
-        for S in SplitLines(Text) do
-          FSeat.Queue.Drop.SendText(Win, S);
+        // text/uri-list が無く、ポータルの鍵も開けなかったときは、受け取るものが無い。
+        Text := '';
+        if (FDragMime <> PML_PORTAL_FILETRANSFER_MIME)
+          and FetchDropData(Offer, FDragMime, Data) then
+          Text := DataToCString(Data);
+        if FDragFiles then
+        begin
+          for S in PMLURIListToLocalPaths(Text) do
+            FSeat.Queue.Drop.SendFile(Win, S);
+        end
+        else
+          for S in SplitLines(Text) do
+            FSeat.Queue.Drop.SendText(Win, S);
+      end;
       FSeat.Queue.Drop.SendComplete(Win);
 
       if Offer.DndAction <> 0 then
@@ -1545,6 +1684,8 @@ begin
       // 受け付けていなくても、drop のあとはオファーを捨てる。
       EndDrag;
     end;
+    if OwnLegacy then
+      FinishDrag(True, WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY);
   except
     on E: Exception do
       RecordError('data_device.drop', E);
@@ -1622,13 +1763,16 @@ procedure TPMLWaylandClipboard.HandleSend(ASource: TPMLWaylandSource; const AMim
 var
   Provider: IPMLClipboardDataProvider;
   Data: TBytes;
+  DragSendDone: Boolean;
 begin
+  DragSendDone := False;
   try
     try
       // 提供者へ聞くのは、いま生きているソースの、公開層が配ってよいと言った MIME タイプだけ。
       // 印の MIME タイプには中身が無い（空のまま閉じる）。
-      if (FSource[ASource.Kind] = ASource) and ASource.HasMime(AMime)
-        and (ASource.Provider <> nil) then
+      if (((not ASource.IsDrag) and (FSource[ASource.Kind] = ASource))
+        or (ASource.IsDrag and (ASource = FDragSrc)))
+        and ASource.HasMime(AMime) and (ASource.Provider <> nil) then
       begin
         Provider := ASource.Provider;
         Data := nil;
@@ -1637,9 +1781,14 @@ begin
           if not WriteAllToPipe(AFD, Data) then
             FLastError := 'send: write failed or timed out for ' + AMime;
       end;
+      // バージョン 3 未満のドラッグは終わりの知らせが無い。データを渡し終えたら終わりとみなす。
+      if ASource.IsDrag and (ASource = FDragSrc) and (ASource.Version < 3) then
+        DragSendDone := True;
     finally
       fpclose(AFD);
     end;
+    if DragSendDone then
+      FinishDrag(True, WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY);
   except
     on E: Exception do
       RecordError('send', E);
@@ -1652,6 +1801,13 @@ var
   K: TPMLClipboardSelection;
 begin
   try
+    if ASource.IsDrag then
+    begin
+      // ドラッグのソース。落とし先が無かった・取り消された。
+      if ASource = FDragSrc then
+        FinishDrag(False, 0);
+      Exit;
+    end;
     K := ASource.Kind;
     if FSource[K] <> ASource then
       Exit;
@@ -1667,6 +1823,302 @@ begin
     on E: Exception do
       RecordError('cancelled', E);
   end;
+end;
+
+
+{ ---- ドラッグ＆ドロップの送り側（こちらがドラッグを始める。papimela 独自で SDL には無い） ----
+
+  WHAT:
+    StartDrag は wl_data_source を作って MIME タイプ（と自分のドラッグだと見分ける印）を
+    並べ、操作（copy / move / ask）を伝え、絵のサーフェスを作って
+    wl_data_device.start_drag を送る。あとはコンポジタからの知らせで進む。
+      - send              : 落とし先がデータを求めた。提供者から読んでパイプへ書く
+      - action            : 落とし先と決まった操作。最後に来たものを覚える
+      - dnd_drop_performed: ボタンが離されて落とされた。覚えるだけ
+      - dnd_finished      : 落とし先が受け取り終えた。DragEnded(True, 最後の操作)
+      - cancelled         : 取り消された・落とし先が無かった。DragEnded(False, Copy)
+
+  WHY:
+    start_drag にはポインタのボタンを押した入力の serial が要り、コンポジタはグラブの
+    始まりでなければ黙って無視する。そのため暗黙のグラブ（シートが覚えている押下）が
+    無ければ始めずに False を返す。
+
+  RESOLVED:
+    - 絵の位置: ポインタの先が絵の (HotX, HotY) に来るよう、絵のサーフェスの原点を
+      (-HotX, -HotY) へずらす。初めの置き方は「絵の左上がカーソルの先」なので、
+      attach の (x, y)（wl_surface バージョン 5 以降は wl_surface.offset）に
+      (-HotX, -HotY) を与える。これは wl_data_device.start_drag と wl_surface.offset の
+      仕様の読みで、labwc / wlroots が実際にこの位置へ描くかは確かめていない
+      （wlroots のソースは読めず、実機のドラッグも操作できなかった）
+    - 絵は start_drag を送ったあとに attach して commit する（プロトコルの記述が
+      その順。サーフェスの役割は start_drag で決まる）
+    - 絵のバッファは ARGB8888（アルファを掛けた形）。wl_shm の共有ファイルは
+      PMLCreateShmFile で作り、バッファを作ったらプールとマッピングはすぐ捨てる
+    - 終わるときはソースを先に捨ててから公開層（DragEnded）へ知らせる。提供者が
+      知らせの中から次の StartDrag を呼べるように
+
+  NOT RESOLVED:
+    - data_source のバージョンが 3 未満（dnd_finished も action も無い）のコンポジタでは、
+      終わりが分からない。最初の send を書き終えたら DragEnded(True, Copy) とする
+      近似にした（バージョン 3 未満では、データを求められるのは落とされたあとだけ）。
+      3 未満では set_actions も送れないので操作は Copy 固定
+    - タッチからのドラッグは始められない（ポインタのボタンだけを見る）
+    - 絵の位置がコンポジタで実際にそうなるかは未確認（実機のドラッグを操作できていない） }
+
+function TPMLWaylandClipboard.SupportsDrag: Boolean;
+begin
+  Result := (FDataDevice <> nil) and (FConn.DataDeviceMgr <> nil);
+end;
+
+{ ドラッグのソースと絵を畳む。提供者へは知らせない（それは公開層の仕事）。 }
+procedure TPMLWaylandClipboard.ReleaseDragObjects;
+var
+  Src: TPMLWaylandSource;
+begin
+  Src := FDragSrc;
+  FDragSrc := nil;
+  FDragAction := 0;
+  FDragPerformed := False;
+  if Src <> nil then
+  begin
+    Src.Provider := nil;
+    Src.Free;
+  end;
+  // バッファはサーフェスより先に捨ててよい（commit 済みの内容はコンポジタが持つ）が、
+  // 順に畳む。
+  if FIconSurface <> nil then
+  begin
+    wl_surface_destroy(FIconSurface);
+    FIconSurface := nil;
+  end;
+  if FIconBuffer <> nil then
+  begin
+    wl_buffer_destroy(FIconBuffer);
+    FIconBuffer := nil;
+  end;
+end;
+
+{ ドラッグが終わった。ソースと絵を捨ててから公開層へ知らせる。 }
+procedure TPMLWaylandClipboard.FinishDrag(ADropped: Boolean; AAction: LongWord);
+var
+  A: TPMLDragAction;
+begin
+  if FDragSrc = nil then
+    Exit;
+  ReleaseDragObjects;
+  if FConn.Display <> nil then
+    wl_display_flush(FConn.Display);
+  case AAction of
+    WL_DATA_DEVICE_MANAGER_DND_ACTION_MOVE: A := TPMLDragAction.Move;
+    WL_DATA_DEVICE_MANAGER_DND_ACTION_ASK : A := TPMLDragAction.Ask;
+  else
+    A := TPMLDragAction.Copy;
+  end;
+  if Assigned(FSink) then
+    FSink.DragEnded(ADropped, A);
+end;
+
+{ ARGB8888（アルファを掛けていない）の絵から、アルファを掛けた wl_buffer を作る。
+  失敗は例外（呼び出し側が絵なしで続ける）。 }
+procedure TPMLWaylandClipboard.BuildIconBuffer(const AIcon: TPMLDragIcon);
+var
+  Size: PtrUInt;
+  FD: cint;
+  Map: Pointer;
+  Pool: Pwl_shm_pool;
+  I, N: Integer;
+  P: PLongWord;
+  V, A, R, G, B: LongWord;
+begin
+  N := AIcon.Width * AIcon.Height;
+  Size := PtrUInt(N) * 4;
+  FD := PMLCreateShmFile(Size);
+  try
+    Map := Fpmmap(nil, Size, PROT_READ or PROT_WRITE, MAP_SHARED, FD, 0);
+    if (Map = nil) or (Map = Pointer(-1)) then
+      raise EPMLVideoError.CreateNative('mmap on the drag icon file failed',
+        FpGetErrno, 'wayland');
+    try
+      P := PLongWord(Map);
+      for I := 0 to N - 1 do
+      begin
+        V := AIcon.Pixels[I];
+        A := V shr 24;
+        R := (((V shr 16) and $FF) * A + 127) div 255;
+        G := (((V shr 8) and $FF) * A + 127) div 255;
+        B := ((V and $FF) * A + 127) div 255;
+        P[I] := (A shl 24) or (R shl 16) or (G shl 8) or B;
+      end;
+      Pool := wl_shm_create_pool(FConn.Shm, FD, LongInt(Size));
+    finally
+      Fpmunmap(Map, Size);
+    end;
+  finally
+    FpClose(FD);
+  end;
+  FIconBuffer := wl_shm_pool_create_buffer(Pool, 0, AIcon.Width, AIcon.Height,
+    AIcon.Width * 4, WL_SHM_FORMAT_ARGB8888);
+  wl_shm_pool_destroy(Pool);
+  if FIconBuffer = nil then
+    raise EPMLVideoError.CreateNative('wl_shm_pool.create_buffer failed (drag icon)', 0, 'wayland');
+end;
+
+{ start_drag のあとに絵を載せる。ポインタの先が絵の (HotX, HotY) に来るよう、
+  サーフェスの原点を (-HotX, -HotY) へずらす。 }
+procedure TPMLWaylandClipboard.PresentIcon(const AIcon: TPMLDragIcon);
+begin
+  if wl_proxy_get_version(Pwl_proxy(FIconSurface)) >= WL_SURFACE_OFFSET_SINCE_VERSION then
+  begin
+    // バージョン 5 以降は attach の x, y が 0 以外だとプロトコルエラー。offset を使う。
+    wl_surface_attach(FIconSurface, FIconBuffer, 0, 0);
+    wl_surface_offset(FIconSurface, -AIcon.HotX, -AIcon.HotY);
+  end
+  else
+    wl_surface_attach(FIconSurface, FIconBuffer, -AIcon.HotX, -AIcon.HotY);
+  if wl_proxy_get_version(Pwl_proxy(FIconSurface)) >= 4 then
+    wl_surface_damage_buffer(FIconSurface, 0, 0, AIcon.Width, AIcon.Height)
+  else
+    wl_surface_damage(FIconSurface, 0, 0, AIcon.Width, AIcon.Height);
+  wl_surface_commit(FIconSurface);
+end;
+
+function TPMLWaylandClipboard.StartDrag(AWindowID: TPMLWindowID;
+  const AMimeTypes: TStringArray; AProvider: IPMLClipboardDataProvider;
+  AActions: TPMLDragActions; const AIcon: TPMLDragIcon): Boolean;
+var
+  Surf: Pwl_surface;
+  Serial: LongWord;
+  Src: TPMLWaylandSource;
+  Acts: LongWord;
+  M: String;
+  HasIcon: Boolean;
+begin
+  Result := False;
+  try
+    if (not SupportsDrag) or (FDragSrc <> nil) or (AProvider = nil) or (Length(AMimeTypes) = 0) then
+      Exit;
+    // 暗黙のグラブ（そのウィンドウでボタンを押している）が無ければ、コンポジタが
+    // 無視するので始めない。
+    if not FSeat.ImplicitGrab(AWindowID, Surf, Serial) then
+      Exit;
+
+    Acts := 0;
+    if TPMLDragAction.Copy in AActions then
+      Acts := Acts or WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY;
+    if TPMLDragAction.Move in AActions then
+      Acts := Acts or WL_DATA_DEVICE_MANAGER_DND_ACTION_MOVE;
+    if TPMLDragAction.Ask in AActions then
+      Acts := Acts or WL_DATA_DEVICE_MANAGER_DND_ACTION_ASK;
+
+    Src := TPMLWaylandSource.CreateData(Self,
+      wl_data_device_manager_create_data_source(FConn.DataDeviceMgr));
+    Src.IsDrag := True;
+    Src.Marker := NewMarker;
+    for M in AMimeTypes do
+      Src.OfferMime(M);
+    // 自分のウィンドウへ落ちたとき、パイプを通さず提供者から直接読むための印。
+    Src.OfferMime(Src.Marker);
+    Src.Mimes := Copy(AMimeTypes);
+    Src.Provider := AProvider;
+    Src.SetActions(Acts);
+    FDragSrc := Src;
+    FDragAction := 0;
+    FDragPerformed := False;
+
+    // 絵は絵のバッファが作れたときだけ。作れなくてもドラッグは始める。
+    HasIcon := False;
+    if (AIcon.Width > 0) and (AIcon.Height > 0)
+      and (Length(AIcon.Pixels) >= AIcon.Width * AIcon.Height)
+      and (FConn.Shm <> nil) and (FConn.Compositor <> nil) then
+      try
+        BuildIconBuffer(AIcon);
+        FIconSurface := wl_compositor_create_surface(FConn.Compositor);
+        HasIcon := FIconSurface <> nil;
+      except
+        on E: Exception do
+          RecordError('drag icon', E);
+      end;
+
+    wl_data_device_start_drag(FDataDevice, Src.DataProxy, Surf, FIconSurface, Serial);
+    if HasIcon then
+      PresentIcon(AIcon);
+    if FConn.Display <> nil then
+      wl_display_flush(FConn.Display);
+    Result := True;
+  except
+    on E: Exception do
+    begin
+      RecordError('StartDrag', E);
+      ReleaseDragObjects;
+      Result := False;
+    end;
+  end;
+end;
+
+{ 取り消す。ソースを捨てればコンポジタがドラッグを終わらせる。cancelled は自分で
+  捨てたソースには届かないので、DragEnded は同期的にこちらから呼ぶ。 }
+procedure TPMLWaylandClipboard.CancelDrag;
+begin
+  try
+    FinishDrag(False, 0);
+  except
+    on E: Exception do
+      RecordError('CancelDrag', E);
+  end;
+end;
+
+procedure TPMLWaylandClipboard.HandleDragAction(ASource: TPMLWaylandSource; AAction: LongWord);
+begin
+  if ASource = FDragSrc then
+    FDragAction := AAction;
+end;
+
+procedure TPMLWaylandClipboard.HandleDragDropPerformed(ASource: TPMLWaylandSource);
+begin
+  if ASource = FDragSrc then
+    FDragPerformed := True;
+end;
+
+{ 落とし先が受け取り終えた（バージョン 3 から）。決まった操作は最後の action。 }
+procedure TPMLWaylandClipboard.HandleDragFinished(ASource: TPMLWaylandSource);
+begin
+  try
+    if ASource = FDragSrc then
+      FinishDrag(True, FDragAction);
+  except
+    on E: Exception do
+      RecordError('dnd_finished', E);
+  end;
+end;
+
+{ 受け取ったオファーが、いま始めているこちらのドラッグのものか（印の MIME タイプで見分ける）。 }
+function TPMLWaylandClipboard.IsOwnDrag(AOffer: TPMLWaylandOffer): Boolean;
+begin
+  Result := (FDragSrc <> nil) and (AOffer <> nil) and AOffer.HasMime(FDragSrc.Marker);
+end;
+
+{ ドロップされたオファーから AMime のデータを取る。
+
+  自分のウィンドウへ落ちたとき（自分のドラッグ）は、パイプで読むと自分が書くのを
+  待って止まるので、ドラッグの提供者から直接読む。 }
+function TPMLWaylandClipboard.FetchDropData(AOffer: TPMLWaylandOffer; const AMime: String;
+  out AData: TBytes): Boolean;
+var
+  Provider: IPMLClipboardDataProvider;
+begin
+  AData := nil;
+  Result := False;
+  if IsOwnDrag(AOffer) then
+  begin
+    if (not FDragSrc.HasMime(AMime)) or (FDragSrc.Provider = nil) then
+      Exit;
+    Provider := FDragSrc.Provider;
+    Result := Provider.GetClipboardData(AMime, AData) and (Length(AData) > 0);
+    if not Result then
+      AData := nil;
+  end
+  else
+    Result := ReceiveFromOffer(AOffer, AMime, AData);
 end;
 
 end.

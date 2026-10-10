@@ -26,6 +26,10 @@
     - Text に '' を置くのは Clear（SDL と同じ）
     - プライマリ選択の ClipboardUpdate にはプライマリ選択の MIME タイプを載せる
       （SDL はクリップボードの方を載せている）
+    - ドラッグを始める（StartDrag。papimela 独自）。状態はクリップボードの選択とは別に
+      持つ。終わったら状態を空にし、DragEnd を積んでから提供者に 1 回知らせる（知らせの
+      中から次の StartDrag を呼べる）。DragEnd を切っていても提供者には知らせる。
+      CancelDrag・Context の破棄は、部品が DragEnded を呼ばなくても終わらせる
     - 部品が無い（ダミーのビデオ）ときは、プロセスの中だけで持つ。部品はあるが
       プライマリ選択が無い（コンポジタが広告しない）ときは、置くと EPMLUnsupported
 
@@ -49,6 +53,8 @@ uses
   PaPiMeLa.Errors,
   PaPiMeLa.Core.Base,
   PaPiMeLa.Events,
+  PaPiMeLa.Pixels,
+  PaPiMeLa.Surface,
   PaPiMeLa.Video.Backend;
 
 type
@@ -56,6 +62,19 @@ type
   // アンブレラ（uses PaPiMeLa）はこちらを並べ直す。
   TPMLClipboardSelection    = PaPiMeLa.Video.Backend.TPMLClipboardSelection;
   IPMLClipboardDataProvider = PaPiMeLa.Video.Backend.IPMLClipboardDataProvider;
+
+  { StartDrag の選び方。
+      Actions : 落とし先に許す操作。空は EPMLArgument
+      Icon    : ドラッグ中にポインタに付ける絵。nil なら付けない。StartDrag の中で写すので、
+                呼んだあとは捨ててよい
+      HotX, HotY: ポインタの先が絵のどこに来るか（絵の左上からの画素） }
+  TPMLDragOptions = record
+    Actions   : TPMLDragActions;
+    Icon      : TPMLSurface;
+    HotX, HotY: Integer;
+    // Actions = [Copy]、絵なし。
+    class function Default: TPMLDragOptions; static;
+  end;
 
   { 文字列を配る内部の提供者。TPMLClipboard が持ち、置き換えたら捨てる。 }
   TPMLTextClipboardProvider = class(TObject, IPMLClipboardDataProvider)
@@ -80,6 +99,10 @@ type
     FQueue  : TPMLEventQueue;
     FBackend: TPMLClipboardBackend;     // 借りている。nil = プロセスの中だけ
     FSel    : array[TPMLClipboardSelection] of TPMLSelectionState;
+    // ドラッグ（StartDrag）。クリップボードの選択とは別に持つ。
+    FDragging   : Boolean;
+    FDragWindow : TPMLWindowID;
+    FDragProvider: IPMLClipboardDataProvider;
     procedure Place(ASelection: TPMLClipboardSelection; const AMimeTypes: TStringArray;
       AProvider: IPMLClipboardDataProvider; AInternal: TPMLTextClipboardProvider);
     procedure Drop(ASelection: TPMLClipboardSelection);
@@ -97,6 +120,8 @@ type
     procedure SetPrimarySelectionText(const AValue: String);
     function  GetOwner: Boolean;
     function  GetPrimaryAvailable: Boolean;
+    function  GetDragAvailable: Boolean;
+    procedure EndDragByCancel;
   public
     // ABackend は TPMLVideoBackend.Clipboard（nil 可）。借りるだけ。
     constructor Create(AContextRef: TObject; AOwner: TPMLObject; AQueue: TPMLEventQueue;
@@ -125,10 +150,30 @@ type
     // 置けるか。False のとき PrimarySelectionText に置くと EPMLUnsupported。
     property  PrimarySelectionAvailable: Boolean read GetPrimaryAvailable;
 
+    // ---- ドラッグを始める（papimela 独自。SDL には無い）
+    // AWindowID のウィンドウから、AMimeTypes を配るドラッグを始める。ポインタのボタンを
+    // そのウィンドウで押している間（MouseButtonDown のあと、MouseButtonUp の前）に呼ぶ。
+    // データは、落とし先が求めたときに AProvider.GetClipboardData で渡す（Pump の中から）。
+    // 始まったら True。終わると DragEnd を積み、そのあと AProvider.ClipboardDataCancelled を
+    // 1 回呼ぶ。始まらなければ False（ボタンが押されていない、ドラッグ中、など）で、
+    // AProvider は呼ばない。
+    // AWindowID = 0、MIME タイプが無い・空の名前、AProvider = nil、Actions が空は EPMLArgument。
+    // DragAvailable が False なら EPMLUnsupported。
+    function  StartDrag(AWindowID: TPMLWindowID; const AMimeTypes: array of String;
+      AProvider: IPMLClipboardDataProvider): Boolean; overload;
+    function  StartDrag(AWindowID: TPMLWindowID; const AMimeTypes: array of String;
+      AProvider: IPMLClipboardDataProvider; const AOptions: TPMLDragOptions): Boolean; overload;
+    // 始めたドラッグを取り消す（DragEnd の Dropped は False）。ドラッグ中でなければ何もしない。
+    procedure CancelDrag;
+    property  IsDragging: Boolean read FDragging;
+    // ビデオのバックエンドがドラッグを始められるか（能力 DragAndDrop）。
+    property  DragAvailable: Boolean read GetDragAvailable;
+
     // IPMLClipboardSink（部品が呼ぶ）
     procedure ClipboardOwnershipLost(ASelection: TPMLClipboardSelection);
     procedure ClipboardOffered(ASelection: TPMLClipboardSelection;
       const AMimeTypes: TStringArray);
+    procedure DragEnded(ADropped: Boolean; AAction: TPMLDragAction);
   end;
 
 implementation
@@ -196,6 +241,8 @@ begin
         FBackend.SetSelection(S, nil, nil);
       Drop(S);
     end;
+  // ドラッグ中なら取り消し、提供者に知らせる（部品を外す前に）。
+  EndDragByCancel;
   if Assigned(FBackend) then
     FBackend.Attach(nil);
   inherited Destroy;
@@ -437,6 +484,154 @@ begin
   if FSel[ASelection].Owner then
     Drop(ASelection);
   PushUpdate(ASelection, False, AMimeTypes);
+end;
+
+
+{ ---- ドラッグ（StartDrag）----
+  WHAT:
+    ドラッグの状態（FDragging / FDragWindow / FDragProvider）はクリップボードの選択
+    （FSel）とは別に持つ。同じ提供者を両方に使っても、それぞれ 1 回ずつ知らせる。
+
+  WHY:
+    終わりの知らせ（DragEnded）の中で、提供者がすぐ次の StartDrag を呼べるようにするため、
+    状態を先に空にしてから DragEnd を積み、最後に提供者へ知らせる。 }
+
+class function TPMLDragOptions.Default: TPMLDragOptions;
+begin
+  Result.Actions := [TPMLDragAction.Copy];
+  Result.Icon := nil;
+  Result.HotX := 0;
+  Result.HotY := 0;
+end;
+
+function TPMLClipboard.GetDragAvailable: Boolean;
+begin
+  Result := Assigned(FBackend) and FBackend.SupportsDrag;
+end;
+
+{ 絵を部品に渡す形（ARGB8888、アルファを掛けない、行の詰め物なし）にする。
+  どの形式の Surface でも受け、呼んだあとは Surface に触らない。 }
+function SurfaceToDragIcon(ASurface: TPMLSurface; AHotX, AHotY: Integer): TPMLDragIcon;
+var
+  Src: TPMLSurface;
+  Y: Integer;
+begin
+  Result.Width := 0;
+  Result.Height := 0;
+  Result.HotX := AHotX;
+  Result.HotY := AHotY;
+  Result.Pixels := nil;
+  if (ASurface = nil) or (ASurface.Width <= 0) or (ASurface.Height <= 0) then
+    Exit;
+  if ASurface.Format = PML_PIXELFORMAT_ARGB8888 then
+    Src := ASurface
+  else
+    Src := ASurface.Convert(PML_PIXELFORMAT_ARGB8888);
+  try
+    Result.Width := Src.Width;
+    Result.Height := Src.Height;
+    SetLength(Result.Pixels, Src.Width * Src.Height);
+    // Pitch に詰め物があることがあるので、行ごとに写す。
+    for Y := 0 to Src.Height - 1 do
+      Move((PByte(Src.Pixels) + PtrUInt(Y) * PtrUInt(Src.Pitch))^,
+        Result.Pixels[Y * Src.Width], Src.Width * SizeOf(LongWord));
+  finally
+    if Src <> ASurface then
+      Src.Free;
+  end;
+end;
+
+function TPMLClipboard.StartDrag(AWindowID: TPMLWindowID; const AMimeTypes: array of String;
+  AProvider: IPMLClipboardDataProvider): Boolean;
+begin
+  Result := StartDrag(AWindowID, AMimeTypes, AProvider, TPMLDragOptions.Default);
+end;
+
+function TPMLClipboard.StartDrag(AWindowID: TPMLWindowID; const AMimeTypes: array of String;
+  AProvider: IPMLClipboardDataProvider; const AOptions: TPMLDragOptions): Boolean;
+var
+  L: TStringArray;
+  I: Integer;
+  Icon: TPMLDragIcon;
+begin
+  CheckMainThread;
+  if AWindowID = 0 then
+    raise EPMLArgument.Create('StartDrag: window ID 0');
+  if Length(AMimeTypes) = 0 then
+    raise EPMLArgument.Create('StartDrag needs at least one MIME type');
+  if AProvider = nil then
+    raise EPMLArgument.Create('StartDrag needs a provider');
+  if AOptions.Actions = [] then
+    raise EPMLArgument.Create('StartDrag: Actions is empty');
+  SetLength(L, Length(AMimeTypes));
+  for I := 0 to High(AMimeTypes) do
+  begin
+    if AMimeTypes[I] = '' then
+      raise EPMLArgument.Create('StartDrag: empty MIME type');
+    L[I] := AMimeTypes[I];
+  end;
+  if not GetDragAvailable then
+    raise EPMLUnsupported.Create('the video backend cannot start a drag');
+  // ドラッグ中の 2 度目は、部品にも提供者にも触れずに False。
+  if FDragging then
+    Exit(False);
+  Icon := SurfaceToDragIcon(AOptions.Icon, AOptions.HotX, AOptions.HotY);
+  Result := FBackend.StartDrag(AWindowID, L, AProvider, AOptions.Actions, Icon);
+  if Result then
+  begin
+    FDragging := True;
+    FDragWindow := AWindowID;
+    FDragProvider := AProvider;
+  end;
+end;
+
+procedure TPMLClipboard.CancelDrag;
+begin
+  CheckMainThread;
+  EndDragByCancel;
+end;
+
+{ 取り消し。部品が DragEnded を呼ばない（行儀の悪い）ときは、こちらで終わらせる。
+  そのあとに遅れて来た DragEnded は、ドラッグ中でないので捨てられる。 }
+procedure TPMLClipboard.EndDragByCancel;
+begin
+  if not FDragging then
+    Exit;
+  if Assigned(FBackend) then
+    FBackend.CancelDrag;
+  if FDragging then
+    DragEnded(False, TPMLDragAction.Copy);
+end;
+
+procedure TPMLClipboard.DragEnded(ADropped: Boolean; AAction: TPMLDragAction);
+var
+  Old: IPMLClipboardDataProvider;
+  Win: TPMLWindowID;
+  Ev: TPMLEvent;
+begin
+  if not FDragging then
+    Exit;
+  Old := FDragProvider;
+  Win := FDragWindow;
+  // 状態を先に空にする。提供者が知らせの中で次の StartDrag を呼べるように。
+  FDragging := False;
+  FDragWindow := 0;
+  FDragProvider := nil;
+
+  Ev := Default(TPMLEvent);
+  Ev.Kind := TPMLEventKind.DragEnd;
+  Ev.Timestamp := PMLNowNS;
+  Ev.WindowID := Win;
+  Ev.Drag.Dropped := ADropped;
+  if ADropped then
+    Ev.Drag.Action := AAction
+  else
+    Ev.Drag.Action := TPMLDragAction.Copy;
+  // DragEnd を切っていても、キューが捨てるだけで提供者には知らせる。
+  FQueue.Push(Ev);
+
+  if Assigned(Old) then
+    Old.ClipboardDataCancelled;
 end;
 
 end.

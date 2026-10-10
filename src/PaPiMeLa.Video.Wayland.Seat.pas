@@ -19,6 +19,9 @@
     従ってクライアントが生成する。
 
   RESOLVED:
+    - ドラッグを始める暗黙のグラブ: ポインタのボタンの押下を覚え（押されているボタンと直近の
+      押下の serial）、そのウィンドウにポインタのフォーカスがあるときだけ ImplicitGrab が
+      True を返す。ポインタが入る・出るたびに数え直す（enter は押下中のボタンを知らせない）
     - 生成リスナーは抽象クラスなので 1 クラスで seat / keyboard / pointer / touch を
       同時に継承できない。転送用の内部クラスを置いて実体へ委譲する
     - サーフェスからウィンドウを引くのは wl_proxy_get_user_data。
@@ -137,6 +140,10 @@ type
     FKeyFocus : TPMLWindowID;
     FPtrFocus : TPMLWindowID;
     FPtrSerial: LongWord;      // 直近の wl_pointer.enter の serial。set_cursor に要る
+    // ドラッグを始める（wl_data_device.start_drag）のに要る暗黙のグラブの情報。
+    FPtrSurface     : Pwl_surface;  // ポインタフォーカスのあるサーフェス（このアプリのもの）。無ければ nil
+    FPtrHeld        : LongWord;     // 押されているボタン（evdev BTN_MOUSE = $110 を 0 にしたビット）
+    FPtrButtonSerial: LongWord;     // 直近のボタン押下の serial
     // 直近の入力（キーボードの enter / キー、ポインタのボタン押下、タッチの down）の
     // serial。set_selection に要る。SDL の last_implicit_grab_serial に当たる。
     FInputSerial  : LongWord;
@@ -175,6 +182,7 @@ type
       AX, AY: wl_fixed_t);
     procedure HandlePointerLeave(ASurface: Pwl_surface);
     procedure HandlePointerMotion(AX, AY: wl_fixed_t);
+    procedure NotePointerButton(ASerial, AButton: LongWord; ADown: Boolean);
     procedure HandlePointerButton(AButton: LongWord; ADown: Boolean);
     procedure HandlePointerAxis(AAxis: LongWord; AValue: wl_fixed_t);
     procedure HandleTouchDown(ASurface: Pwl_surface; AID: LongInt;
@@ -203,6 +211,11 @@ type
     // サーフェスを持つウィンドウの ID（user_data のウィンドウ backend から引く）。
     // 解決できなければ 0。データデバイス（ドラッグ＆ドロップ）が使う。
     function  WindowIDOf(ASurface: Pwl_surface): TPMLWindowID;
+    // ドラッグを始められるか。AWindowID のウィンドウにポインタのフォーカスがあり、ボタンが
+    // 押されている（暗黙のグラブ）なら True にして、そのサーフェスと押下の serial を返す。
+    // SDL に当たるものは無い（SDL は送り側のドラッグを持たない）。
+    function  ImplicitGrab(AWindowID: TPMLWindowID; out ASurface: Pwl_surface;
+      out ASerial: LongWord): Boolean;
     // 次のリピートまでの残り時間（ミリ秒）。リピート中でなければ -1。
     function  MillisecondsUntilRepeat: Integer;
 
@@ -230,6 +243,8 @@ const
   BTN_LEFT   = $110;
   BTN_RIGHT  = $111;
   BTN_MIDDLE = $112;
+  // BTN_MOUSE（BTN_LEFT の手前）。ここから 32 個を押下の記録に使う。
+  BTN_MOUSE_FIRST = $110;
 
 { 転送クラス }
 
@@ -308,6 +323,7 @@ begin
   // 押下だけ（SDL と同じ）。離したときの serial は選択の根拠にしない。
   if state = 1 then
     FOwner.NoteInputSerial(serial);
+  FOwner.NotePointerButton(serial, button_, state = 1);
   FOwner.HandlePointerButton(button_, state = 1);
 end;
 
@@ -753,16 +769,20 @@ begin
   // set_cursor と set_shape はこの serial を要求する。カーソルの張り直しにも使う。
   FPtrSerial := ASerial;
   ReapplyCursor;
+  // 入ってきた時点で押されているボタンは分からない（enter はそれを知らせない）。数え直す。
+  FPtrHeld := 0;
   W := WindowOf(ASurface);
   if W = nil then
   begin
     FPtrFocus := 0;
+    FPtrSurface := nil;
     if FGrab <> nil then
       FGrab.SetPointerFocus(nil);
     Exit;
   end;
 
   FPtrFocus := W.WindowID;
+  FPtrSurface := ASurface;
   X := PMLFixedToSingle(AX);
   Y := PMLFixedToSingle(AY);
   if FGrab <> nil then
@@ -785,6 +805,10 @@ begin
   if ID = 0 then
     ID := FPtrFocus;
   FPtrFocus := 0;
+  // ドラッグを始めるとコンポジタがポインタを奪い、離したボタンはこちらへ届かない。
+  // 暗黙のグラブ中は leave が来ないので、ここで捨てて困ることはない。
+  FPtrSurface := nil;
+  FPtrHeld := 0;
   // serial は enter のときだけ有効。離れたあとに set_cursor を送っても
   // コンポジタは無視するので、無駄な要求を出さないよう捨てる。
   FPtrSerial := 0;
@@ -806,6 +830,42 @@ begin
   if FGrab <> nil then
     FGrab.NoteMotion(X, Y);
   FQueue.Mouse.SendMotion(FPtrFocus, X, Y);
+end;
+
+{ ボタンの押下を覚える（ドラッグを始める暗黙のグラブ用）。
+
+  WHY:
+    wl_data_device.start_drag は、ポインタのボタンを押した入力イベントの serial を
+    要求する。コンポジタは「その押下から始まったグラブ」でなければ黙って無視するので、
+    押されているボタンと、その直近の押下の serial を持っておく。 }
+procedure TPMLWaylandSeat.NotePointerButton(ASerial, AButton: LongWord; ADown: Boolean);
+var
+  Bit: LongWord;
+begin
+  if (AButton < BTN_MOUSE_FIRST) or (AButton >= BTN_MOUSE_FIRST + 32) then
+    Exit;
+  Bit := LongWord(1) shl (AButton - BTN_MOUSE_FIRST);
+  if ADown then
+  begin
+    FPtrHeld := FPtrHeld or Bit;
+    FPtrButtonSerial := ASerial;
+  end
+  else
+    FPtrHeld := FPtrHeld and not Bit;
+end;
+
+function TPMLWaylandSeat.ImplicitGrab(AWindowID: TPMLWindowID; out ASurface: Pwl_surface;
+  out ASerial: LongWord): Boolean;
+begin
+  ASurface := nil;
+  ASerial := 0;
+  Result := (AWindowID <> 0) and (FPtrFocus = AWindowID) and (FPtrSurface <> nil)
+    and (FPtrHeld <> 0) and (FPtrButtonSerial <> 0);
+  if Result then
+  begin
+    ASurface := FPtrSurface;
+    ASerial := FPtrButtonSerial;
+  end;
 end;
 
 procedure TPMLWaylandSeat.HandlePointerButton(AButton: LongWord; ADown: Boolean);

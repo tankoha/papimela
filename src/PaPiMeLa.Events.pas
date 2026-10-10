@@ -74,6 +74,7 @@ type
     FingerDown, FingerUp, FingerMotion, FingerCanceled,
     ClipboardUpdate,
     DropFile, DropText, DropBegin, DropComplete, DropPosition,
+    DragEnd,                             // papimela 独自（こちらが始めたドラッグの終わり）
     AudioDeviceAdded, AudioDeviceRemoved, AudioDeviceFormatChanged,
     RenderTargetsReset, RenderDeviceReset, RenderDeviceLost,
     User
@@ -142,13 +143,27 @@ type
     Pressure: Single;
   end;
 
-  // ClipboardUpdate の付随情報。MIME タイプの並びは TPMLEvent.Strings に載る。
   // DropBegin / DropFile / DropText / DropPosition / DropComplete の付随情報。ファイルの
   // パスと文字列は TPMLEvent.Text に載る。位置はウィンドウの座標（DropBegin では 0）。
   TPMLDropEventData = record
     X, Y: Single;
   end;
 
+  { ドラッグで、落とし先とやり取りする操作（wl_data_device_manager の dnd_action）。
+      Copy: 落とし先が写す。元はそのまま
+      Move: 落とし先が写したあと、元を消してよい（消すのはアプリ）
+      Ask : 落としたあとで落とし先が利用者に聞く（最後は Copy か Move に決まる） }
+  TPMLDragAction = (Copy, Move, Ask);
+  TPMLDragActions = set of TPMLDragAction;
+
+  // DragEnd の付随情報（TPMLClipboard.StartDrag で始めたドラッグの終わり）。
+  // WindowID はドラッグを始めたウィンドウ。
+  TPMLDragEventData = record
+    Dropped: Boolean;          // True = 落とし先が受け取り終えた。False = 取り消された・断られた
+    Action : TPMLDragAction;   // Dropped のとき、落とし先と決まった操作（Copy か Move）
+  end;
+
+  // ClipboardUpdate の付随情報。MIME タイプの並びは TPMLEvent.Strings に載る。
   TPMLClipboardEventData = record
     Owner           : Boolean;   // True = このアプリが置いた（SetText など）。False = 他のアプリ
     PrimarySelection: Boolean;   // True = プライマリ選択（中クリックで貼る方）
@@ -181,6 +196,7 @@ type
       8: (Finger           : TPMLTouchFingerData);
       9: (Clipboard        : TPMLClipboardEventData);
       10: (Drop            : TPMLDropEventData);
+      11: (Drag            : TPMLDragEventData);
       // Display / JAxis / GAxis / Finger ... は各サブシステム着手時に追加する。
       // 可変部への追加は既存コードに影響しない。
   end;

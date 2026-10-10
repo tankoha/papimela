@@ -56,6 +56,7 @@ const
   DBUS_TYPE_OBJECT_PATH = Ord('o');
   DBUS_TYPE_SIGNATURE   = Ord('g');
   DBUS_TYPE_ARRAY       = Ord('a');
+  DBUS_TYPE_UNIX_FD     = Ord('h');
   DBUS_TYPE_STRUCT      = Ord('r');
   DBUS_TYPE_VARIANT     = Ord('v');
   DBUS_TYPE_BYTE        = Ord('y');
@@ -179,6 +180,8 @@ type
     procedure AddInt32(AValue: LongInt);
     procedure AddUInt32(AValue: LongWord);
     procedure AddUInt64(AValue: QWord);
+    // ファイル記述子を渡す（型 h）。libdbus が複製して送るので、AFD は呼び出し側が閉じてよい。
+    procedure AddUnixFD(AFD: LongInt);
     procedure AddDouble(AValue: Double);
     procedure AddBoolean(AValue: Boolean);
 
@@ -411,6 +414,11 @@ end;
 procedure TPMLDBusWriter.AddUInt64(AValue: QWord);
 begin
   AddBasic(DBUS_TYPE_UINT64, @AValue);
+end;
+
+procedure TPMLDBusWriter.AddUnixFD(AFD: LongInt);
+begin
+  AddBasic(DBUS_TYPE_UNIX_FD, @AFD);
 end;
 
 procedure TPMLDBusWriter.AddDouble(AValue: Double);

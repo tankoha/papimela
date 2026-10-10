@@ -57,3 +57,6 @@ test/test_drop
 test/test_render_transform
 test/demo_drop
 test/test_render_target
+test/demo_drag
+test/test_drag_source
+test/test_documents_portal
