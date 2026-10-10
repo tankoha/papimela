@@ -20,6 +20,8 @@
 //   PaPiMeLa.Time
 //   PaPiMeLa.Atomic
 //   PaPiMeLa.Threading
+//   PaPiMeLa.Properties
+//   PaPiMeLa.Log
 //   PaPiMeLa.App
 //   PaPiMeLa.Video.Backend
 //   PaPiMeLa.TextInput.Backend
@@ -73,7 +75,6 @@ type
 type
   TPMLSubsystem = PaPiMeLa.Core.TPMLSubsystem;
   TPMLSubsystems = PaPiMeLa.Core.TPMLSubsystems;
-  TPMLLogLevel = PaPiMeLa.Core.TPMLLogLevel;
   TPMLTimerService = PaPiMeLa.Core.TPMLTimerService;
   TPMLContextOptions = PaPiMeLa.Core.TPMLContextOptions;
   TPMLContext = PaPiMeLa.Core.TPMLContext;
@@ -691,6 +692,41 @@ type
   TPMLThreadPriority = PaPiMeLa.Threading.TPMLThreadPriority;
   TPMLThreadFunc = PaPiMeLa.Threading.TPMLThreadFunc;
   TPMLThread = PaPiMeLa.Threading.TPMLThread;
+
+// ---- PaPiMeLa.Properties
+type
+  TPMLPropertyType = PaPiMeLa.Properties.TPMLPropertyType;
+  TPMLPropertyCleanup = PaPiMeLa.Properties.TPMLPropertyCleanup;
+  TPMLPropertyEnumerator = PaPiMeLa.Properties.TPMLPropertyEnumerator;
+  TPMLProperties = PaPiMeLa.Properties.TPMLProperties;
+  TPMLHintPriority = PaPiMeLa.Properties.TPMLHintPriority;
+  TPMLHintValue = PaPiMeLa.Properties.TPMLHintValue;
+  TPMLHintCallback = PaPiMeLa.Properties.TPMLHintCallback;
+  TPMLHints = PaPiMeLa.Properties.TPMLHints;
+const
+  PML_HINT_LOGGING = PaPiMeLa.Properties.PML_HINT_LOGGING;
+function PMLStringBoolean(const AValue: String; ADefault: Boolean): Boolean; inline;
+function PMLStringInteger(const AValue: String; ADefault: Integer): Integer; inline;
+function PMLStrToInt64C(const AValue: String): Int64; inline;
+function PMLStrToFloatC(const AValue: String): Double; inline;
+
+// ---- PaPiMeLa.Log
+type
+  TPMLLogPriority = PaPiMeLa.Log.TPMLLogPriority;
+  TPMLLogOutput = PaPiMeLa.Log.TPMLLogOutput;
+  TPMLLog = PaPiMeLa.Log.TPMLLog;
+const
+  PML_LOG_CATEGORY_APPLICATION = PaPiMeLa.Log.PML_LOG_CATEGORY_APPLICATION;
+  PML_LOG_CATEGORY_ERROR = PaPiMeLa.Log.PML_LOG_CATEGORY_ERROR;
+  PML_LOG_CATEGORY_ASSERT = PaPiMeLa.Log.PML_LOG_CATEGORY_ASSERT;
+  PML_LOG_CATEGORY_SYSTEM = PaPiMeLa.Log.PML_LOG_CATEGORY_SYSTEM;
+  PML_LOG_CATEGORY_AUDIO = PaPiMeLa.Log.PML_LOG_CATEGORY_AUDIO;
+  PML_LOG_CATEGORY_VIDEO = PaPiMeLa.Log.PML_LOG_CATEGORY_VIDEO;
+  PML_LOG_CATEGORY_RENDER = PaPiMeLa.Log.PML_LOG_CATEGORY_RENDER;
+  PML_LOG_CATEGORY_INPUT = PaPiMeLa.Log.PML_LOG_CATEGORY_INPUT;
+  PML_LOG_CATEGORY_TEST = PaPiMeLa.Log.PML_LOG_CATEGORY_TEST;
+  PML_LOG_CATEGORY_GPU = PaPiMeLa.Log.PML_LOG_CATEGORY_GPU;
+  PML_LOG_CATEGORY_CUSTOM = PaPiMeLa.Log.PML_LOG_CATEGORY_CUSTOM;
 
 // ---- PaPiMeLa.App
 type

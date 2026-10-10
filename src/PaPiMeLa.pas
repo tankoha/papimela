@@ -58,6 +58,8 @@ uses
   PaPiMeLa.Clipboard,
   PaPiMeLa.Atomic,
   PaPiMeLa.Threading,
+  PaPiMeLa.Properties,
+  PaPiMeLa.Log,
   PaPiMeLa.Video.Backend,
   PaPiMeLa.Render,
   PaPiMeLa.TextInput,

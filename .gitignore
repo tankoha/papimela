@@ -60,3 +60,5 @@ test/test_render_target
 test/demo_drag
 test/test_drag_source
 test/test_documents_portal
+test/test_properties
+test/test_log

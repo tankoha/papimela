@@ -33,6 +33,7 @@ uses
   PaPiMeLa.Video.Backend,
   PaPiMeLa.Video,
   PaPiMeLa.Video.Dummy,
+  PaPiMeLa.Log,
   PaPiMeLa.Core;
 
 var
@@ -97,7 +98,7 @@ function UndeclaredDefaults: Boolean;
 var
   O: TPMLContextOptions;   // わざと Default を通さない（Initialize 演算子の検査）
 begin
-  Result := (O.EventQueueCapacity = 256) and (O.MinimumLogLevel = TPMLLogLevel.Info)
+  Result := (O.EventQueueCapacity = 256) and (O.MinimumLogLevel = TPMLLogPriority.Info)
         and (O.PreferredVideo = '') and (O.PreferredTextInput = '');
 end;
 
@@ -109,7 +110,7 @@ var
 begin
   WriteLn('0. Context のオプション（値型。F-7）');
   O := TPMLContextOptions.Default;
-  Check((O.EventQueueCapacity = 256) and (O.MinimumLogLevel = TPMLLogLevel.Info)
+  Check((O.EventQueueCapacity = 256) and (O.MinimumLogLevel = TPMLLogPriority.Info)
     and (O.PreferredVideo = '') and (O.PreferredTextInput = ''),
     'Default は既定値（容量 256、Info、バックエンドは自動）');
   DirtyStack;

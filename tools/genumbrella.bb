@@ -56,6 +56,8 @@
    {:unit "PaPiMeLa.Time"}
    {:unit "PaPiMeLa.Atomic"}
    {:unit "PaPiMeLa.Threading"}
+   {:unit "PaPiMeLa.Properties"}
+   {:unit "PaPiMeLa.Log"}
    {:unit "PaPiMeLa.App"}
    {:unit "PaPiMeLa.Video.Backend" :only #{"PMLVideoBackendNames"}}
    {:unit "PaPiMeLa.TextInput.Backend" :only #{"PMLTextInputBackendNames"}}])

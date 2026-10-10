@@ -15,13 +15,14 @@
     オブジェクトグラフにし、同一プロセスに複数の Context を作ることを禁じない。
 
   RESOLVED:
-    - 破棄順序は TextInput → Joystick → Audio → Video → Timer → Events
+    - 破棄順序は TextInput → Joystick → Audio → Video → Timer → Events → Log → Properties → Hints
     - finalization 節では何もしない。破棄はアプリの Context.Free に委ねる
     - Context を生成したスレッドがメインスレッド。子はそれを継承する
+    - Hints・Properties・Log はサブシステムより先に作り、後に壊す（どのサブシステムも
+      作るときからログを書ける）
 
   NOT RESOLVED:
     - Audio / Joysticks は未実装のため常に nil。要求されたら EPMLUnsupported を投げる
-    - TPMLHints / TPMLLog は未実装。Log は当面 Context.LogInfo で標準出力へ
 
   Copyright (C) 2026 papimela contributors
   （zlib ライセンス本文は papimela.inc を参照）
@@ -37,6 +38,8 @@ uses
   PaPiMeLa.Types,
   PaPiMeLa.Errors,
   PaPiMeLa.Core.Base,
+  PaPiMeLa.Properties,
+  PaPiMeLa.Log,
   PaPiMeLa.Events,
   PaPiMeLa.Time,
   PaPiMeLa.Video,
@@ -45,8 +48,6 @@ uses
 type
   TPMLSubsystem  = (Video, Audio, Joystick, Gamepad, Haptic, TextInput);
   TPMLSubsystems = set of TPMLSubsystem;
-
-  TPMLLogLevel = (Verbose, Debug, Info, Warn, Error_);
 
   { 単調増加時刻と、待つこと。どれも Context を要らないので class 関数
     （TPMLTimerService.Delay(16) とも Ctx.Timer.Delay(16) とも書ける）。
@@ -88,7 +89,10 @@ type
     PreferredVideo    : String;
     // イベントキューの容量（イベント数）。1 以上。
     EventQueueCapacity: Integer;
-    MinimumLogLevel   : TPMLLogLevel;
+    // ヒント PAPIMELA_LOGGING で決まらなかったカテゴリの優先度（TPMLLog.Create の
+    // ABaseDefault）。既定は Info で、全部のカテゴリが Info から出る。Invalid なら SDL と
+    // 同じ既定（APP は Info、他の多くは Error_）。
+    MinimumLogLevel   : TPMLLogPriority;
     class function Default: TPMLContextOptions; static;
     class operator Initialize(var AOptions: TPMLContextOptions);
   private
@@ -102,20 +106,24 @@ type
     FVideo     : TPMLVideoSystem;
     FTextInput : TPMLTextInputSystem;
     FSubsystems: TPMLSubsystems;
-    FMinLevel  : TPMLLogLevel;
+    FHints     : TPMLHints;
+    FProperties: TPMLProperties;
+    FLog       : TPMLLog;
   public
     constructor Create(ASubsystems: TPMLSubsystems); overload;
     constructor Create(ASubsystems: TPMLSubsystems;
       const AOptions: TPMLContextOptions); overload;
     destructor Destroy; override;
 
-    procedure Log(ALevel: TPMLLogLevel; const AMsg: String);
-    procedure LogFmt(ALevel: TPMLLogLevel; const AFmt: String; const AArgs: array of const);
     // AProc をメインスレッドで動かす（SDL_RunOnMainThread）。どのスレッドから呼んでもよい。
     // 他のスレッドからなら次の Events.Pump（Poll / Wait の中も）で動く。AWait なら動き終わる
     // まで待ち、動いたら True（Context が先に壊れたら False）。
     function  RunOnMainThread(AProc: TPMLMainThreadProc; AWait: Boolean = False): Boolean;
 
+    // ヒント（SDL_SetHint 系）、大域のプロパティ（SDL_GetGlobalProperties）、ログ（SDL_Log 系）。
+    property Hints     : TPMLHints           read FHints;
+    property Properties: TPMLProperties      read FProperties;
+    property Log       : TPMLLog             read FLog;
     property Events    : TPMLEventQueue      read FEvents;
     property Timer     : TPMLTimerService    read FTimer;
     property Video     : TPMLVideoSystem     read FVideo;
@@ -131,7 +139,7 @@ begin
   AOptions.PreferredTextInput := '';
   AOptions.PreferredVideo := '';
   AOptions.EventQueueCapacity := 256;
-  AOptions.MinimumLogLevel := TPMLLogLevel.Info;
+  AOptions.MinimumLogLevel := TPMLLogPriority.Info;
 end;
 
 class operator TPMLContextOptions.Initialize(var AOptions: TPMLContextOptions);
@@ -215,7 +223,9 @@ begin
     raise EPMLArgument.CreateFmt('EventQueueCapacity must be at least 1 (got %d)',
       [AOptions.EventQueueCapacity]);
   // AOptions は値で読むだけで、Context は覚えない。
-  FMinLevel := AOptions.MinimumLogLevel;
+  FHints := TPMLHints.Create;
+  FProperties := TPMLProperties.Create;
+  FLog := TPMLLog.Create(FHints, AOptions.MinimumLogLevel);
 
   // 生成順 = 破棄の逆順。Events と Timer は常に存在する。
   FEvents := TPMLEventQueue.Create(Self, Self, AOptions.EventQueueCapacity);
@@ -224,7 +234,7 @@ begin
   if TPMLSubsystem.Video in ASubsystems then
   begin
     FVideo := TPMLVideoSystem.Create(Self, Self, FEvents, AOptions.PreferredVideo);
-    LogFmt(TPMLLogLevel.Info, 'video backend: %s', [FVideo.BackendName]);
+    FLog.Info(PML_LOG_CATEGORY_VIDEO, 'video backend: ' + FVideo.BackendName);
   end;
   if TPMLSubsystem.Audio in ASubsystems then
     raise EPMLUnsupported.Create('the Audio subsystem is not implemented yet');
@@ -239,7 +249,7 @@ begin
     FTextInput := TPMLTextInputSystem.Create(Self, Self, FEvents,
       AOptions.PreferredTextInput, FVideo);
     FEvents.KeyFilter := FTextInput as IPMLKeyFilter;
-    LogFmt(TPMLLogLevel.Info, 'text input backend: %s', [FTextInput.BackendName]);
+    FLog.Info(PML_LOG_CATEGORY_INPUT, 'text input backend: ' + FTextInput.BackendName);
   end;
 end;
 
@@ -252,28 +262,16 @@ begin
   FreeAndNil(FVideo);
   FreeAndNil(FTimer);
   FreeAndNil(FEvents);
+  // Log はヒントの呼び出しを外すので、Hints より先に壊す
+  FreeAndNil(FLog);
+  FreeAndNil(FProperties);
+  FreeAndNil(FHints);
   inherited Destroy;
-end;
-
-procedure TPMLContext.Log(ALevel: TPMLLogLevel; const AMsg: String);
-const
-  Names: array[TPMLLogLevel] of String = ('VERBOSE', 'DEBUG', 'INFO', 'WARN', 'ERROR');
-begin
-  if ALevel < FMinLevel then
-    Exit;
-  // TPMLLog（#11 章の Log ユニット）ができたらそちらへ委譲する。
-  WriteLn(ErrOutput, Format('[papimela/%s] %s', [Names[ALevel], AMsg]));
 end;
 
 function TPMLContext.RunOnMainThread(AProc: TPMLMainThreadProc; AWait: Boolean): Boolean;
 begin
   Result := FEvents.RunOnMainThread(AProc, AWait);
-end;
-
-procedure TPMLContext.LogFmt(ALevel: TPMLLogLevel; const AFmt: String;
-  const AArgs: array of const);
-begin
-  Log(ALevel, Format(AFmt, AArgs));
 end;
 
 end.

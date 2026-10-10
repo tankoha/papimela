@@ -20,6 +20,8 @@
 //   PaPiMeLa.Time
 //   PaPiMeLa.Atomic
 //   PaPiMeLa.Threading
+//   PaPiMeLa.Properties
+//   PaPiMeLa.Log
 //   PaPiMeLa.App
 //   PaPiMeLa.Video.Backend
 //   PaPiMeLa.TextInput.Backend
@@ -408,6 +410,27 @@ end;
 procedure PMLCPUPause;
 begin
   PaPiMeLa.Atomic.PMLCPUPause;
+end;
+
+// ---- PaPiMeLa.Properties
+function PMLStringBoolean(const AValue: String; ADefault: Boolean): Boolean;
+begin
+  Result := PaPiMeLa.Properties.PMLStringBoolean(AValue, ADefault);
+end;
+
+function PMLStringInteger(const AValue: String; ADefault: Integer): Integer;
+begin
+  Result := PaPiMeLa.Properties.PMLStringInteger(AValue, ADefault);
+end;
+
+function PMLStrToInt64C(const AValue: String): Int64;
+begin
+  Result := PaPiMeLa.Properties.PMLStrToInt64C(AValue);
+end;
+
+function PMLStrToFloatC(const AValue: String): Double;
+begin
+  Result := PaPiMeLa.Properties.PMLStrToFloatC(AValue);
 end;
 
 // ---- PaPiMeLa.Video.Backend

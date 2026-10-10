@@ -1,79 +1,77 @@
 # 引き継ぎ資料
 
-新しいセッションは、`CLAUDE.md` の次にこれを読む。最終更新: 2026-10-05（#45 のコミット `31d4d09` の次）。
+新しいセッションは、`CLAUDE.md` の次にこれを読む。最終更新: 2026-10-10（#5 Log・#6 Properties とヒントのコミットの次）。
 
-> **2026-10-05 の手元のセッションで**: クラウドの作業（ブランチ `claude/zen-mayer-sjyn3o`）を**早送りで `master` に入れた**
-> （持ち主の判断）。§5.1 の手元の検査のうち自動で判定できるものはすべて通った（23 本・724 件、`docs/TEST-LOG.md` の冒頭）。
-> 対話の確認（`demo_japanese_input`、`demo_pointer_constraints`、Pong）も 2026-10-06 に持ち主が済ませ、すべて想定どおりだった
-> （`docs/TEST-LOG.md` の冒頭と T-09 の節）。**手元の確認は残っていない。** 次は §3 の候補と §8 の保留中の判断へ。
+> **2026-10-10 の手元のセッションで**: §8 の保留中の判断を持ち主に聞いて片付け（README に SDL の不具合 3 件と浮動小数点の
+> 例外を足した、D-44 の丸めは四捨五入のまま、Sonnet の疑い 3 つを実物で確かめた）、見つかった D-53（スワップ間隔）を
+> papimela 側で直し、#5・#6 を入れた。表示サーバ無しの 26 本はすべて通り、手元専用は GL の 3 本だけ流し直した
+> （`docs/TEST-LOG.md` の冒頭）。**手元の対話の確認は残っていない。** 次は §3 の候補と §8 の保留中の判断へ。
 
 ## 1. 今どこにいるか
 
 | 項目 | 状態 |
 |---|---|
 | リポジトリ | https://github.com/tankoha/papimela（公開、Issues 有効）。手元のセッションは `master` に直接 push、クラウドのセッションは指定のブランチへ push して、手元で早送りマージする |
-| CI | 緑。rawpaco 激辛、checkorigin、アンブレラの古さ（`genumbrella.bb --check`）、図の検査、表示サーバ無しのテスト 12 本、Pong の自己検査、GLES2 と ソフトウェアのドライバの画素比較（llvmpipe）。ジョブ 60 分・GLES2 の手順 5 分の時間制限つき |
-| テスト | 23 本、724 件、すべて成功（`docs/TEST-LOG.md`。2026-10-05 に手元の実機で全部流し直した） |
-| 不具合 | 52 件。うち上流 SDL の 4 件（D-18、D-36、D-38、D-42）は未報告（方針は `CLAUDE.md`） |
-| 規模 | 手書き 42 ユニット + 生成（Wayland プロトコル 21、キーボードの表 2、EGL / GLES2 の定数 2、DebugText の字形 1、アンブレラ 2）。約 3 万行 |
+| CI | 緑。rawpaco 激辛、checkorigin、アンブレラの古さ（`genumbrella.bb --check`）、図の検査、表示サーバ無しのテスト 26 本、Pong の自己検査、GLES2 と ソフトウェアのドライバの画素比較（llvmpipe）。ジョブ 60 分・GLES2 の手順 5 分の時間制限つき |
+| テスト | 表示サーバ無しの 26 本・1031 件はすべて成功（2026-10-10 に手元で作り直して全部流した）。手元専用と対話の検査は `docs/TEST-LOG.md` の各行 |
+| 不具合 | 57 件。うち上流 SDL の 9 件は未報告（D-53 は SDL 自身が FIXME で知っている。他の 8 件は報告するかを検討中。方針は `CLAUDE.md`） |
+| 規模 | 手書き 52 ユニット（`src/*.pas`）+ 生成（Wayland プロトコル 21、キーボードの表 2、EGL / GLES2 の定数 2、DebugText の字形 1、アンブレラ 2）。約 4.2 万行 |
 
 ### 動いているもの
 
 Wayland のウィンドウ（xdg-shell、configure の往復、最大化・最小化、隠す・出す）、シート
 （xkb のキーボード、ポインタ、タッチ、ポインタ拘束、カーソル形状）、キーボードの状態と
 SDL と同じ値のスキャンコード・キーコード（配列ごとのキーマップ）、イベントキュー、
-fcitx5 経由の IME（全文節・周辺テキスト・周辺削除）、ピクセル形式、サーフェス、BMP、
+IME（fcitx5・IBus・text-input-v3。全文節・周辺テキスト・周辺削除）、ピクセル形式、サーフェス、BMP、
 ブリッタ、レンダラ（ソフトウェアと OpenGL ES 2.0。どちらもウィンドウへ VSync つき。拡大率、論理解像度 5 方式、
 ウィンドウ座標との変換、DebugText、回転・反転・平行四辺形・敷き詰め・9 つ分け、描画先テクスチャ）、
 クリップボードとプライマリ選択、ドラッグ＆ドロップ（受信と、こちらから始めるドラッグ。Flatpak 向けの document-portal も）、
-EGL の GL コンテキスト、ヘッドレスのダミーのビデオ、待つ API（Delay / DelayNS / DelayPrecise）、
+EGL の GL コンテキスト（スワップ間隔はコンテキストごと）、ヘッドレスのダミーのビデオ、待つ API・タイマー・スレッド・不可分操作、
+**ログ（`Ctx.Log`）・ヒント（`Ctx.Hints`、`PAPIMELA_LOGGING` など）・プロパティの表（`TPMLProperties`、`Ctx.Properties`）**、
 バックエンドの登録（`PaPiMeLa.Backends`）、アンブレラ（`uses PaPiMeLa`）、`TPMLApplication`、サンプルの Pong。
 
 ### 設計書第 11 章の進み具合
 
-済み（一部を含む）: #1–4、#10、#12–17（#17 の `.GL` は未）、#22、#24（`Events.Keymap`。押下状態は
+済み（一部を含む）: #1–10、#12–17（#17 の `.GL` は未）、#22、#24（`Events.Keymap`。押下状態は
 `PaPiMeLa.Events` の `TPMLKeyboardState`）、#25 の一部（マウスとタッチの状態機械は `PaPiMeLa.Events`）、
 #26–29、#31–39、#41–43（#41 の残りは YUV・パレット・PIXELART などのテクスチャの種類）、
-#7、#8、#9、#45、#46、#47、#48、#49、#50、#64、#70、#71。
+#45、#46、#47、#48、#49、#50、#64、#70、#71。
 
-未着手: #5–6（Log、Properties）、#11、#18–21、#23、#30、#40、#44、
+未着手: #11、#18–21、#23、#30、#40、#44、
 #51–63（オーディオ、ジョイスティック、ゲームパッド、ハプティクス）、#65–69。
 
-## 2. 前のセッション（2026-10-02〜05）でしたこと
-
-クラウドのセッション。4 つのコミット（すべて `claude/zen-mayer-sjyn3o`）:
+## 2. 前のセッション（2026-10-10、手元）でしたこと
 
 | コミット | 内容 | 担当 | 検査 |
 |---|---|---|---|
-| `d6970e5` | **論理解像度（5 方式）・拡大率・ウィンドウ座標との変換・DebugText**（#41、F-4 / F-5）。字形の生成器 `tools/gendebugfont.bb`。Pong を書き換え | Opus | T-23（49 件）を先に書いた。**SDL を実際に作って同じ 26 場面を描き、画素で比べた**（20 場面一致、残りは理由が分かっている）。GLES2 との比較に 4 場面 |
-| `fa46f49` | 合成の丸めのコメントの誤りを直した（D-44） | Opus | — |
-| `8835f76` | **待つ API**（`PaPiMeLa.Time`：Delay / DelayNS / DelayPrecise、#9 の一部、F-6）と **Context のオプションを record に**（F-7） | Time は Sonnet、F-7 は Opus | T-24（18 件）、T-11 に 5 件 |
-| `31d4d09` | **バックエンドの登録・`PaPiMeLa.Backends`・アンブレラ `PaPiMeLa`・`TPMLApplication`**（#45） | Sonnet（interface と検査は Opus） | T-25（29 件）、T-26（33 件） |
-
-見つけた不具合: D-42（SDL の DebugText が U+00BE〜U+00FF を「字形無し」で描く。SDL を作って実測）、
-D-43（ソフトウェアのドライバがテクスチャの変調色を実行時に読んでいた）、D-44（上の丸めのコメント）、
-D-45（検査で `setitimer` へ `const` の record を渡し、C に NULL が届いていた。Sonnet が strace で発見）。
+| `2572a2d` | README に SDL の不具合 3 件（D-36、D-38、D-42）と、GL で浮動小数点の例外が無効になること（D-40）を載せた。D-44 は四捨五入のまま（持ち主の判断） | Opus | — |
+| `57c42f1` | Sonnet の疑い 3 つを SDL の実物で確かめた。スワップ間隔が全体で 1 つ（**D-53**）は本物、EGL 1.5 の判定と面無しの MakeCurrent は不具合ではない | Opus | 使い捨て検証 |
+| `1c17b36` | **スワップ間隔をコンテキストごとに**（D-53。持ち主の判断）。途中で、Wayland の Restore が最小化を解けないことを測って確かめた | Opus | T-21 に 7 件（先に書き、直す前に 4 件落ちた。変異 3 通り） |
+| （この次） | **Log（#5）・Properties とヒント（#6）**。Context が Log・Hints・Properties を持つ。SDL の誤り 4 つ（D-54〜D-57）を見つけ、papimela では直した | API・検査・Context への組み込みは Opus、実装は qwen を Opus が直した（解析 3 関数は書き直し） | T-45（95 件）、T-46（46 件）。空の実装で 75 件・42 件落ちた。変異 19 通り（18 通りが捕まる） |
 
 このセッションで分かったこと・やり方:
 
-- **SDL の実物を作って比べる**のが強い。表示サーバ無しで静的に作れる（§5）。手で求めた期待値の誤り
-  （ブレゼンハムの辿り方）と、ヘッダのコメントの誤り（字形の絵が左右逆）も、実物で決着した
-- **Sonnet は検査の誤りも見つけてくる**（#9 で 2 件、#45 でコメントの入れ子 1 件）。言われたら
-  鵜呑みにせず、自分で辿り直して確かめてから直す（今回は 3 件とも正しかった）
-- 突然変異（わざと誤りを入れて検査が落ちるか）を毎回やった。#41 で 9 通り、#9 で 6 通り、#45 で 9 通り。
-  **1 つ目で歯の無い検査が見つかった**（終点を描く規則。閉じた枠しか描いていなかった）
-- FPC の実測: record の `class operator Initialize` は 3.2.2 で効く（ただし「初期化されていない」の警告は出る）。
-  **type helper は別名にできない**（派生させて置く）。cdecl の `const` の record は値渡しになる
-- アンブレラの導入で、**具象バックエンドは uses したものだけが使える**ようになった。手元専用の
-  プログラムは必要なものを uses しているか、実行ファイルのクラス名で確かめた（`demo_render_window` の
-  gles2 が壊れるところだったのを直した）
+- **SDL の実物は、作らなくても手元にある**: Ubuntu 26.04 に SDL 3.4.2 の共有ライブラリ（`/usr/lib/x86_64-linux-gnu/libSDL3.so.0`）
+  が入っている。cmake も ninja も無いが、`reference/SDL/include` のヘッダで C を書き、その .so に直接リンクすれば呼べる
+  （`gcc -I reference/SDL/include x.c /usr/lib/x86_64-linux-gnu/libSDL3.so.0`）。比べる前に、該当の関数が参照版と同じ中身かを
+  `git -C reference/SDL fetch --depth=1 origin refs/tags/release-3.4.2` と `git diff FETCH_HEAD HEAD -- <ファイル>` で確かめる
+- 検査の期待値を **SDL の実物で測った表**から取ると、移植で直すべき誤り（D-54〜D-57）が自然に見つかる。測る前に読んで
+  気づいた誤りも、測ってから記録した
+- qwen の実装は今回も読んでから直した（`CLAUDE.md` の qwen の節に実例を足した）。検査を先に書いていたので、どこが
+  誤りかがすぐ分かった
 
 ## 3. 次の候補（おすすめ順）
 
-1. **Log（#5、Low）・Properties とヒント（#6、Low）**: 基盤の残り。Atomic（#7）は 2026-10-09 に済んだ（一度だけの初期化 `TPMLInitState` もあるので、Log と Properties の遅延初期化に使える）。Threading（#8）・RunOnMainThread・タイマー（#9）は 2026-10-06 に済んだ。ヒントが入ると SDL の THREAD_PRIORITY_POLICY（実時間スケジューリング）などに進める。クリップボード（#38 のうちクリップボードとプライマリ選択）は 2026-10-06、D&D の受信は 2026-10-09、ドラッグを始める側と document-portal は 2026-10-10 に済んだ。IME は IBus（#48）・text-input-v3（#49）とも 2026-10-06 に済んだ。
-   IME の残り: 埋め込み候補（`TextEditingCandidates`）、IBus の ForwardKeyEvent、ibus-anthy など他のエンジンの属性の実測、GNOME / KDE での IBus 直結（§7.5 の要検証）。IBus の検査環境は `tools/ibus-sandbox/`（ibus + ibus-mozc を入れた Ubuntu 24.04 の最小 rootfs を bwrap で隔離。デスクトップの fcitx5 と混ざらない）。実測の結果は `spikes/RESULTS.md` のスパイク 3
+1. **ヒントの残り（#6 の続き、小さい）**: `PAPIMELA_VIDEO` と `PAPIMELA_IME` を、環境変数を直接読むのをやめてヒント
+   （`Ctx.Hints`）に通す。そのためには、Context を作る前にヒントを置く手段が要る（SDL は `SDL_Init` の前に `SDL_SetHint`
+   できる。papimela は Context がヒントを持つ）。案は `TPMLContextOptions` にヒントの組を持たせること。§8 で持ち主に聞く。
+   ヒントが通れば SDL の THREAD_PRIORITY_POLICY（実時間スケジューリング）などに進める。
+   既存のコードの `FLastNonFatalError` のような「黙って覚える」所を `Ctx.Log` へ流すのも、この続きでできる
 2. **オーディオ（#51 以降）**: 大きな段階。PipeWire から
 3. **レンダラのテクスチャの種類（#41 / #43）**: YUV、パレット（INDEX8）、PIXELART の拡大。描画先テクスチャ・回転・9-grid / タイルは 2026-10-09 に済んだ
+4. IME の残り: 埋め込み候補（`TextEditingCandidates`）、IBus の ForwardKeyEvent、ibus-anthy など他のエンジンの属性の実測、GNOME / KDE での IBus 直結（§7.5 の要検証）。IBus の検査環境は `tools/ibus-sandbox/`（ibus + ibus-mozc を入れた Ubuntu 24.04 の最小 rootfs を bwrap で隔離。デスクトップの fcitx5 と混ざらない）。実測の結果は `spikes/RESULTS.md` のスパイク 3
+
+済んだもの（2026-10-10、2 つ目）: Log（#5）・Properties とヒント（#6）、スワップ間隔をコンテキストごとに（D-53）。§2 の表。
 
 済んだもの（2026-10-10）: ドラッグを始める側（`Ctx.Video.Clipboard.StartDrag`。SDL に無い papimela 独自の API。T-42、対話の `demo_drag` は T-44）と
  document-portal（`PaPiMeLa.Platform.DocumentPortal`。鍵からパス、パスから鍵。T-43 は手元専用）。ドラッグで渡すポータルの鍵は
@@ -109,7 +107,7 @@ Pong もすべて書き換え、今は `uses SysUtils, Math, PaPiMeLa` だけで
 表示サーバ無しで通るもの（CI と同じ）:
 
 ```bash
-for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_render_transform test_render_target test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_drop test_drag_source test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella; do
+for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_render_transform test_render_target test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_drop test_drag_source test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log; do
   fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/$t test/$t.pas && ./test/$t
 done
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -oexamples/pong examples/pong.pas && ./examples/pong --selftest
@@ -135,7 +133,7 @@ env -u WAYLAND_DISPLAY LIBGL_ALWAYS_SOFTWARE=1 ./test/test_render_gles2   # Mesa
 cd papimela && mkdir -p lib
 B='fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib'
 # 0. 表示サーバ無しの分（CI と同じ。手元の新しい Mesa でも通るか）
-for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella; do
+for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log; do
   $B -otest/$t test/$t.pas && ./test/$t | tail -1
 done
 # 1. 実機の Wayland（自動判定。最後の行が「結論」で終わればよい）
@@ -205,7 +203,8 @@ man-db などの設定は所有者の切り替えで失敗するが、`dpkg -r -
 | rawpaco | `../rawpaco`（https://github.com/tankoha/rawpaco。`make` で作る）。CI は `main` を取る |
 | SDL のソース | `reference/SDL`（gitignore 済み）。版と取り直し方は `docs/ORIGIN.md` |
 | Babashka | 生成器と checkorigin と qwen-gen が使う |
-| SDL の実物 | 移植の結果を SDL と画素で比べるときに作る。表示サーバ無しで静的に作れる: `cmake -G Ninja -S reference/SDL -B <作業用> -DSDL_UNIX_CONSOLE_BUILD=ON -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TESTS=OFF` に、使わないもの（`-DSDL_AUDIO=OFF` など）を足す。`SDL_CreateSoftwareRenderer` でサーフェスへ描けば比べられる（`docs/TEST-LOG.md` の使い捨て検証） |
+| SDL の実物（手元） | **作らなくても使える**: システムの SDL 3.4.2（`/usr/lib/x86_64-linux-gnu/libSDL3.so.0`）に、`reference/SDL/include` のヘッダで書いた C を直接リンクする（§2）。参照版と中身が違わないかを `git diff` で確かめてから比べる。SDL3 は起動時の環境を写して持つので、環境変数は起動時に渡す（途中の `setenv` は見えない） |
+| SDL の実物（作る） | 移植の結果を SDL と画素で比べるときに作る。表示サーバ無しで静的に作れる: `cmake -G Ninja -S reference/SDL -B <作業用> -DSDL_UNIX_CONSOLE_BUILD=ON -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TESTS=OFF` に、使わないもの（`-DSDL_AUDIO=OFF` など）を足す。`SDL_CreateSoftwareRenderer` でサーフェスへ描けば比べられる（`docs/TEST-LOG.md` の使い捨て検証） |
 | qwen | 手元の ollama の `qwen2.5-coder:14b`。呼び出しは `tools/qwen-gen.bb`。**クラウドには無い**ので、Low の作業は手元に戻るか、Sonnet に回す |
 | クラウドのセッション | 毎回まっさらな Ubuntu 24.04（root）。最初に揃える: `apt-get install -y fpc libegl1 libgles2 libegl-mesa0 libgl1-mesa-dri`、`git clone https://github.com/tankoha/rawpaco.git ../rawpaco && make -C ../rawpaco`、`docs/ORIGIN.md` の手順で `reference/SDL`、Babashka は `curl -sSL https://raw.githubusercontent.com/babashka/babashka/master/install \| bash`。SDL の実物を作るなら `cmake ninja-build` も（入っていた）。GitHub の CI の状態は `https://api.github.com/repos/tankoha/papimela/actions/runs?head_sha=<コミット>` で読める |
 | 手元の機械 | labwc（Wayland）、画面 DP-3 2560x1080 200 Hz、Radeon RX 9070 + 内蔵 Raphael、Mesa 26.0.8、Ubuntu 26.04、fcitx5-mozc |
@@ -226,13 +225,23 @@ man-db などの設定は所有者の切り替えで失敗するが、`dpkg -r -
 - 公開層の interface 部を変えたら `tools/genumbrella.bb` で作り直す（CI の `--check` が落ちる）。type helper は別名にできない
 - C の関数へ構造体を渡すときは `const` の record でなくポインタで宣言する（cdecl の `const` は値渡しになる。D-45）
 - レンダラは描画を**積んでから実行する**。積んだ後に変えられる値（テクスチャの変調色など）は積むときに写す（D-43。D-39 も同じ隙間）
+- **変異の検査の後は `-B` で作り直す**。元に戻したソースが同じ秒に書き戻されると、最後の変異の `.ppu` が残り、正しいものが落ちる（2026-10-10 に T-45 / T-46 で踏んだ。D-34 と同じ）
+- x86_64 の FPC では、型の無い小数の定数（`0.01`）は Extended で比べられる。Double の値と `=` で比べるなら型付きの定数にする
+- FPC の `Format('%.6f')` は C の `%f` とちょうど半分の丸めと -0・inf・nan の書き方が違う（`docs/TEST-LOG.md` の使い捨て検証）
+- Wayland の `Restore` は最小化を解けない（xdg-shell に要求が無い）。最小化した窓にはフレームの合図が来ないので、GL の `SwapGL` は 1/20 秒ごとの打ち切りで進む。最小化の後に速さを測る検査は新しい窓で測る
+- ヒントの呼び出しはヒントの排他を持ったまま来る。呼び出しの中で別の排他を取る部品は、自分からヒントを読むときに逆の順にならないようにする（`TPMLLog.ResetPriorities` の PORT-NOTE）
 
 ## 8. 保留中の判断（利用者に聞く）
 
-- SDL の不具合 D-36、D-38、D-42 を README の「SDL にバグ報告を返すべきか」の節に足すか（今は D-18 だけ）
-- ソフトウェアのブリッタの半透明の丸めが SDL と 1 違う（SDL は切り捨てで `0x9f`、papimela は四捨五入で `0xa0`。D-44）。
-  SDL に揃えるか。揃えるなら T-15 の参照実装と T-22 の許容差も見直す
-- GL を使うと浮動小数点の例外が無効になること（D-40）を README にも書くか
-- Sonnet が挙げた SDL の怪しい点 3 つ（スワップ間隔が全体で 1 つ、EGL 1.5 をちょうど 1.5 で判定、
-  面が無いときに成功を返す MakeCurrent）は**まだ確かめていない**。確かめるまで不具合一覧に載せない
+- 新しく見つけた SDL の不具合 D-54〜D-57 を README の「SDL にバグ報告を返すべきか」の節に足すか（今は D-18、D-36、
+  D-38、D-42、D-53。2026-10-10 に持ち主が D-36・D-38・D-42・D-53 を足すと決めた）
+- Context を作る前にヒントを置く手段（§3 の 1）。`TPMLContextOptions` にヒントの組を持たせるか、別の形か
+- 読んだだけで確かめていない SDL の怪しい点（確かめるまで不具合一覧に載せない。D-57 の補足）: 知らせの中で次の知らせを
+  外すと解放した要素を辿る、`SDL_ResetLogPriorities` とヒントの知らせが逆の順で排他を取る
+- SDL の X11 の GLX の経路では、作った直後のスワップ間隔が 1 だった（SDL の「既定で VSync 無し」が効いていない。
+  D-53 の確認の途中で見た。追っていない。papimela は X11 を持たないので急がない）
 - D-40 の「止まる」側の仕組み（llvmpipe の作業スレッドで例外が起きる）は推測のまま
+
+2026-10-10 に片付いたもの: README に D-36・D-38・D-42 と浮動小数点の例外（D-40）を載せた。D-44 の丸めは四捨五入のまま。
+Sonnet の疑い 3 つを確かめた（D-53 は本物で papimela を直した、残り 2 つは不具合ではない）。Log の既定は今の見え方を保つ
+（`MinimumLogLevel` = Info で全部のカテゴリ。SDL は APP 以外 ERROR）。
