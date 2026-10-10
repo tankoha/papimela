@@ -281,6 +281,16 @@ either:
   placeholder although the font has them. Built SDL, drew "é", got a
   checkerboard.
 
+A fifth one is different in kind. **D-53**: SDL documents the swap interval as
+belonging to "the current OpenGL context", but keeps a single value for the
+whole video device and resets it to 0 every time a context is created. On
+Wayland, creating a second context silently turns vsync off for the first
+window (measured with SDL 3.4.2: 200 fps became roughly 20,000). On X11 with EGL
+the window keeps waiting for vsync, but `SDL_GL_GetSwapInterval` says 0. SDL
+already knows about this one — the Wayland code carries a
+`FIXME: technically, this should be per-context, right?` — so it is less a
+question of whether to tell them than of whether to add anything.
+
 And that is where I'm stuck:
 
 - The policy says **keep the AI out**, and I want to respect that.
@@ -318,6 +328,15 @@ SDL のコードを実際に動かして確かめたもので、どれも報告�
 - **D-42**、`SDL_render.c` の `DrawDebugCharacter`: 「字形の無い文字か」の判定が
   コード点を最後のコード点（255）ではなく字形の数（190）と比べている。字形はあるのに
   ¾ と À〜ÿ が印で描かれる。SDL を作って「é」を描いたら市松模様が出た
+
+5 件目は種類が違う。**D-53**: SDL はスワップ間隔を「現在の OpenGL コンテキストの」
+ものとして説明しているが、値はビデオの装置全体で 1 つしか持たず、コンテキストを
+作るたびに 0 へ戻す。Wayland では、2 つ目のコンテキストを作ると 1 つ目のウィンドウの
+VSync が黙って切れる（SDL 3.4.2 で測ると 200 fps が約 2 万 fps になった）。
+X11 の EGL ではウィンドウは VSync を待ち続けるのに、`SDL_GL_GetSwapInterval` は 0 と
+答える。これは SDL も知っていて、Wayland のコードに
+`FIXME: technically, this should be per-context, right?` と残っている。だから
+知らせるかどうかより、何か付け足すことがあるかどうかの話になる。
 
 そこで止まっている。
 
