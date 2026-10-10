@@ -83,9 +83,11 @@ type
     されていないようだ」と警告するので、普段は Default から書く。 }
   TPMLContextOptions = record
     // 使用する IME バックエンドを明示指定する（'fcitx' / 'ibus' / 'wayland' / 'none'）。
-    // 空なら PAPIMELA_IME 環境変数、それも無ければ自動選択。
+    // ヒント PML_HINT_IME を Override で置く近道（環境変数 PAPIMELA_IME より強い）。
+    // 空ならヒント（Hints か環境変数）、それも無ければ自動選択。
     PreferredTextInput: String;
-    // 使用するビデオバックエンドを明示指定する（'wayland'）。空なら PAPIMELA_VIDEO。
+    // 使用するビデオバックエンドを明示指定する（'wayland'）。ヒント PML_HINT_VIDEO を
+    // Override で置く近道（環境変数 PAPIMELA_VIDEO より強い）。空ならヒント。
     PreferredVideo    : String;
     // イベントキューの容量（イベント数）。1 以上。
     EventQueueCapacity: Integer;
@@ -93,6 +95,9 @@ type
     // ABaseDefault）。既定は Info で、全部のカテゴリが Info から出る。Invalid なら SDL と
     // 同じ既定（APP は Info、他の多くは Error_）。
     MinimumLogLevel   : TPMLLogPriority;
+    // 作り始めに置くヒント（SDL_Init の前の SDL_SetHint にあたる）。例:
+    //   Opts.Hints.Add(PML_HINT_VIDEO, 'dummy');
+    Hints             : TPMLHintSettings;
     class function Default: TPMLContextOptions; static;
     class operator Initialize(var AOptions: TPMLContextOptions);
   private
@@ -224,6 +229,12 @@ begin
       [AOptions.EventQueueCapacity]);
   // AOptions は値で読むだけで、Context は覚えない。
   FHints := TPMLHints.Create;
+  // ヒントはログとバックエンドより先に置く（SDL_Init の前の SDL_SetHint と同じ時機）
+  FHints.Apply(AOptions.Hints);
+  if AOptions.PreferredVideo <> '' then
+    FHints.SetHint(PML_HINT_VIDEO, AOptions.PreferredVideo, TPMLHintPriority.Override);
+  if AOptions.PreferredTextInput <> '' then
+    FHints.SetHint(PML_HINT_IME, AOptions.PreferredTextInput, TPMLHintPriority.Override);
   FProperties := TPMLProperties.Create;
   FLog := TPMLLog.Create(FHints, AOptions.MinimumLogLevel);
 
@@ -233,7 +244,7 @@ begin
 
   if TPMLSubsystem.Video in ASubsystems then
   begin
-    FVideo := TPMLVideoSystem.Create(Self, Self, FEvents, AOptions.PreferredVideo);
+    FVideo := TPMLVideoSystem.Create(Self, Self, FEvents, FHints.GetHint(PML_HINT_VIDEO));
     FLog.Info(PML_LOG_CATEGORY_VIDEO, 'video backend: ' + FVideo.BackendName);
   end;
   if TPMLSubsystem.Audio in ASubsystems then
@@ -247,7 +258,7 @@ begin
   begin
     // ビデオ（あれば）を渡す。text-input-v3 はウィンドウの接続の上で動く。
     FTextInput := TPMLTextInputSystem.Create(Self, Self, FEvents,
-      AOptions.PreferredTextInput, FVideo);
+      FHints.GetHint(PML_HINT_IME), FVideo);
     FEvents.KeyFilter := FTextInput as IPMLKeyFilter;
     FLog.Info(PML_LOG_CATEGORY_INPUT, 'text input backend: ' + FTextInput.BackendName);
   end;

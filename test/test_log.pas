@@ -14,6 +14,7 @@
     5. 絞り込み、末尾の改行、出力の差し替え、前置き、複数のスレッド
     6. 既定の出力（子のプロセスを作って標準エラーを読む）
     7. Context が Log・Hints・Properties を持つ
+    8. Context を作る前のヒント（TPMLContextOptions.Hints。PAPIMELA_VIDEO・PAPIMELA_IME もヒントで選ぶ）
 
   WHY:
     #5 の受け入れ検査。実装より先に書き、空の実装で落ちることを確かめてから渡す。
@@ -32,7 +33,8 @@ uses
   PaPiMeLa.Threading,
   PaPiMeLa.Properties,
   PaPiMeLa.Log,
-  PaPiMeLa.Core;
+  PaPiMeLa.Core,
+  PaPiMeLa.Backends;
 
 function setenv(AName, AValue: PAnsiChar; AOverwrite: LongInt): LongInt; cdecl; external 'c';
 function unsetenv(AName: PAnsiChar): LongInt; cdecl; external 'c';
@@ -526,6 +528,93 @@ begin
   end;
 end;
 
+{ ---- 8. Context を作る前のヒント ---- }
+
+function CreateRaises(ASubsystems: TPMLSubsystems; const AOptions: TPMLContextOptions): Boolean;
+var
+  Ctx: TPMLContext;
+begin
+  Result := False;
+  try
+    Ctx := TPMLContext.Create(ASubsystems, AOptions);
+    Ctx.Free;
+  except
+    on E: EPMLUnsupported do
+      Result := True;
+  end;
+end;
+
+procedure TestHintsBeforeContext;
+var
+  Ctx: TPMLContext;
+  Opts: TPMLContextOptions;
+begin
+  WriteLn;
+  WriteLn('8. Context を作る前のヒント（TPMLContextOptions.Hints）');
+  unsetenv(PML_HINT_LOGGING);
+  unsetenv(PML_HINT_VIDEO);
+  unsetenv(PML_HINT_IME);
+  Opts := TPMLContextOptions.Default;
+  Check(Opts.Hints.Count = 0, '既定では空');
+  Opts.Hints.Add(PML_HINT_LOGGING, 'video=error');
+  Opts.Hints.Add(PML_HINT_VIDEO, 'dummy');
+  Check(Opts.Hints.Count = 2, 'Add で足せる');
+  Ctx := TPMLContext.Create([TPMLSubsystem.Video], Opts);
+  try
+    Check(Ctx.Log.GetPriority(PML_LOG_CATEGORY_VIDEO) = TPMLLogPriority.Error_, 'ログはできた時点でヒントに従う');
+    Check(Ctx.Hints.GetHint(PML_HINT_LOGGING) = 'video=error', '置いたヒントは Ctx.Hints から読める');
+    Check(Ctx.Video.BackendName = 'dummy', 'PAPIMELA_VIDEO のヒントでビデオのバックエンドを選ぶ');
+  finally
+    Ctx.Free;
+  end;
+
+  // 環境変数もヒントとして読む（起動後に setenv で置いたものも見える）
+  setenv(PML_HINT_VIDEO, 'nosuch', 1);
+  Check(CreateRaises([TPMLSubsystem.Video], TPMLContextOptions.Default),
+    '環境変数 PAPIMELA_VIDEO=nosuch を読んで断る（libc の getenv で読む）');
+  Opts := TPMLContextOptions.Default;
+  Opts.Hints.Add(PML_HINT_VIDEO, 'dummy');
+  Check(CreateRaises([TPMLSubsystem.Video], Opts), 'Normal のヒントより環境変数が強い（SDL と同じ）');
+  Opts := TPMLContextOptions.Default;
+  Opts.Hints.Add(PML_HINT_VIDEO, 'dummy', TPMLHintPriority.Override);
+  Ctx := TPMLContext.Create([TPMLSubsystem.Video], Opts);
+  try
+    Check(Ctx.Video.BackendName = 'dummy', 'Override のヒントは環境変数より強い');
+  finally
+    Ctx.Free;
+  end;
+  Opts := TPMLContextOptions.Default;
+  Opts.PreferredVideo := 'dummy';
+  Ctx := TPMLContext.Create([TPMLSubsystem.Video], Opts);
+  try
+    Check((Ctx.Video.BackendName = 'dummy') and (Ctx.Hints.GetHint(PML_HINT_VIDEO) = 'dummy'),
+      'PreferredVideo は Override のヒントを置く近道（今までどおり環境変数より強い）');
+  finally
+    Ctx.Free;
+  end;
+  unsetenv(PML_HINT_VIDEO);
+
+  Opts := TPMLContextOptions.Default;
+  Opts.Hints.Add(PML_HINT_IME, 'none');
+  Ctx := TPMLContext.Create([TPMLSubsystem.TextInput], Opts);
+  try
+    Check(Ctx.TextInput.BackendName = 'none', 'PAPIMELA_IME のヒントで IME のバックエンドを選ぶ');
+  finally
+    Ctx.Free;
+  end;
+  setenv(PML_HINT_IME, 'nosuch', 1);
+  Check(CreateRaises([TPMLSubsystem.TextInput], TPMLContextOptions.Default), '環境変数 PAPIMELA_IME も読む');
+  Opts := TPMLContextOptions.Default;
+  Opts.PreferredTextInput := 'none';
+  Ctx := TPMLContext.Create([TPMLSubsystem.TextInput], Opts);
+  try
+    Check(Ctx.TextInput.BackendName = 'none', 'PreferredTextInput も環境変数より強い');
+  finally
+    Ctx.Free;
+  end;
+  unsetenv(PML_HINT_IME);
+end;
+
 begin
   if ParamStr(1) = '--emit' then
   begin
@@ -543,6 +632,7 @@ begin
   TestOutput;
   TestDefaultOutput;
   TestContext;
+  TestHintsBeforeContext;
 
   WriteLn;
   if Failures = 0 then

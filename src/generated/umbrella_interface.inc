@@ -701,10 +701,14 @@ type
   TPMLProperties = PaPiMeLa.Properties.TPMLProperties;
   TPMLHintPriority = PaPiMeLa.Properties.TPMLHintPriority;
   TPMLHintValue = PaPiMeLa.Properties.TPMLHintValue;
+  TPMLHintSetting = PaPiMeLa.Properties.TPMLHintSetting;
+  TPMLHintSettings = PaPiMeLa.Properties.TPMLHintSettings;
   TPMLHintCallback = PaPiMeLa.Properties.TPMLHintCallback;
   TPMLHints = PaPiMeLa.Properties.TPMLHints;
 const
   PML_HINT_LOGGING = PaPiMeLa.Properties.PML_HINT_LOGGING;
+  PML_HINT_VIDEO = PaPiMeLa.Properties.PML_HINT_VIDEO;
+  PML_HINT_IME = PaPiMeLa.Properties.PML_HINT_IME;
 function PMLStringBoolean(const AValue: String; ADefault: Boolean): Boolean; inline;
 function PMLStringInteger(const AValue: String; ADefault: Integer): Integer; inline;
 function PMLStrToInt64C(const AValue: String): Int64; inline;

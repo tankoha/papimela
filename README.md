@@ -110,7 +110,7 @@ the debug-text font and the umbrella unit). Working:
 There is a playable Pong in `examples/`; the only papimela unit it uses is
 the umbrella `PaPiMeLa`.
 
-38 automated test programs. The 26 that need no display (1,031 assertions)
+38 automated test programs. The 26 that need no display (1,043 assertions)
 run in CI on every push, together with Pong's self-test, the IBus test (against
 an isolated IBus) and the GPU renderer's pixel-by-pixel comparison with the
 software one (on Mesa llvmpipe). The rest need a real Wayland session, a GPU
@@ -243,7 +243,7 @@ Wayland の `text-input-v3` ではこれは表現できない（preedit のス�
 
 `examples/` には遊べる Pong があり、papimela のユニットはアンブレラの `PaPiMeLa` しか使っていない。
 
-自動テストは 38 本。画面の要らない 26 本（1,031 アサーション）は push のたびに CI で走り、
+自動テストは 38 本。画面の要らない 26 本（1,043 アサーション）は push のたびに CI で走り、
 Pong の自己検査、IBus の検査（隔離した IBus を相手に）、GPU のレンダラをソフトウェアのレンダラと
 画素ごとに比べる検査（Mesa の llvmpipe で）も CI で走る。残りは実際の Wayland セッションや GPU や
 fcitx5 が要るので、4 つの対話のデモと速さの計測と一緒に手元で流す。実行の記録は全部

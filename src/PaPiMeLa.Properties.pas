@@ -28,11 +28,8 @@
     - ヒントの変化の知らせは、実際に効いている値（環境変数を含む）が変わったときだけ、
       前後の効いている値で呼ぶ。SDL は環境変数があると前の値を誤って知らせ、変わって
       いないのにも呼ぶ（D-57）
-
-  NOT RESOLVED:
-    - Context を作る前にヒントを置く手段が無い（SDL は SDL_Init の前に SDL_SetHint できる）。
-      当面は環境変数か TPMLContextOptions を使う
-    - PAPIMELA_VIDEO と PAPIMELA_IME は、まだヒントを通さず環境変数を直接読んでいる
+    - Context を作る前のヒント（SDL_Init の前の SDL_SetHint）は TPMLContextOptions.Hints に置く。
+      Context が作り始めに Apply する（2026-10-10 に持ち主が決めた形）
 
   Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
   Copyright (C) 2026 papimela contributors
@@ -52,6 +49,10 @@ uses
 const
   // ログの優先度（PaPiMeLa.Log）。書式は SDL_HINT_LOGGING と同じ。
   PML_HINT_LOGGING = 'PAPIMELA_LOGGING';
+  // ビデオのバックエンドの名前（'wayland'、'dummy'）。空なら登録された順に試す。
+  PML_HINT_VIDEO   = 'PAPIMELA_VIDEO';
+  // IME のバックエンドの名前（'fcitx'、'ibus'、'wayland'、'none'）。空なら自動で選ぶ。
+  PML_HINT_IME     = 'PAPIMELA_IME';
 
 type
   TPMLProperties = class;
@@ -144,6 +145,22 @@ type
     class function Make(const AValue: String): TPMLHintValue; static;
   end;
 
+  // Context を作る前に置くヒント 1 つ（TPMLContextOptions.Hints）。
+  TPMLHintSetting = record
+    Name    : String;
+    Value   : String;
+    Priority: TPMLHintPriority;
+  end;
+
+  { Context を作る前に置くヒントの並び。値型。TPMLContextOptions.Hints に足すと、Context は
+    作り始めに（ログやバックエンドを選ぶより前に）足した順に TPMLHints.SetHint する。 }
+  TPMLHintSettings = record
+    Items: array of TPMLHintSetting;
+    procedure Add(const AName, AValue: String;
+      APriority: TPMLHintPriority = TPMLHintPriority.Normal);
+    function  Count: Integer;
+  end;
+
   // ヒントの効いている値が変わったときに呼ばれる。AddCallback のときは AOld = ANew。
   TPMLHintCallback = procedure(const AName: String;
     const AOld, ANew: TPMLHintValue) of object;
@@ -185,6 +202,9 @@ type
     function  ResetHint(const AName: String): Boolean;
     // SDL_ResetHints。全部の名前に ResetHint をする。
     procedure ResetHints;
+    { ASettings を足した順に SetHint する。置けなかったもの（同じ名前の環境変数があって
+      Override でない、など）は飛ばす（SDL_SetHint が false を返すのと同じ）。 }
+    procedure Apply(const ASettings: TPMLHintSettings);
 
     // 効いている値。置かれていなければ ''。
     function  GetHint(const AName: String): String;
@@ -954,6 +974,24 @@ begin
   Result := Signed(V);
 end;
 
+{ TPMLHintSettings }
+
+procedure TPMLHintSettings.Add(const AName, AValue: String; APriority: TPMLHintPriority);
+var
+  I: Integer;
+begin
+  I := Length(Items);
+  SetLength(Items, I + 1);
+  Items[I].Name := AName;
+  Items[I].Value := AValue;
+  Items[I].Priority := APriority;
+end;
+
+function TPMLHintSettings.Count: Integer;
+begin
+  Result := Length(Items);
+end;
+
 { TPMLHints }
 
 // FPC の GetEnvironmentVariable は「無い」と「空」を区別しないので、libc の getenv を使う。
@@ -1108,6 +1146,14 @@ begin
   finally
     FLock.Unlock;
   end;
+end;
+
+procedure TPMLHints.Apply(const ASettings: TPMLHintSettings);
+var
+  I: Integer;
+begin
+  for I := 0 to High(ASettings.Items) do
+    SetHint(ASettings.Items[I].Name, ASettings.Items[I].Value, ASettings.Items[I].Priority);
 end;
 
 procedure TPMLHints.ResetHints;

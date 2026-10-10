@@ -13,7 +13,7 @@
 |---|---|
 | リポジトリ | https://github.com/tankoha/papimela（公開、Issues 有効）。手元のセッションは `master` に直接 push、クラウドのセッションは指定のブランチへ push して、手元で早送りマージする |
 | CI | 緑。rawpaco 激辛、checkorigin、アンブレラの古さ（`genumbrella.bb --check`）、図の検査、表示サーバ無しのテスト 26 本、Pong の自己検査、GLES2 と ソフトウェアのドライバの画素比較（llvmpipe）。ジョブ 60 分・GLES2 の手順 5 分の時間制限つき |
-| テスト | 表示サーバ無しの 26 本・1031 件はすべて成功（2026-10-10 に手元で作り直して全部流した）。手元専用と対話の検査は `docs/TEST-LOG.md` の各行 |
+| テスト | 表示サーバ無しの 26 本・1043 件はすべて成功（2026-10-10 に手元で作り直して全部流した）。手元専用と対話の検査は `docs/TEST-LOG.md` の各行 |
 | 不具合 | 57 件。うち上流 SDL の 9 件は未報告（D-53 は SDL 自身が FIXME で知っている。他の 8 件は報告するかを検討中。方針は `CLAUDE.md`） |
 | 規模 | 手書き 52 ユニット（`src/*.pas`）+ 生成（Wayland プロトコル 21、キーボードの表 2、EGL / GLES2 の定数 2、DebugText の字形 1、アンブレラ 2）。約 4.2 万行 |
 
@@ -62,11 +62,10 @@ EGL の GL コンテキスト（スワップ間隔はコンテキストごと）
 
 ## 3. 次の候補（おすすめ順）
 
-1. **ヒントの残り（#6 の続き、小さい）**: `PAPIMELA_VIDEO` と `PAPIMELA_IME` を、環境変数を直接読むのをやめてヒント
-   （`Ctx.Hints`）に通す。そのためには、Context を作る前にヒントを置く手段が要る（SDL は `SDL_Init` の前に `SDL_SetHint`
-   できる。papimela は Context がヒントを持つ）。案は `TPMLContextOptions` にヒントの組を持たせること。§8 で持ち主に聞く。
-   ヒントが通れば SDL の THREAD_PRIORITY_POLICY（実時間スケジューリング）などに進める。
-   既存のコードの `FLastNonFatalError` のような「黙って覚える」所を `Ctx.Log` へ流すのも、この続きでできる
+1. **ヒントを使う側（小さい）**: ヒントは Context を作る前から置ける（`TPMLContextOptions.Hints`、2026-10-10）。
+   `PAPIMELA_VIDEO` / `PAPIMELA_IME` もヒントで選ぶようになった。次は SDL のヒントのうち papimela に効くもの
+   （THREAD_PRIORITY_POLICY の実時間スケジューリングなど）を足すこと。既存のコードの `FLastNonFatalError` のような
+   「黙って覚える」所を `Ctx.Log` へ流すのも、ここでできる
 2. **オーディオ（#51 以降）**: 大きな段階。PipeWire から
 3. **レンダラのテクスチャの種類（#41 / #43）**: YUV、パレット（INDEX8）、PIXELART の拡大。描画先テクスチャ・回転・9-grid / タイルは 2026-10-09 に済んだ
 4. IME の残り: 埋め込み候補（`TextEditingCandidates`）、IBus の ForwardKeyEvent、ibus-anthy など他のエンジンの属性の実測、GNOME / KDE での IBus 直結（§7.5 の要検証）。IBus の検査環境は `tools/ibus-sandbox/`（ibus + ibus-mozc を入れた Ubuntu 24.04 の最小 rootfs を bwrap で隔離。デスクトップの fcitx5 と混ざらない）。実測の結果は `spikes/RESULTS.md` のスパイク 3
@@ -233,13 +232,12 @@ man-db などの設定は所有者の切り替えで失敗するが、`dpkg -r -
 
 ## 8. 保留中の判断（利用者に聞く）
 
-- Context を作る前にヒントを置く手段（§3 の 1）。`TPMLContextOptions` にヒントの組を持たせるか、別の形か
 - 読んだだけで確かめていない SDL の怪しい点（確かめるまで不具合一覧に載せない。D-57 の補足）: 知らせの中で次の知らせを
   外すと解放した要素を辿る、`SDL_ResetLogPriorities` とヒントの知らせが逆の順で排他を取る
 - SDL の X11 の GLX の経路では、作った直後のスワップ間隔が 1 だった（SDL の「既定で VSync 無し」が効いていない。
   D-53 の確認の途中で見た。追っていない。papimela は X11 を持たないので急がない）
 - D-40 の「止まる」側の仕組み（llvmpipe の作業スレッドで例外が起きる）は推測のまま
 
-2026-10-10 に片付いたもの: README に D-36・D-38・D-42 と浮動小数点の例外（D-40）を載せた。同日、D-53〜D-57 と「現状」の数字も載せた。D-44 の丸めは四捨五入のまま。
+2026-10-10 に片付いたもの: README に D-36・D-38・D-42 と浮動小数点の例外（D-40）を載せた。同日、D-53〜D-57 と「現状」の数字も載せた。Context を作る前のヒントは `TPMLContextOptions.Hints` に置く形にして、実装した。D-44 の丸めは四捨五入のまま。
 Sonnet の疑い 3 つを確かめた（D-53 は本物で papimela を直した、残り 2 つは不具合ではない）。Log の既定は今の見え方を保つ
 （`MinimumLogLevel` = Info で全部のカテゴリ。SDL は APP 以外 ERROR）。

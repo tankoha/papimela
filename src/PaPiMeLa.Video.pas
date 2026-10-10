@@ -834,9 +834,8 @@ begin
   inherited Create(AContextRef, AOwner);
   FQueue := AQueue;
   FNextWindowID := 1;
+  // APreferred は Context がヒント PML_HINT_VIDEO（環境変数を含む）から決めた名前
   Wanted := Trim(APreferred);
-  if Wanted = '' then
-    Wanted := Trim(GetEnvironmentVariable('PAPIMELA_VIDEO'));
 
   Names := PMLVideoBackendNames;
   if Wanted <> '' then
