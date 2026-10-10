@@ -115,6 +115,15 @@ FPC 3.2.2. `docs/DESIGN.md` is the design; `docs/TEST-LOG.md` records what has
 actually been run; `docs/DEFECTS.md` lists every defect found so far, fixed ones
 included, because the ones already fixed are the ones most likely to come back.
 
+One thing that differs from a plain FPC program: **FPC enables floating-point
+exceptions by default, and C code assumes they are off.** GL drivers written in
+C routinely perform invalid operations, which under FPC's default either crash
+or hang a driver thread (D-40). So when papimela loads EGL, before any GL
+context exists, it masks all floating-point exceptions on the calling thread.
+In a program that uses GL, a division by zero then gives infinity or NaN
+instead of raising — the same as a C program using SDL. Programs that do not
+use GL keep FPC's default.
+
 ### A closing thought
 
 SDL builds its vtables by hand, in C, on purpose, and it has carried the
@@ -220,6 +229,14 @@ FPC 3.2.2。`docs/DESIGN.md` が設計、`docs/TEST-LOG.md` が実際に何を�
 記録、`docs/DEFECTS.md` がこれまでに見つけた不具合の全件である。修正済みのものも
 載せてあるのは、**一度直したものが一番戻ってきやすい**からだ。
 
+素の FPC のプログラムと違うところが 1 つある。**FPC は浮動小数点の例外を既定で
+有効にしていて、C のコードは無効であることを前提にしている。** C で書かれた GL の
+ドライバは不正な演算を普通に起こすので、FPC の既定のままだと落ちるか、ドライバの
+スレッドが止まる（D-40）。そこで papimela は EGL を読み込むとき（GL のコンテキストを
+作るより前）に、呼んだスレッドの浮動小数点の例外をすべて無効にする。GL を使う
+プログラムでは、以後 0 除算などが例外にならず無限大や NaN になる（C で SDL を使う
+プログラムと同じ）。GL を使わないプログラムは FPC の既定のまま。
+
 ### 最後に
 
 手書きの vtable を分解してクラス階層に組み直す作業をこれだけ続けてきて、
@@ -248,6 +265,22 @@ compares that argument with itself, so a validation that *looks* like a
 validation always succeeds. It is in `docs/DEFECTS.md`. It has not been
 reported.
 
+It is not the only one. Three more are in `docs/DEFECTS.md`, each confirmed by
+running SDL's own code rather than by reading alone, and none of them reported
+either:
+
+- **D-36**, `imKStoUCS.c:312`: one range check starts six values before its
+  table, so keysyms 0x58a–0x58f index in front of the array. Calling the
+  function with 0x58a crashed with SIGSEGV.
+- **D-38**, `SDL_EGL_CreateSurface` in `SDL_egl.c`: `eglGetError()` is read
+  once to decide whether to retry and again to build the message. Reading it
+  clears it, so the error SDL records says `EGL_SUCCESS`.
+- **D-42**, `DrawDebugCharacter` in `SDL_render.c`: the "no glyph for this
+  character" test compares a code point with the number of glyphs (190)
+  instead of the last code point (255), so ¾ and À–ÿ come out as the
+  placeholder although the font has them. Built SDL, drew "é", got a
+  checkerboard.
+
 And that is where I'm stuck:
 
 - The policy says **keep the AI out**, and I want to respect that.
@@ -272,6 +305,19 @@ SDL は AI 生成物の貢献を受け付けない方針を明示している。
 `SDL_ibus.c` の 115 行目で、D-Bus の型名検証が引数を上書きしてから自分自身と
 比較しているため、**検証の形をしたまま必ず成功する**。`docs/DEFECTS.md` に
 記録してある。報告はしていない。
+
+これだけではない。`docs/DEFECTS.md` にはあと 3 件ある。どれも読んだだけでなく
+SDL のコードを実際に動かして確かめたもので、どれも報告していない。
+
+- **D-36**、`imKStoUCS.c` の 312 行目: 範囲の判定が表の先頭より 6 つ手前から
+  始まっていて、キーシム 0x58a〜0x58f で配列の手前を読む。0x58a を渡して呼ぶと
+  SIGSEGV で落ちた
+- **D-38**、`SDL_egl.c` の `SDL_EGL_CreateSurface`: 再試行するかの判定で
+  `eglGetError()` を読み、記録のためにもう一度読む。読むと消えるので、SDL が
+  記録するエラーは `EGL_SUCCESS` になる
+- **D-42**、`SDL_render.c` の `DrawDebugCharacter`: 「字形の無い文字か」の判定が
+  コード点を最後のコード点（255）ではなく字形の数（190）と比べている。字形はあるのに
+  ¾ と À〜ÿ が印で描かれる。SDL を作って「é」を描いたら市松模様が出た
 
 そこで止まっている。
 
