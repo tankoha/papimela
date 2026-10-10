@@ -71,9 +71,10 @@ One part is not a port at all. SDL's `SDL_EVENT_TEXT_EDITING` carries a single
 selection range, which is enough for Latin scripts and not enough for Japanese:
 when you convert 「今日の東京株式市場」 the IME splits it into clauses and
 highlights the one you are editing, and SDL has nowhere to put that. papimela
-talks to fcitx5 over D-Bus directly and carries **every clause boundary**, the
-surrounding text, and delete-surrounding requests. This is verified against a
-real keyboard, not just a test harness:
+talks to the input method (fcitx5, and now IBus too) over D-Bus directly and
+carries **every clause boundary**, the surrounding text, and delete-surrounding
+requests. With fcitx5 this is verified against a real keyboard, not just a test
+harness:
 
 ```
 変換中: [なんか]<変なタイミングで>   （2 文節、[ ] が注目）
@@ -84,20 +85,43 @@ the D-Bus route is not an optimisation, it is the only way.
 
 ### State
 
-Roughly 30,000 lines across 42 hand-written units and 21 generated Wayland
-protocol units. Working: Wayland windows, the seat (keyboard with xkb, pointer,
-touch, pointer constraints, cursor shapes), keyboard state with SDL-compatible
-scancodes and keycodes, the event queue, the IME path through
-fcitx5, pixel formats, surfaces, BMP, blitters, a software renderer and an OpenGL ES 2.0
-renderer that draw into windows with VSync (the GPU one about 135 times faster on
-the same scene) with logical resolution and built-in debug text, OpenGL ES contexts on Wayland windows through EGL, and a headless video backend so tests can run without
-a display server. There is a playable Pong in `examples/`.
+About 30,000 hand-written lines in 52 units, plus about 14,000 generated ones
+(21 Wayland protocol units, the keyboard tables, the EGL and GLES2 constants,
+the debug-text font and the umbrella unit). Working:
 
-23 test programs, 724 assertions, all passing. The GPU renderer is compared pixel by
-pixel against the software one, in CI too (on Mesa llvmpipe). CI runs a static analyser in its
-strictest mode (one warning fails the build), checks that the class diagrams
-still match the code, checks that every file's stated provenance matches the
-design document, and runs the tests that don't need a screen.
+- Wayland windows, and the seat: keyboard with xkb, pointer, touch, pointer
+  constraints, cursor shapes. Keyboard state with SDL-compatible scancodes and
+  keycodes, per-layout keymaps, and the event queue.
+- Input methods: fcitx5 and IBus over D-Bus, carrying every clause, the
+  surrounding text and delete-surrounding requests; and the compositor's
+  text-input-v3, which carries as much of that as the protocol has room for
+  (the preedit and its cursor, but not clause boundaries).
+- Pixel formats, surfaces, BMP, blitters.
+- A software renderer and an OpenGL ES 2.0 renderer that draw into windows
+  with VSync (the GPU one about 135 times faster on the same scene). Both have
+  logical resolution, built-in debug text, rotation and flipping, tiling and
+  nine-grid, and render targets. OpenGL ES contexts on Wayland windows through
+  EGL, with the swap interval kept per context.
+- Clipboard and primary selection, drag and drop in both directions, and the
+  document portal for sandboxed (Flatpak) apps.
+- Threads, timers, atomics, logging, hints and property tables.
+- A headless video backend, so tests can run without a display server.
+
+There is a playable Pong in `examples/`; the only papimela unit it uses is
+the umbrella `PaPiMeLa`.
+
+38 automated test programs. The 26 that need no display (1,031 assertions)
+run in CI on every push, together with Pong's self-test, the IBus test (against
+an isolated IBus) and the GPU renderer's pixel-by-pixel comparison with the
+software one (on Mesa llvmpipe). The rest need a real Wayland session, a GPU
+or fcitx5 and are run by hand, along with four interactive demos and a
+frame-rate measurement. Every run is recorded in `docs/TEST-LOG.md`, and each
+test passed on its last recorded run (the dates are in the log; some hand-run
+ones predate later changes). For several of the ported parts, the expected
+values were measured on the real SDL rather than worked out by reading it.
+CI also runs a static analyser in its strictest mode (one warning fails the
+build), checks that the class diagrams still match the code, and checks that
+every file's stated provenance matches the design document.
 
 Not done yet: desktop GL, audio, joystick, and everything in the design
 document's later chapters. What writing Pong showed to be missing is listed in
@@ -185,9 +209,9 @@ Linux と Wayland だけ、コア機能だけ。範囲を意図的に狭くし�
 ひとつだけ、移植ですらない部分がある。SDL の `SDL_EVENT_TEXT_EDITING` が運べる
 のは単一の選択範囲で、ラテン文字には足りるが日本語には足りない。
 「今日の東京株式市場」を変換すると IME は文節に分け、編集中の文節を強調するが、
-SDL にはそれを置く場所が無い。papimela は fcitx5 と D-Bus で直接話し、
-**全文節の区切り**と周辺テキストと周辺削除要求を運ぶ。実際のキーボードで確認済み
-である。
+SDL にはそれを置く場所が無い。papimela は IME（fcitx5、今は IBus も）と D-Bus で直接話し、
+**全文節の区切り**と周辺テキストと周辺削除要求を運ぶ。fcitx5 では実際のキーボードで
+確認済みである。
 
 ```
 変換中: [なんか]<変なタイミングで>   （2 文節、[ ] が注目）
@@ -198,20 +222,36 @@ Wayland の `text-input-v3` ではこれは表現できない（preedit のス�
 
 ### 現状
 
-手書き 42 ユニットと生成した Wayland プロトコル 21 ユニット、およそ 3 万行。
-動いているのは、Wayland のウィンドウ、シート（xkb を使ったキーボード、ポインタ、
-タッチ、ポインタ拘束、カーソル形状）、SDL と同じ値のスキャンコードとキーコードを
-持つキーボードの状態、イベントキュー、fcitx5 経由の IME、
-ピクセル形式、サーフェス、BMP、ブリッタ、ウィンドウへ VSync つきで描く
-ソフトウェアと OpenGL ES 2.0 のレンダラ（同じ場面で GPU の方が約 135 倍速い。論理解像度と組み込みの文字つき）、
-EGL による Wayland ウィンドウ上の OpenGL ES コンテキスト、そして表示サーバ無しでテストを回すためのヘッドレス
-バックエンド。`examples/` には遊べる Pong がある。
+手書き 52 ユニットでおよそ 3 万行、それに生成したものがおよそ 1.4 万行（Wayland プロトコル
+21 ユニット、キーボードの表、EGL と GLES2 の定数、DebugText の字形、アンブレラ）。
+動いているもの:
 
-テストは 23 本、724 アサーション、全て成功。GPU のレンダラはソフトウェアの
-レンダラと画素ごとに比べていて、CI でも（Mesa の llvmpipe で）走る。CI は静的解析を最も厳しい設定で
-回し（warning 1 件でビルドが落ちる）、クラス図がコードと食い違っていないかを
-確かめ、各ファイルが名乗っている由来が設計書と一致するかを確かめ、画面の要らない
-テストを実行する。
+- Wayland のウィンドウと、シート（xkb を使ったキーボード、ポインタ、タッチ、ポインタ拘束、
+  カーソル形状）。SDL と同じ値のスキャンコードとキーコードを持つキーボードの状態、配列ごとの
+  キーマップ、イベントキュー
+- IME: D-Bus 経由の fcitx5 と IBus（全文節・周辺テキスト・周辺削除要求を運ぶ）と、コンポジタの
+  text-input-v3（プロトコルに置き場のある範囲。変換中の文字列とカーソルは運ぶが、文節の区切りは無い）
+- ピクセル形式、サーフェス、BMP、ブリッタ
+- ウィンドウへ VSync つきで描くソフトウェアと OpenGL ES 2.0 のレンダラ（同じ場面で GPU の方が
+  約 135 倍速い）。どちらも論理解像度、組み込みの文字、回転と反転、敷き詰めと 9 つ分け、
+  描画先テクスチャを持つ。EGL による Wayland ウィンドウ上の OpenGL ES コンテキスト（スワップ
+  間隔はコンテキストごと）
+- クリップボードとプライマリ選択、両方向のドラッグ＆ドロップ、サンドボックス（Flatpak）の
+  アプリ向けの document-portal
+- スレッド、タイマー、不可分操作、ログ、ヒント、プロパティの表
+- 表示サーバ無しでテストを回すためのヘッドレスのバックエンド
+
+`examples/` には遊べる Pong があり、papimela のユニットはアンブレラの `PaPiMeLa` しか使っていない。
+
+自動テストは 38 本。画面の要らない 26 本（1,031 アサーション）は push のたびに CI で走り、
+Pong の自己検査、IBus の検査（隔離した IBus を相手に）、GPU のレンダラをソフトウェアのレンダラと
+画素ごとに比べる検査（Mesa の llvmpipe で）も CI で走る。残りは実際の Wayland セッションや GPU や
+fcitx5 が要るので、4 つの対話のデモと速さの計測と一緒に手元で流す。実行の記録は全部
+`docs/TEST-LOG.md` にあり、どれも最後に流したときは成功している（日付は記録にある。手元で流す
+ものには、その後の変更より前のものもある）。移植した部分のいくつかは、期待値を SDL のソースを
+読んで決めるのではなく、SDL の実物を動かして測った。
+CI はほかに、静的解析を最も厳しい設定で回し（warning 1 件でビルドが落ちる）、クラス図が
+コードと食い違っていないかを確かめ、各ファイルが名乗っている由来が設計書と一致するかを確かめる。
 
 まだ無いもの: デスクトップ GL、オーディオ、ジョイスティック、設計書の
 後ろの章にあるもの一式。Pong を書いてみて足りなかったものは
@@ -265,7 +305,7 @@ compares that argument with itself, so a validation that *looks* like a
 validation always succeeds. It is in `docs/DEFECTS.md`. It has not been
 reported.
 
-It is not the only one. Three more are in `docs/DEFECTS.md`, each confirmed by
+It is not the only one. Seven more are in `docs/DEFECTS.md`, each confirmed by
 running SDL's own code rather than by reading alone, and none of them reported
 either:
 
@@ -280,8 +320,25 @@ either:
   instead of the last code point (255), so ¾ and À–ÿ come out as the
   placeholder although the font has them. Built SDL, drew "é", got a
   checkerboard.
+- **D-54**, `CopyOneProperty` in `SDL_properties.c`: copying a property set
+  copies each entry wholesale, including the buffer that holds a number once
+  it has been read as a string. Source and copy then share that buffer.
+  Destroy the source and the copy's string is garbage; destroy the copy too
+  and glibc stops the program with `free(): double free detected`.
+- **D-55**, `ParseLogCategory` and `ParseLogPriority` in `SDL_log.c`: the
+  `SDL_LOGGING` hint is compared only up to the length of what you wrote, so
+  `a=debug` means APP and `t` means TRACE, and an empty string matches
+  anything. Setting `SDL_LOGGING=` (empty) silences every category, CRITICAL
+  included.
+- **D-56**, `SDL_ResetLogPriorities`: the header says that with
+  `DEBUG_INVOCATION=1` the defaults are `assert=warn,test=verbose,*=debug`,
+  but application-defined categories stay at ERROR.
+- **D-57**, `SDL_SetHintWithPriority` and `SDL_ResetHint` in `SDL_hints.c`:
+  when an environment variable is in effect, hint callbacks are told the
+  wrong old value (`(null)` instead of the variable), and resetting a hint
+  that was never set fires a callback although nothing changed.
 
-A fifth one is different in kind. **D-53**: SDL documents the swap interval as
+One more is different in kind. **D-53**: SDL documents the swap interval as
 belonging to "the current OpenGL context", but keeps a single value for the
 whole video device and resets it to 0 every time a context is created. On
 Wayland, creating a second context silently turns vsync off for the first
@@ -316,7 +373,7 @@ SDL は AI 生成物の貢献を受け付けない方針を明示している。
 比較しているため、**検証の形をしたまま必ず成功する**。`docs/DEFECTS.md` に
 記録してある。報告はしていない。
 
-これだけではない。`docs/DEFECTS.md` にはあと 3 件ある。どれも読んだだけでなく
+これだけではない。`docs/DEFECTS.md` にはあと 7 件ある。どれも読んだだけでなく
 SDL のコードを実際に動かして確かめたもので、どれも報告していない。
 
 - **D-36**、`imKStoUCS.c` の 312 行目: 範囲の判定が表の先頭より 6 つ手前から
@@ -328,8 +385,19 @@ SDL のコードを実際に動かして確かめたもので、どれも報告�
 - **D-42**、`SDL_render.c` の `DrawDebugCharacter`: 「字形の無い文字か」の判定が
   コード点を最後のコード点（255）ではなく字形の数（190）と比べている。字形はあるのに
   ¾ と À〜ÿ が印で描かれる。SDL を作って「é」を描いたら市松模様が出た
+- **D-54**、`SDL_properties.c` の `CopyOneProperty`: プロパティを写すとき要素を丸ごと写すので、
+  数を一度文字列として読んだときに作られる置き場まで、写し元と写し先で共有する。写し元を
+  壊すと写し先の文字列が壊れ、写し先も壊すと glibc が `free(): double free detected` で止める
+- **D-55**、`SDL_log.c` の `ParseLogCategory` と `ParseLogPriority`: `SDL_LOGGING` のヒントを
+  「書いた側の長さ」だけ比べるので、`a=debug` が APP に、`t` が TRACE になり、空の文字列は何にでも
+  一致する。`SDL_LOGGING=`（空）にすると、CRITICAL も含めて全部のカテゴリが黙る
+- **D-56**、`SDL_ResetLogPriorities`: ヘッダは `DEBUG_INVOCATION=1` なら既定が
+  `assert=warn,test=verbose,*=debug` と同じだと書いているが、アプリの独自のカテゴリは ERROR のまま
+- **D-57**、`SDL_hints.c` の `SDL_SetHintWithPriority` と `SDL_ResetHint`: 環境変数が効いていると、
+  ヒントの変化の知らせが前の値を誤り（環境変数ではなく `(null)` と知らせる）、一度も置いて
+  いないヒントを Reset すると、何も変わっていないのに知らせが来る
 
-5 件目は種類が違う。**D-53**: SDL はスワップ間隔を「現在の OpenGL コンテキストの」
+もう 1 件は種類が違う。**D-53**: SDL はスワップ間隔を「現在の OpenGL コンテキストの」
 ものとして説明しているが、値はビデオの装置全体で 1 つしか持たず、コンテキストを
 作るたびに 0 へ戻す。Wayland では、2 つ目のコンテキストを作ると 1 つ目のウィンドウの
 VSync が黙って切れる（SDL 3.4.2 で測ると 200 fps が約 2 万 fps になった）。
