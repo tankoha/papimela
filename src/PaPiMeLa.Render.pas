@@ -44,8 +44,6 @@
       IPMLWindowDependent 経由でレンダラも消える（テクスチャも一緒に消える）
 
   NOT RESOLVED:
-    - 描画先テクスチャ（SetRenderTarget）、回転（RenderTextureRotated）、
-      9-grid / タイルは未実装（VSync、論理解像度、DebugText は実装済み）
     - 線の描き方の切り替え（SDL_HINT_RENDER_LINE_METHOD）は無い。論理解像度では
       三角形、倍率だけなら矩形の並び、どちらも無ければドライバの線（SDL の既定の
       振り分けのうち、ソフトウェアのレンダラと同じもの）
@@ -349,8 +347,11 @@ type
       サーフェスは借りるだけで、所有しない。 }
     class function CreateSoftware(ATarget: TPMLSurface): TPMLRenderer;
     { ウィンドウへ描くレンダラを作る。所有者はウィンドウ。
-      ADriverName が空ならドライバを選ぶ。今あるのは 'software' だけで、
-      ウィンドウの SoftwareFramebuffer 能力が要る。 }
+      ADriverName が空ならヒント PAPIMELA_RENDER_DRIVER（SDL_HINT_RENDER_DRIVER）を見て、
+      それも空ならドライバを自動で選ぶ。名前はカンマ区切りで、順に試す。
+      ドライバは 'software'（ウィンドウの SoftwareFramebuffer 能力が要る）と、
+      登録されたもの（'gles2'）。ヒント PAPIMELA_RENDER_VSYNC が空でなければ、
+      作った時点の VSync に使う。 }
     constructor CreateForWindow(AWindow: TPMLWindow; const ADriverName: String = '');
     destructor Destroy; override;
 
@@ -495,6 +496,8 @@ implementation
 
 uses
   Math,
+  PaPiMeLa.Log,
+  PaPiMeLa.Properties,
   PaPiMeLa.Render.Software,
   PaPiMeLa.Video.Backend;
 
@@ -915,47 +918,140 @@ begin
   FCurrentScale := FScale;
 end;
 
+{ ウィンドウへ描くドライバを 1 つ作る（SDL_CreateRendererWithProperties のドライバ選び）。
+
+  WHAT:
+    ANames が空なら、今までどおり自動で選ぶ。空でなければカンマで分けて順に試す。
+    'software' か登録された名前に合うものだけを作ってみる。作れなければ警告を書いて次へ。
+
+  WHY:
+    レンダラの Create より前に済ませるのは、失敗したときウィンドウに何も登録しない
+    ようにするため。
+
+  PORT-NOTE:
+    SDL は名前のどれにも合わなくても「作れなかった」の 1 種類のエラーにするが、
+    papimela は「知らない名前だけ」(EPMLUnsupported) と、「知っていたが作れなかった」
+    （最後に作れなかったドライバの例外を種類を変えずに投げ直す。名指しの 1 つが作れない
+    ときの例外がヒントを入れる前と同じになる）を分ける。 }
+function CreateWindowDriver(AWindow: TPMLWindow; const ANames: String): TPMLRenderDriver;
+var
+  Services: TPMLContextBase;
+  Tokens: TStringArray;
+  Token: String;
+  I, Index: Integer;
+  Known: Boolean;
+  LastFailure: TObject;
+begin
+  Result := nil;
+  if ANames = '' then
+  begin
+    // 自動。登録されたドライバのうち選ぶと答えた最初のもの。GL で作った
+    // ウィンドウには GPU のドライバを選ぶ（SDL も既定では GPU を優先する）。
+    for I := 0 to High(RenderDriverRegistry) do
+      if RenderDriverRegistry[I].Prefers(AWindow) then
+        Exit(RenderDriverRegistry[I].Factory(AWindow));
+    Exit(TPMLWindowSoftwareRenderDriver.Create(AWindow));
+  end;
+
+  Services := AWindow.ContextServices;
+  Known := False;
+  LastFailure := nil;
+  Tokens := ANames.Split(',');
+  for I := 0 to High(Tokens) do
+  begin
+    Token := Trim(Tokens[I]);
+    if Token = '' then
+      Continue;
+    Index := -1;
+    if not SameText(Token, 'software') then
+    begin
+      Index := FindRenderDriverIndex(Token);
+      if Index < 0 then
+        Continue;   // 知らない名前は飛ばす
+    end;
+    Known := True;
+    try
+      if Index >= 0 then
+        Result := RenderDriverRegistry[Index].Factory(AWindow)
+      else
+        Result := TPMLWindowSoftwareRenderDriver.Create(AWindow);
+    except
+      on E: EPMLError do
+      begin
+        // 途中まで作ったものは、コンストラクタの例外で FPC が壊している
+        Result := nil;
+        // 最後の失敗は、種類を変えずに後で投げ直す（名指しの 1 つが作れなかったときの
+        // 例外の種類を、ヒントが入る前と同じに保つ）
+        LastFailure.Free;
+        LastFailure := TObject(AcquireExceptionObject);
+        if (Services <> nil) and (Services.Log <> nil) then
+          Services.Log.Warn(PML_LOG_CATEGORY_RENDER,
+            Format('Couldn''t create renderer %s: %s', [Token, E.Message]));
+      end;
+    end;
+    if Result <> nil then
+    begin
+      LastFailure.Free;
+      Exit;
+    end;
+  end;
+
+  if not Known then
+    raise EPMLUnsupported.CreateNative(
+      Format('render driver "%s" is not available (available: %s); '
+        + 'add PaPiMeLa.Backends (or PaPiMeLa) to uses to link the built-in drivers',
+        [ANames, String.Join(', ', PMLRenderDriverNames)]), 0, 'render');
+  // 名前の分かったドライバはあったが、どれも作れなかった。最後の失敗をそのまま投げる。
+  raise Exception(LastFailure);
+end;
+
 constructor TPMLRenderer.CreateForWindow(AWindow: TPMLWindow;
   const ADriverName: String);
 var
-  Index, I: Integer;
+  Names, VSyncHint: String;
+  Services: TPMLContextBase;
+  NewDriver: TPMLRenderDriver;
 begin
   if AWindow = nil then
     raise EPMLArgument.Create('CreateForWindow needs a window');
-  // 名前の解決はドライバを作る前に済ませる（未登録なら何も作らずに断る）。
-  Index := -1;
-  if ADriverName <> '' then
-  begin
-    if not SameText(ADriverName, 'software') then
-    begin
-      Index := FindRenderDriverIndex(ADriverName);
-      if Index < 0 then
-        raise EPMLUnsupported.CreateNative(
-          Format('render driver "%s" is not available (available: %s); '
-            + 'add PaPiMeLa.Backends (or PaPiMeLa) to uses to link the built-in drivers',
-            [ADriverName, String.Join(', ', PMLRenderDriverNames)]), 0, 'render');
-    end;
-  end
-  else
-    for I := 0 to High(RenderDriverRegistry) do
-      if RenderDriverRegistry[I].Prefers(AWindow) then
-      begin
-        Index := I;
-        Break;
-      end;
-  inherited Create(AWindow.ContextRef, AWindow);
+  Services := AWindow.ContextServices;
+  // 名前の解決とドライバの作成は、ウィンドウに何かを登録する前に済ませる
+  // （未登録・作れないなら何も作らずに断る）。
+  Names := ADriverName;
+  if (Names = '') and (Services <> nil) and (Services.Hints <> nil) then
+    Names := Services.Hints.GetHint(PML_HINT_RENDER_DRIVER);
+  NewDriver := CreateWindowDriver(AWindow, Trim(Names));
+  try
+    inherited Create(AWindow.ContextRef, AWindow);
+  except
+    NewDriver.Free;
+    raise;
+  end;
+  FDriver := NewDriver;
   FQueue := TPMLRenderQueue.Create;
   FDrawColor := TPMLFColor.Make(0, 0, 0, 1);
   FBlendMode := TPMLBlendMode.None;
   FScale := TPMLFPoint.Make(1, 1);
   FLogicalScale := TPMLFPoint.Make(1, 1);
   FCurrentScale := FScale;
-  // 名前が無ければ、登録されたドライバのうち選ぶと答えた最初のもの。GL で作った
-  // ウィンドウには GPU のドライバを選ぶ（SDL も既定では GPU を優先する）。
-  if Index >= 0 then
-    FDriver := RenderDriverRegistry[Index].Factory(AWindow)
-  else
-    FDriver := TPMLWindowSoftwareRenderDriver.Create(AWindow);
+  // SDL_HINT_RENDER_VSYNC: 空でなければ作った時点の VSync に使う
+  // （SDL_GetHintBoolean(hint, true)）。ドライバが対応しなければ警告だけ。
+  if (Services <> nil) and (Services.Hints <> nil) then
+  begin
+    VSyncHint := Services.Hints.GetHint(PML_HINT_RENDER_VSYNC);
+    if VSyncHint <> '' then
+      try
+        if PMLStringBoolean(VSyncHint, True) then
+          SetVSync(1)
+        else
+          SetVSync(0);
+      except
+        on E: EPMLUnsupported do
+          if Services.Log <> nil then
+            Services.Log.Warn(PML_LOG_CATEGORY_RENDER,
+              Format('Couldn''t set VSync from hint: %s', [E.Message]));
+      end;
+  end;
   // 登録は最後。ここまでで例外が出たら Destroy が走るが、まだ登録していない。
   FWindow := AWindow;
   AWindow.AddDependent(Self);

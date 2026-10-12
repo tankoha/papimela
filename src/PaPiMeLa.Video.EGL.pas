@@ -64,6 +64,7 @@ interface
 uses
   SysUtils,
   PaPiMeLa.Platform.DynLib,
+  PaPiMeLa.Properties,
   PaPiMeLa.Platform.EGL,
   PaPiMeLa.Video.Backend;
 
@@ -98,6 +99,8 @@ type
     FApiType   : EGLenum;
     FShutdownDone: Boolean;
 
+    // ヒントの値（Context が無ければ空）。
+    function  HintValue(const AName: String): String;
     function  EnsureLoaded: Boolean;
     function  EnsureInitialized: Boolean;
     procedure ReadVersion(ADisplay: EGLDisplay);
@@ -302,11 +305,20 @@ begin
   Result := nil;
 end;
 
+function TPMLEGLBackend.HintValue(const AName: String): String;
+begin
+  if (ContextServices <> nil) and (ContextServices.Hints <> nil) then
+    Result := ContextServices.Hints.GetHint(AName)
+  else
+    Result := '';
+end;
+
 function TPMLEGLBackend.EnsureLoaded: Boolean;
 begin
   if FLibLoaded then
     Exit(True);
-  if not PMLEGLLoad then
+  // ヒント PAPIMELA_EGL_LIBRARY（SDL_HINT_EGL_LIBRARY）。空なら既定の名前。
+  if not PMLEGLLoad(HintValue(PML_HINT_EGL_LIBRARY)) then
   begin
     FLastError := 'could not load libEGL';
     Exit(False);
@@ -888,19 +900,35 @@ end;
 
 { libGLESv2 から AName を引く。ライブラリは最初に要るときに 1 度だけ開く。 }
 function TPMLEGLBackend.GLESSymbol(const AName: String): Pointer;
+var
+  Hinted: String;
 begin
   if (FGLES = nil) and (not FGLESTried) then
   begin
     FGLESTried := True;
-    try
-      FGLES := TPMLDynLib.Create(GLES_NAMES);
-    except
-      on E: Exception do
-      begin
-        FGLES := nil;
-        FLastError := E.Message;
+    // ヒント PAPIMELA_OPENGL_LIBRARY（SDL_HINT_OPENGL_LIBRARY）があれば先に試し、
+    // 読めなければ既定の名前へ戻る（SDL_EGL_LoadLibraryOnly と同じ）。
+    Hinted := HintValue(PML_HINT_OPENGL_LIBRARY);
+    if Hinted <> '' then
+      try
+        FGLES := TPMLDynLib.Create([Hinted]);
+      except
+        on E: Exception do
+        begin
+          FGLES := nil;
+          FLastError := E.Message;
+        end;
       end;
-    end;
+    if FGLES = nil then
+      try
+        FGLES := TPMLDynLib.Create(GLES_NAMES);
+      except
+        on E: Exception do
+        begin
+          FGLES := nil;
+          FLastError := E.Message;
+        end;
+      end;
   end;
   if FGLES = nil then
     Exit(nil);

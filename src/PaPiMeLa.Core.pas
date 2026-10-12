@@ -104,16 +104,13 @@ type
     class procedure SetDefaults(var AOptions: TPMLContextOptions); static;
   end;
 
-  TPMLContext = class sealed(TPMLObject)
+  TPMLContext = class sealed(TPMLContextBase)
   strict private
     FEvents    : TPMLEventQueue;
     FTimer     : TPMLTimerService;
     FVideo     : TPMLVideoSystem;
     FTextInput : TPMLTextInputSystem;
     FSubsystems: TPMLSubsystems;
-    FHints     : TPMLHints;
-    FProperties: TPMLProperties;
-    FLog       : TPMLLog;
   public
     constructor Create(ASubsystems: TPMLSubsystems); overload;
     constructor Create(ASubsystems: TPMLSubsystems;
@@ -125,10 +122,8 @@ type
     // まで待ち、動いたら True（Context が先に壊れたら False）。
     function  RunOnMainThread(AProc: TPMLMainThreadProc; AWait: Boolean = False): Boolean;
 
-    // ヒント（SDL_SetHint 系）、大域のプロパティ（SDL_GetGlobalProperties）、ログ（SDL_Log 系）。
-    property Hints     : TPMLHints           read FHints;
-    property Properties: TPMLProperties      read FProperties;
-    property Log       : TPMLLog             read FLog;
+    // Hints（SDL_SetHint 系）・Properties（SDL_GetGlobalProperties）・Log（SDL_Log 系）・AppID は
+    // TPMLContextBase（PaPiMeLa.Core.Base）にある。
     property Events    : TPMLEventQueue      read FEvents;
     property Timer     : TPMLTimerService    read FTimer;
     property Video     : TPMLVideoSystem     read FVideo;

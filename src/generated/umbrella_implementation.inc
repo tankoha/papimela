@@ -77,6 +77,16 @@ begin
   Result := PaPiMeLa.Events.Keymap.PMLScancodeFromEvdev(AEvdevCode);
 end;
 
+function PMLConvertNumpadKeycode(AKeycode: TPMLKeycode; ANumLock: Boolean): TPMLKeycode;
+begin
+  Result := PaPiMeLa.Events.Keymap.PMLConvertNumpadKeycode(AKeycode, ANumLock);
+end;
+
+function PMLParseKeycodeOptions(const AHint: String): TPMLKeycodeOptions;
+begin
+  Result := PaPiMeLa.Events.Keymap.PMLParseKeycodeOptions(AHint);
+end;
+
 // ---- PaPiMeLa.Pixels
 function PMLPixelFlag(AFormat: TPMLPixelFormat): LongWord;
 begin
@@ -413,6 +423,11 @@ begin
 end;
 
 // ---- PaPiMeLa.Properties
+function PMLGetEnvironment(const AName: String; out AValue: String): Boolean;
+begin
+  Result := PaPiMeLa.Properties.PMLGetEnvironment(AName, AValue);
+end;
+
 function PMLStringBoolean(const AValue: String; ADefault: Boolean): Boolean;
 begin
   Result := PaPiMeLa.Properties.PMLStringBoolean(AValue, ADefault);

@@ -133,6 +133,8 @@ function PMLKeymapKeycode(
   AScancode: TPMLScancode;
   AShifted: Boolean): TPMLKeycode; inline;
 function PMLScancodeFromEvdev(AEvdevCode: LongWord): TPMLScancode; inline;
+function PMLConvertNumpadKeycode(AKeycode: TPMLKeycode; ANumLock: Boolean): TPMLKeycode; inline;
+function PMLParseKeycodeOptions(const AHint: String): TPMLKeycodeOptions; inline;
 
 // ---- PaPiMeLa.Keycodes
 type
@@ -709,6 +711,13 @@ const
   PML_HINT_LOGGING = PaPiMeLa.Properties.PML_HINT_LOGGING;
   PML_HINT_VIDEO = PaPiMeLa.Properties.PML_HINT_VIDEO;
   PML_HINT_IME = PaPiMeLa.Properties.PML_HINT_IME;
+  PML_HINT_APP_ID = PaPiMeLa.Properties.PML_HINT_APP_ID;
+  PML_HINT_KEYCODE_OPTIONS = PaPiMeLa.Properties.PML_HINT_KEYCODE_OPTIONS;
+  PML_HINT_RENDER_DRIVER = PaPiMeLa.Properties.PML_HINT_RENDER_DRIVER;
+  PML_HINT_RENDER_VSYNC = PaPiMeLa.Properties.PML_HINT_RENDER_VSYNC;
+  PML_HINT_EGL_LIBRARY = PaPiMeLa.Properties.PML_HINT_EGL_LIBRARY;
+  PML_HINT_OPENGL_LIBRARY = PaPiMeLa.Properties.PML_HINT_OPENGL_LIBRARY;
+function PMLGetEnvironment(const AName: String; out AValue: String): Boolean; inline;
 function PMLStringBoolean(const AValue: String; ADefault: Boolean): Boolean; inline;
 function PMLStringInteger(const AValue: String; ADefault: Integer): Integer; inline;
 function PMLStrToInt64C(const AValue: String): Int64; inline;

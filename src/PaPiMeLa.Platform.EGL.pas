@@ -106,9 +106,11 @@ var
   eglGetPlatformDisplayEXT: function(APlatform: EGLenum; ANativeDisplay: Pointer;
     AAttribList: PEGLint): EGLDisplay; cdecl = nil;
 
-{ libEGL を読み込む。既に読み込んでいれば参照カウントを増やすだけ。
-  ライブラリが無いか、EGL 1.4 の関数が 1 つでも無ければ False（何も残さない）。 }
-function  PMLEGLLoad: Boolean;
+{ libEGL を読み込む。既に読み込んでいれば（名前によらず）参照カウントを増やすだけ。
+  ライブラリが無いか、EGL 1.4 の関数が 1 つでも無ければ False（何も残さない）。
+  ALibrary が空でなければその名前だけを試す（ヒント PAPIMELA_EGL_LIBRARY の値）。
+  空なら既定の名前（libEGL.so.1、libEGL.so）。 }
+function  PMLEGLLoad(const ALibrary: String = ''): Boolean;
 procedure PMLEGLUnload;
 function  PMLEGLLoaded: Boolean;
 
@@ -156,19 +158,26 @@ begin
   eglGetPlatformDisplayEXT := nil;
 end;
 
-function PMLEGLLoad: Boolean;
+function PMLEGLLoad(const ALibrary: String): Boolean;
 begin
   // C の GL の実装は浮動小数点の例外が無効であることを前提にしている（D-40）。
   // 2 回目以降の読み込みでも、呼んだスレッドが違うかもしれないので毎回行う。
   SetExceptionMask([exInvalidOp, exDenormalized, exZeroDivide, exOverflow,
     exUnderflow, exPrecision]);
+  // 既に読み込んでいれば、ALibrary が何であっても数を増やすだけ（SDL_EGL_LoadLibraryOnly の
+  // 「egl_data が既にあれば何もしない」と同じ。最初に読んだ名前が以後も使われる）。
   if GRefCount > 0 then
   begin
     Inc(GRefCount);
     Exit(True);
   end;
   try
-    GLib := TPMLDynLib.Create(LIBEGL_NAMES);
+    // 名前を渡されたらそれだけを試す。既定の名前へは逃げない（SDL は
+    // SDL_HINT_EGL_LIBRARY があればそれだけを SDL_LoadObject する）。
+    if ALibrary <> '' then
+      GLib := TPMLDynLib.Create([ALibrary])
+    else
+      GLib := TPMLDynLib.Create(LIBEGL_NAMES);
   except
     on E: EPMLPlatformLibrary do
     begin

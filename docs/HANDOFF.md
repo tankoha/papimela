@@ -12,8 +12,8 @@
 | 項目 | 状態 |
 |---|---|
 | リポジトリ | https://github.com/tankoha/papimela（公開、Issues 有効）。手元のセッションは `master` に直接 push、クラウドのセッションは指定のブランチへ push して、手元で早送りマージする |
-| CI | 緑。rawpaco 激辛、checkorigin、アンブレラの古さ（`genumbrella.bb --check`）、図の検査、表示サーバ無しのテスト 26 本、Pong の自己検査、GLES2 と ソフトウェアのドライバの画素比較（llvmpipe）。ジョブ 60 分・GLES2 の手順 5 分の時間制限つき |
-| テスト | 表示サーバ無しの 26 本・1043 件はすべて成功（2026-10-10 に手元で作り直して全部流した）。手元専用と対話の検査は `docs/TEST-LOG.md` の各行 |
+| CI | 緑。rawpaco 激辛、checkorigin、アンブレラの古さ（`genumbrella.bb --check`）、図の検査、表示サーバ無しのテスト 27 本、Pong の自己検査、GLES2 と ソフトウェアのドライバの画素比較（llvmpipe）。ジョブ 60 分・GLES2 の手順 5 分の時間制限つき |
+| テスト | 表示サーバ無しの 27 本・1082 件はすべて成功（2026-10-10 に手元で作り直して全部流した）。手元専用と対話の検査は `docs/TEST-LOG.md` の各行 |
 | 不具合 | 57 件。うち上流 SDL の 9 件は未報告（D-53 は SDL 自身が FIXME で知っている。他の 8 件は報告するかを検討中。方針は `CLAUDE.md`） |
 | 規模 | 手書き 52 ユニット（`src/*.pas`）+ 生成（Wayland プロトコル 21、キーボードの表 2、EGL / GLES2 の定数 2、DebugText の字形 1、アンブレラ 2）。約 4.2 万行 |
 
@@ -62,7 +62,8 @@ EGL の GL コンテキスト（スワップ間隔はコンテキストごと）
 
 ## 3. 次の候補（おすすめ順）
 
-1. **ヒントを使う側（小さい）**: ヒントは Context を作る前から置ける（`TPMLContextOptions.Hints`、2026-10-10）。
+1. **ヒントを使う側（小さい）**: **A は 2026-10-13 に済んだ**（KEYCODE_OPTIONS と hide_numpad、APP_ID、RENDER_DRIVER / RENDER_VSYNC、EGL_LIBRARY / OPENGL_LIBRARY。T-47。下の層からは `ContextServices` で Context の土台に届く）。残りは B（THREAD_PRIORITY_POLICY と実時間、IME_IMPLEMENTED_UI、QUIT_ON_LAST_WINDOW_CLOSE、NO_SIGNAL_HANDLERS、EVENT_LOGGING）。C（ダブルクリック、タッチとマウス、スクリーンセーバー、libdecor など）は機能そのものが先に要る。
+   ヒントは Context を作る前から置ける（`TPMLContextOptions.Hints`、2026-10-10）。
    `PAPIMELA_VIDEO` / `PAPIMELA_IME` もヒントで選ぶようになった。次は SDL のヒントのうち papimela に効くもの
    （THREAD_PRIORITY_POLICY の実時間スケジューリングなど）を足すこと。既存のコードの `FLastNonFatalError` のような
    「黙って覚える」所を `Ctx.Log` へ流すのも、ここでできる
@@ -106,7 +107,7 @@ Pong もすべて書き換え、今は `uses SysUtils, Math, PaPiMeLa` だけで
 表示サーバ無しで通るもの（CI と同じ）:
 
 ```bash
-for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_render_transform test_render_target test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_drop test_drag_source test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log; do
+for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_render_transform test_render_target test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_drop test_drag_source test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints; do
   fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/$t test/$t.pas && ./test/$t
 done
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -oexamples/pong examples/pong.pas && ./examples/pong --selftest
@@ -132,7 +133,7 @@ env -u WAYLAND_DISPLAY LIBGL_ALWAYS_SOFTWARE=1 ./test/test_render_gles2   # Mesa
 cd papimela && mkdir -p lib
 B='fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib'
 # 0. 表示サーバ無しの分（CI と同じ。手元の新しい Mesa でも通るか）
-for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log; do
+for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints; do
   $B -otest/$t test/$t.pas && ./test/$t | tail -1
 done
 # 1. 実機の Wayland（自動判定。最後の行が「結論」で終わればよい）

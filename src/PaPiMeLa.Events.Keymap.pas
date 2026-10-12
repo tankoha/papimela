@@ -55,6 +55,7 @@ uses
 type
   { キーイベントのキーコードの決め方。SDL_HINT_KEYCODE_OPTIONS にあたる。 }
   TPMLKeycodeOption = (
+    HideNumpad,      // テンキーのキーコードを、NumLock に応じてテンキーでないものにする
     FrenchNumbers,   // 数字の段が記号の配列（AZERTY）では、数字の段を数字にする
     LatinLetters     // 文字キーがラテン文字でない配列では、US 配列の文字にする
   );
@@ -134,6 +135,16 @@ function PMLKeymapKeycode(AKeysym: LongWord; AScancode: TPMLScancode;
 
 { evdev のキーコード（Wayland が送る値。xkb のキーコード - 8）をスキャンコードにする。 }
 function PMLScancodeFromEvdev(AEvdevCode: LongWord): TPMLScancode;
+
+{ テンキーのキーコードを、テンキーでないものにする（SDL_ConvertNumpadKeycode。
+  hide_numpad のとき）。数字と小数点は ANumLock なら数字・小数点、そうでなければ矢印や
+  Home などの編集キー。テンキーでないキーコードはそのまま返す。 }
+function PMLConvertNumpadKeycode(AKeycode: TPMLKeycode; ANumLock: Boolean): TPMLKeycode;
+
+{ ヒント PAPIMELA_KEYCODE_OPTIONS の値をキーコードの決め方にする
+  （SDL_KeycodeOptionsChanged）。空なら既定。カンマで分けた語が 'none' なら空、
+  そうでなければ 'hide_numpad' / 'french_numbers' / 'latin_letters' の和。 }
+function PMLParseKeycodeOptions(const AHint: String): TPMLKeycodeOptions;
 
 implementation
 
@@ -542,6 +553,85 @@ begin
     Result := Empty.KeyName(Self);
   finally
     Empty.Free;
+  end;
+end;
+
+{ SDL_ConvertNumpadKeycode。 }
+function PMLConvertNumpadKeycode(AKeycode: TPMLKeycode; ANumLock: Boolean): TPMLKeycode;
+begin
+  case AKeycode of
+    PMLK_KP_DIVIDE: Result := PMLK_SLASH;
+    PMLK_KP_MULTIPLY: Result := PMLK_ASTERISK;
+    PMLK_KP_MINUS: Result := PMLK_MINUS;
+    PMLK_KP_PLUS: Result := PMLK_PLUS;
+    PMLK_KP_ENTER: Result := PMLK_RETURN;
+    PMLK_KP_1: if ANumLock then Result := PMLK_1 else Result := PMLK_END;
+    PMLK_KP_2: if ANumLock then Result := PMLK_2 else Result := PMLK_DOWN;
+    PMLK_KP_3: if ANumLock then Result := PMLK_3 else Result := PMLK_PAGEDOWN;
+    PMLK_KP_4: if ANumLock then Result := PMLK_4 else Result := PMLK_LEFT;
+    PMLK_KP_5: if ANumLock then Result := PMLK_5 else Result := PMLK_CLEAR;
+    PMLK_KP_6: if ANumLock then Result := PMLK_6 else Result := PMLK_RIGHT;
+    PMLK_KP_7: if ANumLock then Result := PMLK_7 else Result := PMLK_HOME;
+    PMLK_KP_8: if ANumLock then Result := PMLK_8 else Result := PMLK_UP;
+    PMLK_KP_9: if ANumLock then Result := PMLK_9 else Result := PMLK_PAGEUP;
+    PMLK_KP_0: if ANumLock then Result := PMLK_0 else Result := PMLK_INSERT;
+    PMLK_KP_PERIOD: if ANumLock then Result := PMLK_PERIOD else Result := PMLK_DELETE;
+    PMLK_KP_EQUALS: Result := PMLK_EQUALS;
+    PMLK_KP_COMMA: Result := PMLK_COMMA;
+    PMLK_KP_EQUALSAS400: Result := PMLK_EQUALS;
+    PMLK_KP_LEFTPAREN: Result := PMLK_LEFTPAREN;
+    PMLK_KP_RIGHTPAREN: Result := PMLK_RIGHTPAREN;
+    PMLK_KP_LEFTBRACE: Result := PMLK_LEFTBRACE;
+    PMLK_KP_RIGHTBRACE: Result := PMLK_RIGHTBRACE;
+    PMLK_KP_TAB: Result := PMLK_TAB;
+    PMLK_KP_BACKSPACE: Result := PMLK_BACKSPACE;
+    PMLK_KP_A: Result := PMLK_A;
+    PMLK_KP_B: Result := PMLK_B;
+    PMLK_KP_C: Result := PMLK_C;
+    PMLK_KP_D: Result := PMLK_D;
+    PMLK_KP_E: Result := PMLK_E;
+    PMLK_KP_F: Result := PMLK_F;
+    PMLK_KP_PERCENT: Result := PMLK_PERCENT;
+    PMLK_KP_LESS: Result := PMLK_LESS;
+    PMLK_KP_GREATER: Result := PMLK_GREATER;
+    PMLK_KP_AMPERSAND: Result := PMLK_AMPERSAND;
+    PMLK_KP_COLON: Result := PMLK_COLON;
+    PMLK_KP_HASH: Result := PMLK_HASH;
+    PMLK_KP_SPACE: Result := PMLK_SPACE;
+    PMLK_KP_AT: Result := PMLK_AT;
+    PMLK_KP_EXCLAM: Result := PMLK_EXCLAIM;
+    PMLK_KP_PLUSMINUS: Result := PMLK_PLUSMINUS;
+  else
+    Result := AKeycode;
+  end;
+end;
+
+{ SDL_KeycodeOptionsChanged。
+
+  PORT-NOTE: SDL は SDL_strstr（部分文字列の検索）で "none" などを探すので、
+  "nonexistent" のような語にも "none" が含まれると見なす。papimela は
+  カンマで分けた語を丸ごと比べる（大文字小文字は区別しない）。 }
+function PMLParseKeycodeOptions(const AHint: String): TPMLKeycodeOptions;
+var
+  Tokens: TStringArray;
+  Token: String;
+  I: Integer;
+begin
+  if AHint = '' then
+    Exit(PML_DEFAULT_KEYCODE_OPTIONS);
+  Result := [];
+  Tokens := AHint.Split(',');
+  for I := 0 to High(Tokens) do
+  begin
+    Token := Trim(Tokens[I]);
+    if SameText(Token, 'none') then
+      Exit([])
+    else if SameText(Token, 'hide_numpad') then
+      Include(Result, TPMLKeycodeOption.HideNumpad)
+    else if SameText(Token, 'french_numbers') then
+      Include(Result, TPMLKeycodeOption.FrenchNumbers)
+    else if SameText(Token, 'latin_letters') then
+      Include(Result, TPMLKeycodeOption.LatinLetters);
   end;
 end;
 

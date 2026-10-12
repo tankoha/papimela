@@ -46,6 +46,7 @@ uses
   PaPiMeLa.Types,
   PaPiMeLa.Errors,
   PaPiMeLa.Core.Base,
+  PaPiMeLa.Properties,
   PaPiMeLa.Threading,
   PaPiMeLa.Keycodes,
   PaPiMeLa.Events.Keymap;
@@ -304,6 +305,10 @@ type
     procedure ReleaseAll(AWindowID: TPMLWindowID);
     procedure Emit(const AItem: TPMLDeferredKey; AWithText: Boolean);
     procedure Drain;
+    // ヒント PAPIMELA_KEYCODE_OPTIONS の変更（SDL_KeycodeOptionsChanged）。
+    procedure KeycodeOptionsChanged(const AName: String; const AOld, ANew: TPMLHintValue);
+    // SDL_GetKeyFromScancode（key_event = true）。AModifiers は NumLock の判定に使う。
+    function  KeyForScancode(AScancode: TPMLScancode; AModifiers: TPMLKeyModifiers): TPMLKeycode;
   public
     constructor Create(AContextRef: TObject; AQueue: TPMLEventQueue);
     destructor Destroy; override;
@@ -1006,10 +1011,17 @@ begin
   FKeycodeOptions := PML_DEFAULT_KEYCODE_OPTIONS;
   FDeferred := TPMLDeferredKeyQueue.Create;
   FNextTicket := 1;
+  // SDL_InitKeyboard と同じ。ヒントを見て FKeycodeOptions を決める
+  // （AddCallback はその場で 1 度呼ぶので、作った時点の値が入る）。
+  if (ContextServices <> nil) and (ContextServices.Hints <> nil) then
+    ContextServices.Hints.AddCallback(PML_HINT_KEYCODE_OPTIONS, @KeycodeOptionsChanged);
 end;
 
 destructor TPMLKeyboardState.Destroy;
 begin
+  // 何かを壊す前に外す（ヒントの変更がここへ届かないように）。
+  if (ContextServices <> nil) and (ContextServices.Hints <> nil) then
+    ContextServices.Hints.RemoveCallback(PML_HINT_KEYCODE_OPTIONS, @KeycodeOptionsChanged);
   FreeAndNil(FDeferred);
   FreeAndNil(FKeymap);
   inherited Destroy;
@@ -1018,6 +1030,23 @@ end;
 function TPMLKeyboardState.GetIsDown(AScancode: TPMLScancode): Boolean;
 begin
   Result := FDown[AScancode];
+end;
+
+procedure TPMLKeyboardState.KeycodeOptionsChanged(const AName: String;
+  const AOld, ANew: TPMLHintValue);
+begin
+  // 置かれていないヒントの Value は ''（PMLParseKeycodeOptions は既定を返す）。
+  FKeycodeOptions := PMLParseKeycodeOptions(ANew.Value);
+end;
+
+{ SDL_GetKeyFromScancode（key_event = true）。キーマップから決めた後に、hide_numpad なら
+  テンキーのキーコードを置き換える。 }
+function TPMLKeyboardState.KeyForScancode(AScancode: TPMLScancode;
+  AModifiers: TPMLKeyModifiers): TPMLKeycode;
+begin
+  Result := FKeymap.KeyForEvent(AScancode, FKeycodeOptions);
+  if TPMLKeycodeOption.HideNumpad in FKeycodeOptions then
+    Result := PMLConvertNumpadKeycode(Result, TPMLKeyModifier.NumLock in AModifiers);
 end;
 
 function TPMLKeyboardState.DeferredCount: Integer;
@@ -1056,7 +1085,7 @@ begin
       Ev.Segments := nil;
       Ev.Strings := nil;
       Ev.Key.Scancode := S;
-      Ev.Key.Key := FKeymap.KeyForEvent(S, FKeycodeOptions);
+      Ev.Key.Key := KeyForScancode(S, FModifiers);
       Ev.Key.Modifiers := FModifiers;
       FQueue.Push(Ev);
     end;
@@ -1196,7 +1225,11 @@ procedure TPMLKeyboardState.SendKey(AWindowID: TPMLWindowID;
 var
   Item: TPMLDeferredKey;
   Filtered: TPMLKeyFilterResult;
+  PrevModifiers: TPMLKeyModifiers;
 begin
+  // hide_numpad の NumLock は、SDL と同じくこのキーより前の状態（SDL の keyboard->modstate）で
+  // 見る。バックエンドは SendModifiers で状態を先に伝える。
+  PrevModifiers := FModifiers;
   FModifiers := AKey.Modifiers;
   Item.Key := AKey;
 
@@ -1214,7 +1247,7 @@ begin
       Exit;
     FDown[Item.Key.Scancode] := ADown;
     if Item.Key.Key = PMLK_UNKNOWN then
-      Item.Key.Key := FKeymap.KeyForEvent(Item.Key.Scancode, FKeycodeOptions);
+      Item.Key.Key := KeyForScancode(Item.Key.Scancode, PrevModifiers);
   end;
 
   Item.Ticket := FNextTicket;

@@ -53,6 +53,19 @@ const
   PML_HINT_VIDEO   = 'PAPIMELA_VIDEO';
   // IME のバックエンドの名前（'fcitx'、'ibus'、'wayland'、'none'）。空なら自動で選ぶ。
   PML_HINT_IME     = 'PAPIMELA_IME';
+  // アプリの ID（Wayland の app_id など。SDL_HINT_APP_ID）。空なら FLATPAK_ID、無ければ実行ファイルの名前。
+  PML_HINT_APP_ID  = 'PAPIMELA_APP_ID';
+  // キーイベントのキーコードの決め方（SDL_HINT_KEYCODE_OPTIONS）。カンマ区切りで
+  // none / hide_numpad / french_numbers / latin_letters。空なら french_numbers,latin_letters。
+  PML_HINT_KEYCODE_OPTIONS = 'PAPIMELA_KEYCODE_OPTIONS';
+  // ウィンドウへ描くレンダラのドライバ（SDL_HINT_RENDER_DRIVER）。カンマ区切りで順に試す。
+  PML_HINT_RENDER_DRIVER   = 'PAPIMELA_RENDER_DRIVER';
+  // レンダラを作ったときの VSync（SDL_HINT_RENDER_VSYNC）。空でなければ真偽で 1 / 0。
+  PML_HINT_RENDER_VSYNC    = 'PAPIMELA_RENDER_VSYNC';
+  // 読み込む EGL のライブラリ（SDL_HINT_EGL_LIBRARY）。
+  PML_HINT_EGL_LIBRARY     = 'PAPIMELA_EGL_LIBRARY';
+  // 読み込む GL のライブラリ（SDL_HINT_OPENGL_LIBRARY。papimela では GLES のライブラリ）。
+  PML_HINT_OPENGL_LIBRARY  = 'PAPIMELA_OPENGL_LIBRARY';
 
 type
   TPMLProperties = class;
@@ -220,6 +233,10 @@ type
     // 無ければ何もしない。
     procedure RemoveCallback(const AName: String; ACallback: TPMLHintCallback);
   end;
+
+{ 環境変数を libc の getenv で読む。無ければ False（空の値は True で ''）。
+  FPC の GetEnvironmentVariable は「無い」と「空」を区別せず、起動後の setenv も見えない。 }
+function PMLGetEnvironment(const AName: String; out AValue: String): Boolean;
 
 { SDL_GetStringBoolean。'' なら ADefault、'0' で始まるか 'false'（大文字小文字を
   区別しない）なら False、それ以外は True。 }
@@ -1260,6 +1277,18 @@ begin
   finally
     FLock.Unlock;
   end;
+end;
+
+function PMLGetEnvironment(const AName: String; out AValue: String): Boolean;
+var
+  P: PAnsiChar;
+begin
+  P := c_getenv(PAnsiChar(AName));
+  Result := P <> nil;
+  if Result then
+    AValue := String(P)
+  else
+    AValue := '';
 end;
 
 end.

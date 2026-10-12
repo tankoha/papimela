@@ -17,6 +17,8 @@
 
   RESOLVED:
     - 親は子への参照を持ち、子は親への借用参照を持つ。破棄は常に親から
+    - 下の層の部品がヒント・ログ・プロパティに届く道は TPMLContextBase（ContextServices）。
+      TPMLContext の型は下の層から見えないので、それが持つものだけをここに置く
     - CheckMainThread は PAPIMELA_DEBUG 時のみ実体を持つ
 
   Copyright (C) 2026 papimela contributors
@@ -30,9 +32,13 @@ interface
 
 uses
   SysUtils, Classes,
-  PaPiMeLa.Errors;
+  PaPiMeLa.Errors,
+  PaPiMeLa.Properties,
+  PaPiMeLa.Log;
 
 type
+  TPMLContextBase = class;
+
   TPMLObject = class abstract(TObject)
   strict private
     FContextRef  : TObject;
@@ -45,7 +51,26 @@ type
   public
     // ルートへの借用参照。PaPiMeLa.Core が TPMLContext へキャストして使う。
     property ContextRef  : TObject read FContextRef;
+    // ルート（Context）の持つヒント・ログ・プロパティへの道。Context 自身なら自分。
+    // Context 無しで作られた物（単体のサーフェスなど）では nil。
+    function  ContextServices: TPMLContextBase;
     property MainThreadID: TThreadID read FMainThreadID;
+  end;
+
+  { Context の土台。TPMLContext（PaPiMeLa.Core）がこれを継承し、作り始めにヒント・
+    ログ・プロパティを作る。下の層の部品は ContextServices でここに届く。 }
+  TPMLContextBase = class abstract(TPMLObject)
+  strict protected
+    FHints     : TPMLHints;
+    FProperties: TPMLProperties;
+    FLog       : TPMLLog;
+  public
+    { アプリの ID（SDL_GetAppID）。Wayland の app_id などに使う。ヒント PML_HINT_APP_ID が
+      空でなければそれ、次に環境変数 FLATPAK_ID、無ければ実行ファイルの名前（ApplicationName）。 }
+    function  AppID: String;
+    property  Hints     : TPMLHints      read FHints;
+    property  Properties: TPMLProperties read FProperties;
+    property  Log       : TPMLLog        read FLog;
   end;
 
   { 所有者（サブシステム）だけが生成・破棄する。アプリは Free してはならない。 }
@@ -83,6 +108,16 @@ begin
     FMainThreadID := GetCurrentThreadID;
 end;
 
+function TPMLObject.ContextServices: TPMLContextBase;
+begin
+  if Self is TPMLContextBase then
+    Result := TPMLContextBase(Self)
+  else if FContextRef is TPMLContextBase then
+    Result := TPMLContextBase(FContextRef)
+  else
+    Result := nil;
+end;
+
 procedure TPMLObject.SetMainThreadID(AID: TThreadID);
 begin
   FMainThreadID := AID;
@@ -96,6 +131,17 @@ begin
       '%s must be used from the main thread (context thread %d, current %d)',
       [ClassName, PtrUInt(FMainThreadID), PtrUInt(GetCurrentThreadID)]);
 {$endif}
+end;
+
+function TPMLContextBase.AppID: String;
+begin
+  Result := '';
+  if FHints <> nil then
+    Result := FHints.GetHint(PML_HINT_APP_ID);
+  if Result = '' then
+    PMLGetEnvironment('FLATPAK_ID', Result);
+  if Result = '' then
+    Result := ApplicationName;
 end;
 
 constructor TPMLSystemObject.Create(AContextRef: TObject; AOwner: TPMLObject);

@@ -255,6 +255,8 @@ end;
 constructor TPMLWaylandWindowBackend.Create(AContextRef: TObject; AOwner: TPMLObject;
   AConn: TPMLWaylandConnection; ASink: IPMLVideoSink; AWindowID: TPMLWindowID;
   const ATitle: String; AWidth, AHeight: Integer; AFlags: TPMLWindowFlags);
+var
+  AppID: String;
 begin
   inherited Create(AContextRef, AOwner);
   FConn := AConn;
@@ -290,7 +292,12 @@ begin
   xdg_toplevel_add_listener_object(FToplevel, FTlFwd);
 
   xdg_toplevel_set_title(FToplevel, PAnsiChar(ATitle));
-  xdg_toplevel_set_app_id(FToplevel, PAnsiChar(ApplicationName));
+  // app_id は作った時点の値を 1 度だけ読む（SDL も作成時に控える）。Context が無ければ実行ファイルの名前。
+  if ContextServices <> nil then
+    AppID := ContextServices.AppID
+  else
+    AppID := ApplicationName;
+  xdg_toplevel_set_app_id(FToplevel, PAnsiChar(AppID));
 
   // サーバサイド装飾があれば使う（無ければ装飾なしで妥協。libdecor は #69）。
   if FConn.DecorationMgr <> nil then
