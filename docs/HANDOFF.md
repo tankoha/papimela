@@ -13,7 +13,7 @@
 |---|---|
 | リポジトリ | https://github.com/tankoha/papimela（公開、Issues 有効）。手元のセッションは `master` に直接 push、クラウドのセッションは指定のブランチへ push して、手元で早送りマージする |
 | CI | 緑。rawpaco 激辛、checkorigin、アンブレラの古さ（`genumbrella.bb --check`）、図の検査、表示サーバ無しのテスト 27 本、Pong の自己検査、GLES2 と ソフトウェアのドライバの画素比較（llvmpipe）。ジョブ 60 分・GLES2 の手順 5 分の時間制限つき |
-| テスト | 表示サーバ無しの 27 本・1082 件はすべて成功（2026-10-10 に手元で作り直して全部流した）。手元専用と対話の検査は `docs/TEST-LOG.md` の各行 |
+| テスト | 表示サーバ無しの 27 本・1117 件はすべて成功（2026-10-10 に手元で作り直して全部流した）。手元専用と対話の検査は `docs/TEST-LOG.md` の各行 |
 | 不具合 | 57 件。うち上流 SDL の 9 件は未報告（D-53 は SDL 自身が FIXME で知っている。他の 8 件は報告するかを検討中。方針は `CLAUDE.md`） |
 | 規模 | 手書き 52 ユニット（`src/*.pas`）+ 生成（Wayland プロトコル 21、キーボードの表 2、EGL / GLES2 の定数 2、DebugText の字形 1、アンブレラ 2）。約 4.2 万行 |
 
@@ -62,7 +62,7 @@ EGL の GL コンテキスト（スワップ間隔はコンテキストごと）
 
 ## 3. 次の候補（おすすめ順）
 
-1. **ヒントを使う側（小さい）**: **A は 2026-10-13 に済んだ**（KEYCODE_OPTIONS と hide_numpad、APP_ID、RENDER_DRIVER / RENDER_VSYNC、EGL_LIBRARY / OPENGL_LIBRARY。T-47。下の層からは `ContextServices` で Context の土台に届く）。残りは B（THREAD_PRIORITY_POLICY と実時間、IME_IMPLEMENTED_UI、QUIT_ON_LAST_WINDOW_CLOSE、NO_SIGNAL_HANDLERS、EVENT_LOGGING）。C（ダブルクリック、タッチとマウス、スクリーンセーバー、libdecor など）は機能そのものが先に要る。
+1. **ヒントを使う側（小さい）**: **A は 2026-10-13 に済んだ**（KEYCODE_OPTIONS と hide_numpad、APP_ID、RENDER_DRIVER / RENDER_VSYNC、EGL_LIBRARY / OPENGL_LIBRARY。T-47。下の層からは `ContextServices` で Context の土台に届く）。**B も同日に済んだ**（THREAD_PRIORITY_POLICY と実時間・D-58 の直し、IME_IMPLEMENTED_UI（papimela の既定は composition）、QUIT_ON_LAST_WINDOW_CLOSE、NO_SIGNAL_HANDLERS、EVENT_LOGGING。T-47 の 6〜10 と T-48。SDL から写した規則は `PaPiMeLa.Events.Quit`（#72）に分けた）。C（ダブルクリック、タッチとマウス、スクリーンセーバー、libdecor など）は機能そのものが先に要る。
    ヒントは Context を作る前から置ける（`TPMLContextOptions.Hints`、2026-10-10）。
    `PAPIMELA_VIDEO` / `PAPIMELA_IME` もヒントで選ぶようになった。次は SDL のヒントのうち papimela に効くもの
    （THREAD_PRIORITY_POLICY の実時間スケジューリングなど）を足すこと。既存のコードの `FLastNonFatalError` のような
@@ -237,6 +237,11 @@ man-db などの設定は所有者の切り替えで失敗するが、`dpkg -r -
   外すと解放した要素を辿る、`SDL_ResetLogPriorities` とヒントの知らせが逆の順で排他を取る
 - SDL の X11 の GLX の経路では、作った直後のスワップ間隔が 1 だった（SDL の「既定で VSync 無し」が効いていない。
   D-53 の確認の途中で見た。追っていない。papimela は X11 を持たないので急がない）
+- **`PaPiMeLa.Events` の由来の食い違い**（2026-10-13 に気づいた）: ヘッダは「クリーンルーム」だが、中の
+  `TPMLKeyboardState`（押下状態の規則）は「SDL_keyboard.c に従う」という PORT-NOTE を持ち、設計書 #24 でも
+  「状態機械は移植」。checkorigin はヘッダと設計書 #22 しか見ないので通っている。キーボードの状態を
+  `PaPiMeLa.Events.Keyboard`（一部移植）に分けるか、ヘッダを「一部移植」に直すか。§3 の 1 の A で足した
+  hide_numpad の配線もこの部分にある
 - D-40 の「止まる」側の仕組み（llvmpipe の作業スレッドで例外が起きる）は推測のまま
 
 2026-10-10 に片付いたもの: README に D-36・D-38・D-42 と浮動小数点の例外（D-40）を載せた。同日、D-53〜D-57 と「現状」の数字も載せた。Context を作る前のヒントは `TPMLContextOptions.Hints` に置く形にして、実装した。D-44 の丸めは四捨五入のまま。

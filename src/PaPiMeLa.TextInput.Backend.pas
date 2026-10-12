@@ -26,19 +26,42 @@ interface
 uses
   SysUtils,
   PaPiMeLa.Types,
+  PaPiMeLa.Core.Base,
+  PaPiMeLa.Properties,
   PaPiMeLa.Events,
   PaPiMeLa.Video,
   PaPiMeLa.TextInput;
 
 type
+  // アプリが自分で描く IME の部品（ヒント PAPIMELA_IME_IMPLEMENTED_UI）。
+  TPMLImeUIElement  = (Composition, Candidates);
+  TPMLImeUIElements = set of TPMLImeUIElement;
+
   TPMLTextInputBackend = class abstract(TObject, IPMLTextInputBackend)
   strict protected
     FSink: IPMLTextInputSink;
     FVideo: TPMLVideoSystem;     // 借りている。AttachVideo で受け取る（nil もありうる）
+    FContextServices: TPMLContextBase;  // 借りている。AttachContext で受け取る（nil もありうる）
+    FImeUI: TPMLImeUIElements;   // ヒント PAPIMELA_IME_IMPLEMENTED_UI の今の値（読んだもの）
+    FImeUIChanged: Boolean;      // 最後に Take した後で FImeUI が変わった。変わりうるのは SetHint したスレッド
+    FImeUIHints: TPMLHints;      // コールバックを置いたヒント表（借りている）。nil なら置いていない
+    { ヒントの表。AttachContext で受け取った Context の表、無ければ AttachVideo で受け取った
+      ビデオの Context の表。どちらも無ければ nil。 }
+    function  FindHints: TPMLHints;
+    { ヒントの変更を受け取り始める。置いた時点の値が FImeUI に入る（変更の印は付かない）。
+      二重に呼んでも 1 つだけ。ヒントの表が無ければ FImeUI は既定（[Composition]）のまま。 }
+    procedure SubscribeImeUI;
+    { 受け取るのをやめる。SubscribeImeUI していなければ何もしない。 }
+    procedure UnsubscribeImeUI;
+    { FImeUI が変わっていたら True を返して印を消す。変わったときの送り直しはメインスレッドで
+      （コールバックはどのスレッドからも来る）。 }
+    function  TakeImeUIChanged: Boolean;
   public
     function  BackendName: String; virtual; abstract;
     function  Capabilities: TPMLTextInputCapabilities; virtual;
     procedure AttachVideo(AVideo: TPMLVideoSystem); virtual;
+    // Context の土台（ヒントやログ）を渡す。Connect より前に呼ぶ。ビデオを使わない Context でも渡す。
+    procedure AttachContext(AServices: TPMLContextBase);
     function  Connect(ASink: IPMLTextInputSink): Boolean; virtual; abstract;
     procedure Disconnect; virtual;
     procedure Activate(AWindow: TPMLWindow; AType: TPMLTextInputType;
@@ -50,6 +73,8 @@ type
     function  FilterKey(const AKey: TPMLKeyEventData; AIsRelease: Boolean;
       ATicket: LongWord): TPMLKeyFilterResult; virtual;
     procedure Pump(ATimeoutMs: Integer); virtual;
+  private
+    procedure ImeUIHintChanged(const AName: String; const AOld, ANew: TPMLHintValue);
   end;
 
   { IME が無い環境。キーはそのままアプリへ流れる。 }
@@ -62,6 +87,13 @@ type
   TPMLTextInputBackendFactory = function: TPMLTextInputBackend;
 
 { ---- バックエンドが共有する変換 ---- }
+
+{ ヒント PAPIMELA_IME_IMPLEMENTED_UI の値を読む。カンマで分けた語（前後の空白は除き、大文字
+  小文字は区別しない）の 'composition' / 'candidates' の和。'none' か '0' があれば空。
+  値が空（置かれていない）なら [Composition]: papimela は変換中の文字を全文節つきでアプリへ渡す
+  のが既定（SDL の既定は none で、変換中の文字は IME が自分で描く）。 }
+function PMLParseImeImplementedUI(const AHint: String): TPMLImeUIElements;
+
 
 // 修飾キーを X11 の状態マスク（ShiftMask=1、LockMask=2、ControlMask=4、Mod1=8（Alt）、
 // Mod2=16（NumLock）、Mod4=64（Super））にする。Fcitx5 も IBus もこれで話す。
@@ -141,6 +173,60 @@ begin
   Result.AfterBytes := UTF8CharToByteOffset(AText, ACursorChar + Result.AfterChars) - CurByte;
 end;
 
+procedure TPMLTextInputBackend.AttachContext(AServices: TPMLContextBase);
+begin
+  FContextServices := AServices;
+end;
+
+function TPMLTextInputBackend.FindHints: TPMLHints;
+begin
+  Result := nil;
+  if Assigned(FContextServices) then
+    Exit(FContextServices.Hints);
+  if Assigned(FVideo) and Assigned(FVideo.ContextServices) then
+    Result := FVideo.ContextServices.Hints;
+end;
+
+procedure TPMLTextInputBackend.ImeUIHintChanged(const AName: String;
+  const AOld, ANew: TPMLHintValue);
+var
+  NewUI: TPMLImeUIElements;
+begin
+  // 置かれていないヒントの Value は ''（既定の [Composition] になる）。
+  NewUI := PMLParseImeImplementedUI(ANew.Value);
+  if NewUI <> FImeUI then
+  begin
+    FImeUI := NewUI;
+    FImeUIChanged := True;
+  end;
+end;
+
+procedure TPMLTextInputBackend.SubscribeImeUI;
+begin
+  FImeUI := PMLParseImeImplementedUI('');
+  if Assigned(FImeUIHints) then
+    Exit;
+  FImeUIHints := FindHints;
+  if not Assigned(FImeUIHints) then
+    Exit;
+  // AddCallback はその場で 1 度呼ぶので、今の値が FImeUI に入る。
+  FImeUIHints.AddCallback(PML_HINT_IME_IMPLEMENTED_UI, @ImeUIHintChanged);
+  FImeUIChanged := False;
+end;
+
+procedure TPMLTextInputBackend.UnsubscribeImeUI;
+begin
+  if Assigned(FImeUIHints) then
+    FImeUIHints.RemoveCallback(PML_HINT_IME_IMPLEMENTED_UI, @ImeUIHintChanged);
+  FImeUIHints := nil;
+end;
+
+function TPMLTextInputBackend.TakeImeUIChanged: Boolean;
+begin
+  Result := FImeUIChanged;
+  FImeUIChanged := False;
+end;
+
 function TPMLTextInputBackend.Capabilities: TPMLTextInputCapabilities;
 begin
   Result := [];
@@ -148,6 +234,7 @@ end;
 
 procedure TPMLTextInputBackend.Disconnect;
 begin
+  UnsubscribeImeUI;
   FSink := nil;
 end;
 
@@ -270,6 +357,45 @@ begin
     Result := TextInputRegistry[I].Factory
   else
     Result := nil;
+end;
+
+function PMLParseImeImplementedUI(const AHint: String): TPMLImeUIElements;
+var
+  Rest, Token: String;
+  P: Integer;
+  Found: TPMLImeUIElements;
+  IsNone: Boolean;
+begin
+  // 空白だけの値も、置かれていないのと同じに扱う。
+  if Trim(AHint) = '' then
+    Exit([TPMLImeUIElement.Composition]);
+  Found := [];
+  IsNone := False;
+  Rest := AHint;
+  repeat
+    P := Pos(',', Rest);
+    if P > 0 then
+    begin
+      Token := Trim(Copy(Rest, 1, P - 1));
+      Delete(Rest, 1, P);
+    end
+    else
+    begin
+      Token := Trim(Rest);
+      Rest := '';
+    end;
+    if SameText(Token, 'composition') then
+      Include(Found, TPMLImeUIElement.Composition)
+    else if SameText(Token, 'candidates') then
+      Include(Found, TPMLImeUIElement.Candidates)
+    else if SameText(Token, 'none') or (Token = '0') then
+      IsNone := True;
+  until (P = 0);
+  // 'none' は他の語より強い。知らない語は無視する。
+  if IsNone then
+    Result := []
+  else
+    Result := Found;
 end;
 
 end.

@@ -291,6 +291,7 @@ var
     Result := False;
     if ACandidate = nil then
       Exit;
+    ACandidate.AttachContext(ContextServices);
     ACandidate.AttachVideo(AVideo);
     if not ACandidate.Connect(Self as IPMLTextInputSink) then
     begin

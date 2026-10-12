@@ -31,6 +31,9 @@
     - HidePreeditText は変換中テキストの消滅として扱う（確定の後・破棄で来る。実測）
     - RequireSurroundingText はキーごとに来る（実測）。前に送ったものと同じなら送らない
     - 入力の種類は ContentType プロパティ（(uu)、書き込み専用）で送る
+    - 能力（SetCapabilities）は FOCUS と SURROUNDING_TEXT に、ヒント PAPIMELA_IME_IMPLEMENTED_UI が
+      composition（置かれていなければこれ）なら PREEDIT_TEXT を足したもの。既定は 41。ヒントが
+      変わったら次の Pump で送り直す（ヒントはどのスレッドからも変えられるため）
     - 接続が切れたら、待っているキーを素通しにして、1 秒ごとにアドレスファイルを
       読み直して繋ぎ直す（ibus-daemon の再起動に追従する）
 
@@ -135,6 +138,7 @@ type
     function  OpenConnection: Boolean;
     procedure CloseConnection;
     procedure ConnectionLost;
+    procedure SendCapabilities;
     procedure SendActivation;
     procedure CallAsync(const AMethod: String);
     procedure SetComposition(const AComposition: TPMLComposition);
@@ -183,6 +187,10 @@ function PMLIBusParseAddressFile(const AContent: String; out AAddress: String;
 function PMLIBusIsFcitxEmulation(const AAddress, APidComm: String): Boolean;
 { 今の環境で使うアドレスを探す。見つからなければ空。AFile に見つけたファイル名。 }
 function PMLIBusFindAddress(out AFile: String; out AFromFcitx: Boolean): String;
+
+{ IBus の SetCapabilities に渡す値。FOCUS（1 shl 3）と周辺テキスト（1 shl 5）は常に。AUI に
+  Composition があれば PREEDIT_TEXT（1 shl 0）も。 }
+function PMLIBusCapabilities(AUI: TPMLImeUIElements): LongWord;
 
 implementation
 
@@ -681,11 +689,16 @@ function TPMLIBusTextInputBackend.Connect(ASink: IPMLTextInputSink): Boolean;
 begin
   Result := OpenConnection;
   if Result then
+  begin
     FSink := ASink;
+    // 変換中の文字をアプリが描くか（ヒント PAPIMELA_IME_IMPLEMENTED_UI）で能力が決まる。
+    SubscribeImeUI;
+  end;
 end;
 
 procedure TPMLIBusTextInputBackend.Disconnect;
 begin
+  UnsubscribeImeUI;
   CloseConnection;
   FPending := nil;
   FActive := False;
@@ -706,21 +719,28 @@ begin
   end;
 end;
 
+{ 能力を送る。値は変換中の文字をアプリが描くか（ヒント PAPIMELA_IME_IMPLEMENTED_UI）で決まる。 }
+procedure TPMLIBusTextInputBackend.SendCapabilities;
+var
+  Msg: PDBusMessage;
+begin
+  Msg := FConn.BeginCall(IBUS_SERVICE, FICPath, IC_IFACE, 'SetCapabilities');
+  try
+    FConn.Writer(Msg).AddUInt32(PMLIBusCapabilities(FImeUI));
+    FConn.SendAsync(Msg);
+  finally
+    FConn.Unref(Msg);
+  end;
+end;
+
 { 能力・入力の種類を送ってからフォーカスを渡す。繋ぎ直した後にも使う。 }
 procedure TPMLIBusTextInputBackend.SendActivation;
 var
   Msg: PDBusMessage;
   W, V, S: TPMLDBusWriter;
-  Caps, Purpose, Hint: LongWord;
+  Purpose, Hint: LongWord;
 begin
-  Caps := IBUS_CAP_PREEDIT_TEXT or IBUS_CAP_FOCUS or IBUS_CAP_SURROUNDING_TEXT;
-  Msg := FConn.BeginCall(IBUS_SERVICE, FICPath, IC_IFACE, 'SetCapabilities');
-  try
-    FConn.Writer(Msg).AddUInt32(Caps);
-    FConn.SendAsync(Msg);
-  finally
-    FConn.Unref(Msg);
-  end;
+  SendCapabilities;
 
   case FType of
     TPMLTextInputType.Name:     Purpose := IBUS_INPUT_PURPOSE_NAME;
@@ -1053,6 +1073,18 @@ begin
     end;
     Exit;
   end;
+  // ヒントが変わっていたら能力を送り直す（コールバックはどのスレッドからも来るので、
+  // D-Bus を触るのはメインスレッドで呼ばれるここ）。まだ Activate していなければ、
+  // Activate のときに新しい値で送る。
+  if TakeImeUIChanged and FActive then
+  begin
+    try
+      SendCapabilities;
+    except
+      on E: EPMLError do
+        FLastNonFatalError := 'SetCapabilities: ' + E.Message;
+    end;
+  end;
   repeat
     Msg := FConn.PopMessage(ATimeoutMs);
     if Msg = nil then
@@ -1073,6 +1105,13 @@ end;
 function CreateIBusTextInputBackend: TPMLTextInputBackend;
 begin
   Result := TPMLIBusTextInputBackend.Create;
+end;
+
+function PMLIBusCapabilities(AUI: TPMLImeUIElements): LongWord;
+begin
+  Result := IBUS_CAP_FOCUS or IBUS_CAP_SURROUNDING_TEXT;
+  if TPMLImeUIElement.Composition in AUI then
+    Result := Result or IBUS_CAP_PREEDIT_TEXT;
 end;
 
 initialization

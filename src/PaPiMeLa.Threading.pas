@@ -33,12 +33,22 @@
       ない」としている。papimela はスレッドを取り消す API を持たない
     - 優先度は SDL の Linux の既定（SCHED_OTHER のまま nice 値を変える。Low = 19、
       Normal = 0、High = -10、TimeCritical = -20）。setpriority が権限で断られたら
-      RealtimeKit（システムバス）の MakeThreadHighPriority に頼む。RealtimeKit の下限
+      RealtimeKit の MakeThreadHighPriorityWithPID に頼む。RealtimeKit の下限
       （MinNiceLevel）より上げることは頼まない
+    - RealtimeKit の相手は SDL と同じ選び方（セッションバスの xdg-desktop-portal の Realtime
+      を、RTTimeUSecMax が読めるときだけ先に使い、無ければシステムバスの RealtimeKit1）。
+      相手と上限・下限（MinNiceLevel、MaxRealtimePriority、RTTimeUSecMax）はプロセスで
+      1 度だけ読む。読めない値は SDL の既定（-20、99、200000）
+    - 実時間スケジューリング（SCHED_RR / SCHED_FIFO）は、ヒント
+      PAPIMELA_THREAD_PRIORITY_POLICY（current / other / rr / fifo）と
+      PAPIMELA_THREAD_FORCE_REALTIME_TIME_CRITICAL で選ぶ（PMLThreadSchedPolicy）。RR / FIFO
+      では RLIMIT_RTTIME と SCHED_RESET_ON_FORK を整えてから RealtimeKit の
+      MakeThreadRealtimeWithPID に頼む。sched_setscheduler で RR / FIFO にはしない（SDL と同じ）
+    - PORT-NOTE(bug): SDL は最初の 1 回だけ、実時間の優先度を RealtimeKit の上限を読む前に
+      既定の 99 から計算する（D-58）。ここでは上限を先に読む
+    - 方針を "fifo" にしても FIFO にはならない（RealtimeKit は RR しか渡さない。SDL も同じ: D-59）
 
   NOT RESOLVED:
-    - 実時間スケジューリング（SCHED_RR / SCHED_FIFO と RealtimeKit の MakeThreadRealtime）は
-      SDL ではヒントで選ぶ経路。ヒント（#6 Properties）が無いので入れていない
     - スレッドごとの値（SDL_GetTLS / SDL_SetTLS）は Pascal の threadvar で足りるので持たない
 
   Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
@@ -151,6 +161,9 @@ type
 
   TPMLThreadPriority = (Low, Normal, High, TimeCritical);
 
+  // スレッドのスケジューリングの方針（SCHED_OTHER / SCHED_RR / SCHED_FIFO）。
+  TPMLSchedPolicy = (Other, RR, FIFO);
+
   // TPMLThread.CreateFunc で走らせる関数。戻り値はスレッドの終わりの値（WaitFor で受け取る）。
   TPMLThreadFunc = function(AData: Pointer): Integer;
 
@@ -176,7 +189,17 @@ type
     property Name: String read FName;
 
     // 呼んだスレッド自身の優先度を変える。できなければ False（例外にしない）。
-    class function SetCurrentPriority(APriority: TPMLThreadPriority): Boolean; static;
+    class function SetCurrentPriority(APriority: TPMLThreadPriority): Boolean; overload; static;
+    { 方針つき（SDL_SYS_SetThreadPriority）。APolicyHint と AForceRealtimeTimeCritical は
+      ヒント PAPIMELA_THREAD_PRIORITY_POLICY と PAPIMELA_THREAD_FORCE_REALTIME_TIME_CRITICAL の値
+      （TPMLContextBase.SetCurrentThreadPriority が渡す）。方針は PMLThreadSchedPolicy で決め、
+      RR / FIFO なら RealtimeKit（xdg-desktop-portal の Realtime を先に、無ければシステムの
+      RealtimeKit1）に実時間を頼む。上げられなければ False。 }
+    class function SetCurrentPriority(APriority: TPMLThreadPriority; const APolicyHint: String;
+      AForceRealtimeTimeCritical: Boolean): Boolean; overload; static;
+    // 呼んだスレッドの今の方針と実時間の優先度（SCHED_OTHER なら 0）。
+    class function CurrentSchedPolicy: TPMLSchedPolicy; static;
+    class function CurrentRealtimePriority: Integer; static;
     // 呼んだスレッドの nice 値（-20〜19）。読めなければ 0。
     class function CurrentNiceValue: Integer; static;
     // 呼んだスレッドの OS 上の名前。
@@ -185,10 +208,24 @@ type
     class function Available: Boolean; static;
   end;
 
+{ スレッドの優先度を上げるときの方針を決める（SDL_SYS_SetThreadPriority の方針の部分）。
+  ヒントが無ければ（APolicyHint が空）、Low / Normal / High / TimeCritical はどれも Other。
+  AForceRealtimeTimeCritical なら TimeCritical は RR。APolicyHint が 'current' なら ACurrent、
+  'other' / 'rr' / 'fifo' ならそれ、それ以外の値なら上の既定。 }
+function PMLThreadSchedPolicy(APriority: TPMLThreadPriority; const APolicyHint: String;
+  AForceRealtimeTimeCritical: Boolean; ACurrent: TPMLSchedPolicy): TPMLSchedPolicy;
+{ RR / FIFO のときの実時間の優先度（SDL_SetLinuxThreadPriorityAndPolicy）。AMaxRealtime は
+  RealtimeKit の MaxRealtimePriority。Low は 1、Normal は半分、High は 3/4、TimeCritical は上限。 }
+function PMLRealtimePriority(APriority: TPMLThreadPriority; AMaxRealtime: Integer): Integer;
+{ RealtimeKit の MaxRealtimePriority（ポータルの Realtime を先に、無ければシステムの RealtimeKit1）。
+  どちらにも届かなければ 0。 }
+function PMLRealtimeKitMaxPriority: Integer;
+
 implementation
 
 uses
   BaseUnix, Unix, UnixType,
+  PaPiMeLa.Atomic,
   PaPiMeLa.Platform.DBus;
 
 const
@@ -622,52 +659,204 @@ begin
     Result := '';
 end;
 
-{ RealtimeKit に、このスレッドの nice 値を上げてもらう（権限の無いプロセス向け）。
-  MinNiceLevel より上げる値は頼まない（頼むと断られる）。 }
-function RealtimeKitNice(ATid: cint; ANice: Integer): Boolean;
+{ ---- RealtimeKit ---- }
+
 const
-  SERVICE = 'org.freedesktop.RealtimeKit1';
-  PATH    = '/org/freedesktop/RealtimeKit1';
-  IFACE   = 'org.freedesktop.RealtimeKit1';
+  RTKIT_NODE   = 'org.freedesktop.RealtimeKit1';
+  RTKIT_PATH   = '/org/freedesktop/RealtimeKit1';
+  RTKIT_IFACE  = 'org.freedesktop.RealtimeKit1';
+  PORTAL_NODE  = 'org.freedesktop.portal.Desktop';
+  PORTAL_PATH  = '/org/freedesktop/portal/desktop';
+  PORTAL_IFACE = 'org.freedesktop.portal.Realtime';
+
+type
+  { RealtimeKit の相手と、その上限・下限。プロセスで 1 度だけ決める（SDL の
+    rtkit_initialize_once）。UsePortal は SDL の rtkit_use_session_conn。 }
+  TRealtimeKitInfo = record
+    Init         : TPMLInitState;
+    UsePortal    : Boolean;
+    // 相手に届いたか（ポータルが答えた、または MaxRealtimePriority を読めた）。
+    Reachable    : Boolean;
+    MinNice      : Integer;
+    MaxRealtime  : Integer;
+    MaxRTTimeUSec: Int64;
+  end;
+
+var
+  GRealtimeKit: TRealtimeKitInfo;
+
+{ Properties.Get(AIface, AName) で整数の性質を読む。型が AType（int32 か int64）でなければ
+  読めなかったことにする（SDL_DBus_QueryPropertyOnConnection と同じ）。 }
+function QueryRealtimeKitProperty(AConn: TPMLDBusConnection; const ANode, APath, AIface,
+  AName: String; AType: LongInt; out AValue: Int64): Boolean;
+var
+  Msg, Reply: PDBusMessage;
+  W: TPMLDBusWriter;
+  R: TPMLDBusReader;
+begin
+  Result := False;
+  AValue := 0;
+  try
+    Msg := AConn.BeginCall(ANode, APath, 'org.freedesktop.DBus.Properties', 'Get');
+    Reply := nil;
+    try
+      W := AConn.Writer(Msg);
+      W.AddString(AIface);
+      W.AddString(AName);
+      Reply := AConn.Send(Msg, 1000);
+      R := AConn.Reader(Reply);
+      if R.ArgType = DBUS_TYPE_VARIANT then
+      begin
+        R := R.Recurse;
+        if R.ArgType = AType then
+        begin
+          if AType = DBUS_TYPE_INT64 then
+            AValue := R.AsInt64
+          else
+            AValue := R.AsInt32;
+          Result := True;
+        end;
+      end;
+    finally
+      AConn.Unref(Reply);
+      AConn.Unref(Msg);
+    end;
+  except
+    // 相手が居ない・性質が無い・断られた。読めなかったとして返す。
+    on E: EPMLError do
+      Result := False;
+  end;
+end;
+
+{ 呼び出し先の組（ポータルかシステムの RealtimeKit1）。 }
+procedure RealtimeKitTarget(AUsePortal: Boolean; out ANode, APath, AIface: String;
+  out ABus: LongInt);
+begin
+  if AUsePortal then
+  begin
+    ANode := PORTAL_NODE;
+    APath := PORTAL_PATH;
+    AIface := PORTAL_IFACE;
+    ABus := DBUS_BUS_SESSION;
+  end
+  else
+  begin
+    ANode := RTKIT_NODE;
+    APath := RTKIT_PATH;
+    AIface := RTKIT_IFACE;
+    ABus := DBUS_BUS_SYSTEM;
+  end;
+end;
+
+{ SDL の set_rtkit_interface。xdg-desktop-portal の Realtime は、セッションバスで
+  RTTimeUSecMax（int64）が読めるときだけ使う（読めれば、ポータルが居て Realtime を
+  持ち、必要な修正が入った版だと分かる）。読めなければシステムの RealtimeKit1。
+  繋いだ接続を返す（どちらにも繋げなければ nil）。 }
+function OpenRealtimeKitConnection(out AUsePortal: Boolean): TPMLDBusConnection;
+var
+  V: Int64;
+begin
+  Result := nil;
+  AUsePortal := False;
+  try
+    Result := TPMLDBusConnection.Create(DBUS_BUS_SESSION);
+    AUsePortal := QueryRealtimeKitProperty(Result, PORTAL_NODE, PORTAL_PATH, PORTAL_IFACE,
+      'RTTimeUSecMax', DBUS_TYPE_INT64, V);
+  except
+    // セッションバスに繋げない。システムの RealtimeKit1 へ。
+    on E: EPMLError do
+      AUsePortal := False;
+  end;
+  if AUsePortal then
+    Exit;
+  FreeAndNil(Result);
+  try
+    Result := TPMLDBusConnection.Create(DBUS_BUS_SYSTEM);
+  except
+    // システムバスにも繋げない。
+    on E: EPMLError do
+      Result := nil;
+  end;
+end;
+
+{ SDL の rtkit_initialize。読めなかった値は SDL の既定（MinNiceLevel -20、
+  MaxRealtimePriority 99、RTTimeUSecMax 200000）のまま。 }
+procedure InitializeRealtimeKit;
+var
+  Conn: TPMLDBusConnection;
+  Node, Path, Iface: String;
+  Bus: LongInt;
+  UsePortal: Boolean;
+  V: Int64;
+begin
+  GRealtimeKit.Reachable := False;
+  GRealtimeKit.MinNice := -20;
+  GRealtimeKit.MaxRealtime := 99;
+  GRealtimeKit.MaxRTTimeUSec := 200000;
+  Conn := OpenRealtimeKitConnection(UsePortal);
+  GRealtimeKit.UsePortal := UsePortal;
+  if UsePortal then
+    GRealtimeKit.Reachable := True;
+  if Conn = nil then
+    Exit;
+  try
+    RealtimeKitTarget(UsePortal, Node, Path, Iface, Bus);
+    if QueryRealtimeKitProperty(Conn, Node, Path, Iface, 'MinNiceLevel', DBUS_TYPE_INT32, V) then
+      GRealtimeKit.MinNice := Integer(V);
+    if QueryRealtimeKitProperty(Conn, Node, Path, Iface, 'MaxRealtimePriority', DBUS_TYPE_INT32, V) then
+    begin
+      GRealtimeKit.MaxRealtime := Integer(V);
+      GRealtimeKit.Reachable := True;
+    end;
+    if QueryRealtimeKitProperty(Conn, Node, Path, Iface, 'RTTimeUSecMax', DBUS_TYPE_INT64, V) then
+      GRealtimeKit.MaxRTTimeUSec := V;
+  finally
+    Conn.Free;
+  end;
+end;
+
+{ 1 度だけ InitializeRealtimeKit を走らせる。走っている最中の他のスレッドは終わるまで待つ。 }
+procedure EnsureRealtimeKit;
+begin
+  if GRealtimeKit.Init.ShouldInit then
+  begin
+    try
+      InitializeRealtimeKit;
+    finally
+      GRealtimeKit.Init.SetInitialized(True);
+    end;
+  end;
+end;
+
+{ RealtimeKit に ATid の優先度を頼む。AIsRealtime なら MakeThreadRealtimeWithPID(pid, tid,
+  uint32 優先度)、そうでなければ MakeThreadHighPriorityWithPID(pid, tid, int32 nice)。 }
+function RealtimeKitCall(ATid: cint; AIsRealtime: Boolean; AValue: Integer): Boolean;
 var
   Conn: TPMLDBusConnection;
   Msg, Reply: PDBusMessage;
   W: TPMLDBusWriter;
-  R: TPMLDBusReader;
-  MinNice: Integer;
+  Node, Path, Iface, Method: String;
+  Bus: LongInt;
 begin
   Result := False;
+  RealtimeKitTarget(GRealtimeKit.UsePortal, Node, Path, Iface, Bus);
+  if AIsRealtime then
+    Method := 'MakeThreadRealtimeWithPID'
+  else
+    Method := 'MakeThreadHighPriorityWithPID';
   try
-    Conn := TPMLDBusConnection.Create(DBUS_BUS_SYSTEM);
+    Conn := TPMLDBusConnection.Create(Bus);
     try
-      MinNice := -15;
-      // Properties.Get(s interface, s name) → v(i)
-      Msg := Conn.BeginCall(SERVICE, PATH, 'org.freedesktop.DBus.Properties', 'Get');
+      Msg := Conn.BeginCall(Node, Path, Iface, Method);
       Reply := nil;
       try
         W := Conn.Writer(Msg);
-        W.AddString(IFACE);
-        W.AddString('MinNiceLevel');
-        Reply := Conn.Send(Msg, 1000);
-        R := Conn.Reader(Reply);
-        if R.ArgType = DBUS_TYPE_VARIANT then
-        begin
-          R := R.Recurse;
-          if R.ArgType = DBUS_TYPE_INT32 then
-            MinNice := R.AsInt32;
-        end;
-      finally
-        Conn.Unref(Reply);
-        Conn.Unref(Msg);
-      end;
-      if ANice < MinNice then
-        ANice := MinNice;
-      Msg := Conn.BeginCall(SERVICE, PATH, IFACE, 'MakeThreadHighPriority');
-      Reply := nil;
-      try
-        W := Conn.Writer(Msg);
+        W.AddUInt64(QWord(fpGetPid));
         W.AddUInt64(QWord(ATid));
-        W.AddInt32(ANice);
+        if AIsRealtime then
+          W.AddUInt32(LongWord(AValue))
+        else
+          W.AddInt32(AValue);
         Reply := Conn.Send(Msg, 1000);
         Result := True;
       finally
@@ -678,10 +867,77 @@ begin
       Conn.Free;
     end;
   except
-    // システムバスが無い・RealtimeKit が居ない・断られた。優先度は変えられなかったとして返す。
+    // バスが無い・RealtimeKit が居ない・断られた。優先度は変えられなかったとして返す。
     on E: EPMLError do
       Result := False;
   end;
+end;
+
+{ RealtimeKit に、このスレッドの nice 値を上げてもらう（権限の無いプロセス向け）。
+  MinNiceLevel より上げる値は頼まない（頼むと断られる）。SDL の rtkit_setpriority_nice。 }
+function RealtimeKitNice(ATid: cint; ANice: Integer): Boolean;
+begin
+  EnsureRealtimeKit;
+  if ANice < GRealtimeKit.MinNice then
+    ANice := GRealtimeKit.MinNice;
+  Result := RealtimeKitCall(ATid, False, ANice);
+end;
+
+const
+  RLIMIT_RTTIME       = 15;
+  SCHED_RESET_ON_FORK = $40000000;
+  SCHED_FIFO_VALUE    = 1;
+  SCHED_RR_VALUE      = 2;
+
+type
+  TRLimit = record
+    rlim_cur, rlim_max: QWord;
+  end;
+  // glibc の struct sched_param は int 1 つ。他の libc で大きくても溢れないよう余白を取る。
+  TSchedParam = record
+    sched_priority: cint;
+    Reserved      : array[0..62] of cint;
+  end;
+
+function sched_getscheduler(pid: cint): cint; cdecl; external libc;
+function sched_setscheduler(pid: cint; policy: cint; param: Pointer): cint; cdecl; external libc;
+function sched_getparam(pid: cint; param: Pointer): cint; cdecl; external libc;
+function getrlimit(resource: cint; rlim: Pointer): cint; cdecl; external libc;
+function setrlimit(resource: cint; rlim: Pointer): cint; cdecl; external libc;
+
+{ SDL の rtkit_initialize_realtime_thread。RealtimeKit が実時間を渡す条件（RLIMIT_RTTIME を
+  置く、方針に SCHED_RESET_ON_FORK を足す）を整える。どこかで失敗したらそこで止めるが、
+  呼び出し側は結果を見ずに RealtimeKit へ頼む（SDL と同じ。本当に断られるかは RealtimeKit
+  に任せる）。呼ぶ前に EnsureRealtimeKit で MaxRTTimeUSec を読んでおくこと。 }
+procedure InitializeRealtimeThread;
+var
+  Lim: TRLimit;
+  Param: TSchedParam;
+  Policy: cint;
+begin
+  Policy := sched_getscheduler(0) or SCHED_RESET_ON_FORK;
+  FillChar(Param, SizeOf(Param), 0);
+  if getrlimit(RLIMIT_RTTIME, @Lim) <> 0 then
+    Exit;
+  Lim.rlim_max := QWord(GRealtimeKit.MaxRTTimeUSec);
+  Lim.rlim_cur := Lim.rlim_max div 2;
+  if setrlimit(RLIMIT_RTTIME, @Lim) <> 0 then
+    Exit;
+  if sched_getparam(0, @Param) <> 0 then
+    Exit;
+  sched_setscheduler(0, Policy, @Param);
+end;
+
+{ SDL の rtkit_setpriority_realtime。上限を超える優先度は上限に丸める。 }
+function RealtimeKitRealtime(ATid: cint; APriority: Integer): Boolean;
+begin
+  EnsureRealtimeKit;
+  if APriority > GRealtimeKit.MaxRealtime then
+    APriority := GRealtimeKit.MaxRealtime;
+  if APriority < 0 then
+    APriority := 0;
+  InitializeRealtimeThread;
+  Result := RealtimeKitCall(ATid, True, APriority);
 end;
 
 class function TPMLThread.SetCurrentPriority(APriority: TPMLThreadPriority): Boolean;
@@ -704,6 +960,98 @@ begin
     Result := RealtimeKitNice(Tid, Nice)
   else
     Result := False;
+end;
+
+function PMLThreadSchedPolicy(APriority: TPMLThreadPriority; const APolicyHint: String;
+  AForceRealtimeTimeCritical: Boolean; ACurrent: TPMLSchedPolicy): TPMLSchedPolicy;
+var
+  PriPolicy: TPMLSchedPolicy;
+begin
+  // Linux の SDL は、どの優先度でも既定は SCHED_OTHER（RR を既定にするのは Apple だけ）。
+  PriPolicy := TPMLSchedPolicy.Other;
+  if AForceRealtimeTimeCritical and (APriority = TPMLThreadPriority.TimeCritical) then
+    PriPolicy := TPMLSchedPolicy.RR;
+  // SDL_strcmp と同じく、大文字小文字を区別して完全に一致したときだけ。
+  if APolicyHint = 'current' then
+    Result := ACurrent
+  else if APolicyHint = 'other' then
+    Result := TPMLSchedPolicy.Other
+  else if APolicyHint = 'rr' then
+    Result := TPMLSchedPolicy.RR
+  else if APolicyHint = 'fifo' then
+    Result := TPMLSchedPolicy.FIFO
+  else
+    Result := PriPolicy;
+end;
+
+function PMLRealtimePriority(APriority: TPMLThreadPriority; AMaxRealtime: Integer): Integer;
+begin
+  case APriority of
+    TPMLThreadPriority.Low:          Result := 1;
+    TPMLThreadPriority.High:         Result := AMaxRealtime * 3 div 4;
+    TPMLThreadPriority.TimeCritical: Result := AMaxRealtime;
+  else
+    Result := AMaxRealtime div 2;
+  end;
+end;
+
+{ SDL_SetLinuxThreadPriorityAndPolicy（方針の決め方は SDL_SYS_SetThreadPriority）。
+  Other は nice 値を変える（1 引数版）。RR / FIFO は RealtimeKit に実時間を頼む。
+  sched_setscheduler で RR / FIFO にはしない（SDL もしない。RealtimeKit が設定する）。
+
+  PORT-NOTE(bug): SDL は実時間の優先度を rtkit_max_realtime_priority から計算するが、その値を
+  RealtimeKit から読む rtkit_initialize は、計算の後の rtkit_setpriority_realtime の中で
+  初めて走る。最初の 1 回だけ既定の 99 から計算され、High（3/4）が上限で頭打ちになって
+  TimeCritical と同じ優先度になる（docs/DEFECTS.md D-58）。ここでは計算の前に読む。 }
+class function TPMLThread.SetCurrentPriority(APriority: TPMLThreadPriority;
+  const APolicyHint: String; AForceRealtimeTimeCritical: Boolean): Boolean;
+var
+  Policy: TPMLSchedPolicy;
+  Prio: Integer;
+begin
+  Policy := PMLThreadSchedPolicy(APriority, APolicyHint, AForceRealtimeTimeCritical,
+    CurrentSchedPolicy);
+  if Policy = TPMLSchedPolicy.Other then
+    Exit(SetCurrentPriority(APriority));
+  EnsureRealtimeKit;
+  Prio := PMLRealtimePriority(APriority, GRealtimeKit.MaxRealtime);
+  Result := RealtimeKitRealtime(gettid, Prio);
+end;
+
+class function TPMLThread.CurrentSchedPolicy: TPMLSchedPolicy;
+var
+  P: cint;
+begin
+  P := sched_getscheduler(0);
+  if P < 0 then
+    Exit(TPMLSchedPolicy.Other);
+  case (P and not SCHED_RESET_ON_FORK) of
+    SCHED_FIFO_VALUE: Result := TPMLSchedPolicy.FIFO;
+    SCHED_RR_VALUE:   Result := TPMLSchedPolicy.RR;
+  else
+    Result := TPMLSchedPolicy.Other;
+  end;
+end;
+
+class function TPMLThread.CurrentRealtimePriority: Integer;
+var
+  Param: TSchedParam;
+begin
+  Result := 0;
+  if CurrentSchedPolicy = TPMLSchedPolicy.Other then
+    Exit;
+  FillChar(Param, SizeOf(Param), 0);
+  if sched_getparam(0, @Param) = 0 then
+    Result := Param.sched_priority;
+end;
+
+function PMLRealtimeKitMaxPriority: Integer;
+begin
+  EnsureRealtimeKit;
+  if GRealtimeKit.Reachable then
+    Result := GRealtimeKit.MaxRealtime
+  else
+    Result := 0;
 end;
 
 end.

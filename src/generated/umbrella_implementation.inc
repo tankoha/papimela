@@ -27,6 +27,11 @@
 //   PaPiMeLa.TextInput.Backend
 
 // ---- PaPiMeLa.Events
+function PMLEventDescription(const AEvent: TPMLEvent): String;
+begin
+  Result := PaPiMeLa.Events.PMLEventDescription(AEvent);
+end;
+
 function PMLNowNS: UInt64;
 begin
   Result := PaPiMeLa.Events.PMLNowNS;
@@ -420,6 +425,26 @@ end;
 procedure PMLCPUPause;
 begin
   PaPiMeLa.Atomic.PMLCPUPause;
+end;
+
+// ---- PaPiMeLa.Threading
+function PMLThreadSchedPolicy(
+  APriority: TPMLThreadPriority;
+  const APolicyHint: String;
+  AForceRealtimeTimeCritical: Boolean;
+  ACurrent: TPMLSchedPolicy): TPMLSchedPolicy;
+begin
+  Result := PaPiMeLa.Threading.PMLThreadSchedPolicy(APriority, APolicyHint, AForceRealtimeTimeCritical, ACurrent);
+end;
+
+function PMLRealtimePriority(APriority: TPMLThreadPriority; AMaxRealtime: Integer): Integer;
+begin
+  Result := PaPiMeLa.Threading.PMLRealtimePriority(APriority, AMaxRealtime);
+end;
+
+function PMLRealtimeKitMaxPriority: Integer;
+begin
+  Result := PaPiMeLa.Threading.PMLRealtimeKitMaxPriority;
 end;
 
 // ---- PaPiMeLa.Properties

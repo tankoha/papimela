@@ -19,8 +19,10 @@
     - 手順の順序: CreateInputContext → SetCapability → FocusIn → Controller.Activate
       Activate を忘れると fcitx5 は非アクティブ状態のままで ProcessKeyEvent が
       常に false を返す（実測）
-    - capability は Preedit|FormattedPreedit|SurroundingText = 82。
-      FormattedPreedit が無いと文節に分かれた形で届かない（実測）
+    - capability は SurroundingText に、ヒント PAPIMELA_IME_IMPLEMENTED_UI が composition
+      （置かれていなければこれ）なら Preedit|FormattedPreedit を足したもの。既定は 82。
+      FormattedPreedit が無いと文節に分かれた形で届かない（実測）。ヒントが変わったら
+      次の Pump で SetCapability を送り直す（ヒントはどのスレッドからも変えられるため）
     - UpdateFormattedPreedit の cursor は UTF-8 バイトオフセット。
       一方 SetSurroundingText の cursor / anchor はコードポイント単位。
       この非対称は fcitx5 側の仕様なので papimela が吸収する
@@ -92,6 +94,10 @@ type
     // 直近の「無視したが記録した」エラー。空なら何も起きていない。
     property LastNonFatalError: String read FLastNonFatalError;
   end;
+
+{ fcitx5 の SetCapability に渡す値。周辺テキスト（1 shl 6）は常に。AUI に Composition があれば
+  Preedit（1 shl 1）と FormattedPreedit（1 shl 4）も（アプリが変換中の文字を描く）。 }
+function PMLFcitxCapabilities(AUI: TPMLImeUIElements): QWord;
 
 implementation
 
@@ -196,7 +202,10 @@ begin
 
   FSink := ASink;
   Subscribe;
-  SetCapability(CAP_PREEDIT or CAP_FORMATTED_PREEDIT or CAP_SURROUNDING_TEXT);
+  // 変換中の文字をアプリが描くか（ヒント PAPIMELA_IME_IMPLEMENTED_UI）で値が決まる。
+  // 置かれていなければ Composition で、今までの 82。
+  SubscribeImeUI;
+  SetCapability(PMLFcitxCapabilities(FImeUI));
   Result := True;
 end;
 
@@ -225,6 +234,7 @@ end;
 
 procedure TPMLFcitxTextInputBackend.Disconnect;
 begin
+  UnsubscribeImeUI;
   if Assigned(FConn) and (FICPath <> '') then
   begin
     try
@@ -396,6 +406,17 @@ var
 begin
   if not Assigned(FConn) then
     Exit;
+  // ヒントが変わっていたら capability を送り直す（コールバックはどのスレッドからも来るので、
+  // D-Bus を触るのはメインスレッドで呼ばれるここ）。
+  if TakeImeUIChanged and (FICPath <> '') then
+  begin
+    try
+      SetCapability(PMLFcitxCapabilities(FImeUI));
+    except
+      on E: EPMLError do
+        FLastNonFatalError := 'SetCapability: ' + E.Message;
+    end;
+  end;
   repeat
     Msg := FConn.PopMessage(ATimeoutMs);
     if Msg = nil then
@@ -562,6 +583,13 @@ end;
 function CreateFcitxTextInputBackend: TPMLTextInputBackend;
 begin
   Result := TPMLFcitxTextInputBackend.Create;
+end;
+
+function PMLFcitxCapabilities(AUI: TPMLImeUIElements): QWord;
+begin
+  Result := CAP_SURROUNDING_TEXT;
+  if TPMLImeUIElement.Composition in AUI then
+    Result := Result or CAP_PREEDIT or CAP_FORMATTED_PREEDIT;
 end;
 
 initialization

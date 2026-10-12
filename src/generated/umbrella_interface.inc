@@ -109,6 +109,7 @@ type
   TPMLTouchState = PaPiMeLa.Events.TPMLTouchState;
   TPMLDropState = PaPiMeLa.Events.TPMLDropState;
   TPMLEventQueue = PaPiMeLa.Events.TPMLEventQueue;
+function PMLEventDescription(const AEvent: TPMLEvent): String; inline;
 function PMLNowNS: UInt64; inline;
 
 // ---- PaPiMeLa.Events.Drop
@@ -692,8 +693,16 @@ type
   TPMLCondition = PaPiMeLa.Threading.TPMLCondition;
   TPMLLockGuard = PaPiMeLa.Threading.TPMLLockGuard;
   TPMLThreadPriority = PaPiMeLa.Threading.TPMLThreadPriority;
+  TPMLSchedPolicy = PaPiMeLa.Threading.TPMLSchedPolicy;
   TPMLThreadFunc = PaPiMeLa.Threading.TPMLThreadFunc;
   TPMLThread = PaPiMeLa.Threading.TPMLThread;
+function PMLThreadSchedPolicy(
+  APriority: TPMLThreadPriority;
+  const APolicyHint: String;
+  AForceRealtimeTimeCritical: Boolean;
+  ACurrent: TPMLSchedPolicy): TPMLSchedPolicy; inline;
+function PMLRealtimePriority(APriority: TPMLThreadPriority; AMaxRealtime: Integer): Integer; inline;
+function PMLRealtimeKitMaxPriority: Integer; inline;
 
 // ---- PaPiMeLa.Properties
 type
@@ -717,6 +726,12 @@ const
   PML_HINT_RENDER_VSYNC = PaPiMeLa.Properties.PML_HINT_RENDER_VSYNC;
   PML_HINT_EGL_LIBRARY = PaPiMeLa.Properties.PML_HINT_EGL_LIBRARY;
   PML_HINT_OPENGL_LIBRARY = PaPiMeLa.Properties.PML_HINT_OPENGL_LIBRARY;
+  PML_HINT_THREAD_PRIORITY_POLICY = PaPiMeLa.Properties.PML_HINT_THREAD_PRIORITY_POLICY;
+  PML_HINT_THREAD_FORCE_REALTIME_TIME_CRITICAL = PaPiMeLa.Properties.PML_HINT_THREAD_FORCE_REALTIME_TIME_CRITICAL;
+  PML_HINT_IME_IMPLEMENTED_UI = PaPiMeLa.Properties.PML_HINT_IME_IMPLEMENTED_UI;
+  PML_HINT_QUIT_ON_LAST_WINDOW_CLOSE = PaPiMeLa.Properties.PML_HINT_QUIT_ON_LAST_WINDOW_CLOSE;
+  PML_HINT_NO_SIGNAL_HANDLERS = PaPiMeLa.Properties.PML_HINT_NO_SIGNAL_HANDLERS;
+  PML_HINT_EVENT_LOGGING = PaPiMeLa.Properties.PML_HINT_EVENT_LOGGING;
 function PMLGetEnvironment(const AName: String; out AValue: String): Boolean; inline;
 function PMLStringBoolean(const AValue: String; ADefault: Boolean): Boolean; inline;
 function PMLStringInteger(const AValue: String; ADefault: Integer): Integer; inline;

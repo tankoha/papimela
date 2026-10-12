@@ -33,6 +33,7 @@ interface
 uses
   SysUtils, Classes,
   PaPiMeLa.Errors,
+  PaPiMeLa.Threading,
   PaPiMeLa.Properties,
   PaPiMeLa.Log;
 
@@ -68,6 +69,10 @@ type
     { アプリの ID（SDL_GetAppID）。Wayland の app_id などに使う。ヒント PML_HINT_APP_ID が
       空でなければそれ、次に環境変数 FLATPAK_ID、無ければ実行ファイルの名前（ApplicationName）。 }
     function  AppID: String;
+    { 呼んだスレッドの優先度を変える（SDL_SetCurrentThreadPriority）。ヒント
+      PAPIMELA_THREAD_PRIORITY_POLICY と PAPIMELA_THREAD_FORCE_REALTIME_TIME_CRITICAL を読んで
+      TPMLThread.SetCurrentPriority に渡す。 }
+    function  SetCurrentThreadPriority(APriority: TPMLThreadPriority): Boolean;
     property  Hints     : TPMLHints      read FHints;
     property  Properties: TPMLProperties read FProperties;
     property  Log       : TPMLLog        read FLog;
@@ -142,6 +147,21 @@ begin
     PMLGetEnvironment('FLATPAK_ID', Result);
   if Result = '' then
     Result := ApplicationName;
+end;
+
+function TPMLContextBase.SetCurrentThreadPriority(APriority: TPMLThreadPriority): Boolean;
+var
+  Policy: String;
+  Force: Boolean;
+begin
+  Policy := '';
+  Force := False;
+  if FHints <> nil then
+  begin
+    Policy := FHints.GetHint(PML_HINT_THREAD_PRIORITY_POLICY);
+    Force := FHints.GetBoolean(PML_HINT_THREAD_FORCE_REALTIME_TIME_CRITICAL, False);
+  end;
+  Result := TPMLThread.SetCurrentPriority(APriority, Policy, Force);
 end;
 
 constructor TPMLSystemObject.Create(AContextRef: TObject; AOwner: TPMLObject);

@@ -18,6 +18,8 @@
     - 破棄順序は TextInput → Joystick → Audio → Video → Timer → Events → Log → Properties → Hints
     - finalization 節では何もしない。破棄はアプリの Context.Free に委ねる
     - Context を生成したスレッドがメインスレッド。子はそれを継承する
+    - SIGINT / SIGTERM の手続きは Events より先に置き（Events が世代を覚える）、Events の後に外す。
+      PAPIMELA_NO_SIGNAL_HANDLERS が真なら置かない
     - Hints・Properties・Log はサブシステムより先に作り、後に壊す（どのサブシステムも
       作るときからログを書ける）
 
@@ -111,6 +113,7 @@ type
     FVideo     : TPMLVideoSystem;
     FTextInput : TPMLTextInputSystem;
     FSubsystems: TPMLSubsystems;
+    FQuitSignals: Boolean;   // PMLInstallQuitSignals を呼んだ（Destroy で取り消す）
   public
     constructor Create(ASubsystems: TPMLSubsystems); overload;
     constructor Create(ASubsystems: TPMLSubsystems;
@@ -132,6 +135,9 @@ type
   end;
 
 implementation
+
+uses
+  PaPiMeLa.Events.Quit;
 
 // 既定値の正本。Default と Initialize 演算子の両方がここを通る。
 class procedure TPMLContextOptions.SetDefaults(var AOptions: TPMLContextOptions);
@@ -233,6 +239,14 @@ begin
   FProperties := TPMLProperties.Create;
   FLog := TPMLLog.Create(FHints, AOptions.MinimumLogLevel);
 
+  // SIGINT / SIGTERM を Quit にする手続き。Events が作ったときの世代を覚えるので、
+  // その前に置く。
+  if not FHints.GetBoolean(PML_HINT_NO_SIGNAL_HANDLERS, False) then
+  begin
+    PMLInstallQuitSignals;
+    FQuitSignals := True;
+  end;
+
   // 生成順 = 破棄の逆順。Events と Timer は常に存在する。
   FEvents := TPMLEventQueue.Create(Self, Self, AOptions.EventQueueCapacity);
   FTimer := TPMLTimerService.Create(Self, Self);
@@ -268,6 +282,12 @@ begin
   FreeAndNil(FVideo);
   FreeAndNil(FTimer);
   FreeAndNil(FEvents);
+  // 手続きはキューが無くなってから戻す。
+  if FQuitSignals then
+  begin
+    PMLRemoveQuitSignals;
+    FQuitSignals := False;
+  end;
   // Log はヒントの呼び出しを外すので、Hints より先に壊す
   FreeAndNil(FLog);
   FreeAndNil(FProperties);

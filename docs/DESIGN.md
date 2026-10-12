@@ -1320,6 +1320,7 @@ wayland-scanner の Pascal 版。C の `wayland-scanner` が生成する `*-clie
 | 69 | `PaPiMeLa.Video.Wayland.LibDecor` | `SDL_waylandwindow.c` の libdecor 部、`SDL_waylandsym.h` の libdecor 節 | 中 | 36 | P2 | 一部移植 | Medium | Sonnet | クライアントサイド装飾。GNOME で必要（未解決 15） |
 | 70 | `tools/checkorigin`、テスト基盤（fpcunit、headless 実行スクリプト） | — | 小 | — | P0 | クリーンルーム | Medium | Sonnet | 9.5。`Origin` 行と本表の整合検査、weston headless / ibus-daemon の CI 起動 |
 | 71 | `PaPiMeLa.Platform.DocumentPortal` | `core/linux/SDL_dbus.c` の `SDL_DBus_DocumentsPortalRetrieveFiles` | 小 | 16 | P2 | 一部移植 | Medium | Sonnet | Documents ポータルの FileTransfer。鍵からパスを受け取る（SDL と同じ。D&D の受信の document-portal の枝）と、鍵を作って渡す（SDL に無い。送り側のため）。interface と受け入れ検査（T-43）は Opus |
+| 72 | `PaPiMeLa.Events.Quit` | `events/SDL_quit.c`、`SDL_windowevents.c` の WINDOW_CLOSE_REQUESTED の節、`SDL_events.c` の SDL_LogEvent | 小 | 22 | P1 | 一部移植 | Medium | Sonnet | SIGINT / SIGTERM を Quit にする手続き（Context をまたいで世代で配る）、最後のウィンドウの数え方、イベントのログの絞り方。クリーンルームの Events / Video から呼ぶ（2026-10-13） |
 
 ### 11.3 内訳サマリ
 

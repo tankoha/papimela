@@ -311,6 +311,10 @@ type
 
 implementation
 
+uses
+  PaPiMeLa.Properties,
+  PaPiMeLa.Events.Quit;
+
 { TPMLWindowOptions }
 
 class function TPMLWindowOptions.Make(const ATitle: String;
@@ -1045,11 +1049,28 @@ end;
 procedure TPMLVideoSystem.WindowCloseRequested(AWindowID: TPMLWindowID);
 var
   W: TPMLWindow;
+  I, Visible: Integer;
+  Services: TPMLContextBase;
 begin
   W := WindowFromID(AWindowID);
   if Assigned(W) then
     W.ApplyCloseRequested;
   PushWindowEvent(TPMLEventKind.WindowCloseRequested, AWindowID);
+
+  // 最後の見えているウィンドウの閉じる要求なら Quit も積む（ヒント
+  // PAPIMELA_QUIT_ON_LAST_WINDOW_CLOSE、既定は真）。閉じる要求の来たウィンドウも、
+  // 隠れていなければ数に入る。
+  Visible := 0;
+  for I := 0 to High(FWindows) do
+    if Assigned(FWindows[I]) and not (TPMLWindowFlag.Hidden in FWindows[I].Flags) then
+      Inc(Visible);
+  if PMLCloseRequestIsLastWindow(Visible) then
+  begin
+    Services := ContextServices;
+    if (Services = nil) or (Services.Hints = nil)
+      or Services.Hints.GetBoolean(PML_HINT_QUIT_ON_LAST_WINDOW_CLOSE, True) then
+      FQueue.PushSimple(TPMLEventKind.Quit);
+  end;
 end;
 
 procedure TPMLVideoSystem.WindowExposed(AWindowID: TPMLWindowID);

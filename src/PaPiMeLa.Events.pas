@@ -442,11 +442,15 @@ type
     FTouch     : TPMLTouchState;
     FDrop      : TPMLDropState;
     FKeyFilter : IPMLKeyFilter;
+    FLogVerbosity  : Integer;    // ヒント PAPIMELA_EVENT_LOGGING の値（0..3）。どのスレッドの Push からも読む
+    FQuitGeneration: LongWord;   // 作ったとき（と Quit を出したとき）の PMLQuitSignalGeneration
     function  TakeLocked(out AEvent: TPMLEvent): Boolean;
     function  NotifyWatches(const AEvent: TPMLEvent): Boolean;
     function  GetCapacity: Integer;
     procedure RunMainThreadCalls;
     procedure CancelMainThreadCalls;
+    // ヒント PAPIMELA_EVENT_LOGGING の変更。
+    procedure EventLoggingChanged(const AName: String; const AOld, ANew: TPMLHintValue);
   public
     constructor Create(AContextRef: TObject; AOwner: TPMLObject;
       ACapacity: Integer = 256);
@@ -500,13 +504,19 @@ type
   end;
 
 // 現在時刻（ナノ秒）。TPMLTimerService ができたらそちらへ委譲する。
+{ イベントを 1 行の説明にする（ヒント PAPIMELA_EVENT_LOGGING でログに出す行の本文）。種類の名前
+  （TPMLEventKind の名前、例えば KeyDown）で始め、括弧の中に主な値を「名前=値」で並べる。 }
+function PMLEventDescription(const AEvent: TPMLEvent): String;
+
 function PMLNowNS: UInt64;
 
 implementation
 
+
 uses
-  BaseUnix, UnixType,
-  PaPiMeLa.Events.Drop;
+  BaseUnix, UnixType, TypInfo,
+  PaPiMeLa.Events.Drop,
+  PaPiMeLa.Events.Quit;
 
 const
   CLOCK_MONOTONIC = 1;
@@ -542,6 +552,18 @@ begin
   FMouse := TPMLMouseState.Create(AContextRef, Self);
   FTouch := TPMLTouchState.Create(AContextRef, Self);
   FDrop := TPMLDropState.Create(AContextRef, Self);
+  // 作った時点の世代を覚える。これより後に来たシグナルだけを Quit にする。
+  FQuitGeneration := PMLQuitSignalGeneration;
+  // AddCallback はその場で 1 度呼ぶので、作った時点のヒントの値が FLogVerbosity に入る。
+  if (ContextServices <> nil) and (ContextServices.Hints <> nil) then
+    ContextServices.Hints.AddCallback(PML_HINT_EVENT_LOGGING, @EventLoggingChanged);
+end;
+
+procedure TPMLEventQueue.EventLoggingChanged(const AName: String;
+  const AOld, ANew: TPMLHintValue);
+begin
+  // 置かれていないヒントの Value は ''（PMLEventLoggingVerbosity は 0 を返す）。
+  FLogVerbosity := PMLEventLoggingVerbosity(ANew.Value);
 end;
 
 // 輪の長さは作るときに決まり、以後変わらないので、ロックは要らない。
@@ -573,6 +595,9 @@ end;
 
 destructor TPMLEventQueue.Destroy;
 begin
+  // 何かを壊す前に外す（ヒントの変更がここへ届かないように）。
+  if (ContextServices <> nil) and (ContextServices.Hints <> nil) then
+    ContextServices.Hints.RemoveCallback(PML_HINT_EVENT_LOGGING, @EventLoggingChanged);
   CancelMainThreadCalls;
   FKeyFilter := nil;
   FreeAndNil(FKeyboard);
@@ -604,6 +629,10 @@ begin
     Exit;
   if not NotifyWatches(AEvent) then
     Exit;
+  // 積む入口はここだけなので、PushSimple も他のバックエンドもここを通る。
+  if PMLEventLogged(AEvent.Kind, FLogVerbosity) and (ContextServices <> nil)
+    and (ContextServices.Log <> nil) then
+    ContextServices.Log.Log('papimela EVENT: ' + PMLEventDescription(AEvent));
 
   FLock.Lock;
   try
@@ -659,6 +688,13 @@ var
 begin
   CheckMainThread;
   RunMainThreadCalls;
+  // シグナルの手続きは世代を進めるだけなので、Quit はここで積む。
+  // Context ごとに自分の見た世代と比べるので、どの Context にも 1 回のシグナルで 1 回出る。
+  if FQuitGeneration <> PMLQuitSignalGeneration then
+  begin
+    FQuitGeneration := PMLQuitSignalGeneration;
+    PushSimple(TPMLEventKind.Quit);
+  end;
   for I := 0 to High(FSources) do
   begin
     // 待ちを許すのは最初のソースだけ（§6.3）。
@@ -1572,6 +1608,88 @@ end;
 function TPMLDropState.IsDropping(AWindowID: TPMLWindowID): Boolean;
 begin
   Result := TPMLDropImpl(FImpl).IndexOf(AWindowID) >= 0;
+end;
+
+function PMLEventDescription(const AEvent: TPMLEvent): String;
+var
+  Details: String;
+
+  procedure Add(const AName, AValue: String);
+  begin
+    Details := Details + ', ' + AName + '=' + AValue;
+  end;
+
+  // 押されている修飾キーの名前を '+' でつなぐ（無ければ 'none'）。
+  function ModifierNames(AMods: TPMLKeyModifiers): String;
+  var
+    M: TPMLKeyModifier;
+  begin
+    Result := '';
+    for M := Low(TPMLKeyModifier) to High(TPMLKeyModifier) do
+      if M in AMods then
+      begin
+        if Result <> '' then
+          Result := Result + '+';
+        Result := Result + GetEnumName(TypeInfo(TPMLKeyModifier), Ord(M));
+      end;
+    if Result = '' then
+      Result := 'none';
+  end;
+
+  function Flt(AValue: Single): String;
+  begin
+    Result := FloatToStrF(AValue, ffFixed, 15, 2, DefaultFormatSettings);
+  end;
+
+begin
+  Details := 'timestamp=' + IntToStr(AEvent.Timestamp);
+  if AEvent.WindowID <> 0 then
+    Add('windowid', IntToStr(AEvent.WindowID));
+  case AEvent.Kind of
+    TPMLEventKind.KeyDown, TPMLEventKind.KeyUp:
+    begin
+      Add('scancode', IntToStr(Ord(AEvent.Key.Scancode)));
+      Add('key', IntToStr(Ord(AEvent.Key.Key)));
+      Add('modifiers', ModifierNames(AEvent.Key.Modifiers));
+      Add('repeat', BoolToStr(AEvent.Key.IsRepeat, True));
+    end;
+    TPMLEventKind.TextInput, TPMLEventKind.TextEditing,
+    TPMLEventKind.DropText, TPMLEventKind.DropFile:
+      Add('text', '"' + AEvent.Text + '"');
+    TPMLEventKind.MouseMotion:
+    begin
+      Add('x', Flt(AEvent.Motion.X));
+      Add('y', Flt(AEvent.Motion.Y));
+      Add('xrel', Flt(AEvent.Motion.XRel));
+      Add('yrel', Flt(AEvent.Motion.YRel));
+    end;
+    TPMLEventKind.MouseButtonDown, TPMLEventKind.MouseButtonUp:
+    begin
+      Add('button', IntToStr(AEvent.Button.Button));
+      Add('clicks', IntToStr(AEvent.Button.Clicks));
+      Add('x', Flt(AEvent.Button.X));
+      Add('y', Flt(AEvent.Button.Y));
+    end;
+    TPMLEventKind.MouseWheel:
+    begin
+      Add('x', Flt(AEvent.Wheel.X));
+      Add('y', Flt(AEvent.Wheel.Y));
+    end;
+    TPMLEventKind.FingerDown, TPMLEventKind.FingerUp,
+    TPMLEventKind.FingerMotion, TPMLEventKind.FingerCanceled:
+    begin
+      Add('finger', IntToStr(AEvent.Finger.FingerID));
+      Add('x', Flt(AEvent.Finger.X));
+      Add('y', Flt(AEvent.Finger.Y));
+    end;
+    TPMLEventKind.WindowMoved, TPMLEventKind.WindowResized,
+    TPMLEventKind.WindowPixelSizeChanged:
+    begin
+      Add('data1', IntToStr(AEvent.Window.Data1));
+      Add('data2', IntToStr(AEvent.Window.Data2));
+    end;
+  end;
+  Result := GetEnumName(TypeInfo(TPMLEventKind), Ord(AEvent.Kind)) + ' (' + Details + ')';
 end;
 
 end.
