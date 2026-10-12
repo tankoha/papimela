@@ -64,3 +64,4 @@ test/test_properties
 test/test_log
 test/test_hints
 test/test_thread_realtime
+test/test_texture_kinds

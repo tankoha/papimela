@@ -22,6 +22,9 @@
       KeyUp は KeyDown を出したキーにだけ出す（D-47）
     - ドラッグ＆ドロップの窓口（TPMLDropState）。中身（SDL_dropevents.c から写した部分）と
       text/uri-list の変換は、由来が移植なので PaPiMeLa.Events.Drop に分けた
+    - キーボードの窓口（TPMLKeyboardState）。状態機械の中身（SDL_keyboard.c から写した
+      押下状態の規則とキーコードのオプション）は、由来が移植なので PaPiMeLa.Events.Keyboard
+      に分けた。IME の返信待ちの列（TPMLDeferredKeyQueue）は papimela 独自なのでここに置く
 
   NOT RESOLVED:
     - 設計 §6.3 は複数 fd を 1 回の poll(2) で待つため IPMLEventPumpSource.GetPollFDs
@@ -279,36 +282,18 @@ type
     押下状態（IsDown）はキーの物理的な状態で、IME が消費したキーも押された
     ことになる（SDL も IME が扱ったキーの状態を更新する）。
 
-    PORT-NOTE: 押下状態の規則は SDL_keyboard.c の SDL_SendKeyboardKeyInternal と
-    SDL_ResetKeyboard に従う。押されていないキーの KeyUp は捨てる。押されている
-    キーの KeyDown はリピートにする。フォーカスを失ったら、押されているキーを
-    すべて KeyUp にしてから WindowFocusLost を積む。こうしないと、別のウィンドウで
-    離したキーがこちらでは押されたまま残る。
-
-    KeyUp は KeyDown を出したキーにだけ出す（D-47）。IME は押すほうを消費しても
-    離すほうは消費しないことが多い（fcitx5-mozc・ibus-mozc とも実測）。逆に
-    KeyDown を出した後で離すほうが消費されても KeyUp は出す。アプリから見て
-    押したまま残らないようにする。 }
+    中身は PaPiMeLa.Events.Keyboard（押下状態の規則とキーコードの決め方。SDL_keyboard.c を写した
+    部分）。KeyUp を KeyDown を出したキーにだけ出す規則（D-47）もそちらに書いてある。 }
   TPMLKeyboardState = class sealed(TPMLSystemObject)
   strict private
-    FQueue     : TPMLEventQueue;
-    FModifiers : TPMLKeyModifiers;
-    FFocusedWindow: TPMLWindowID;
-    FConsumed  : Integer;
-    FDown      : array[TPMLScancode] of Boolean;
-    FEmittedDown: array[TPMLScancode] of Boolean;   // KeyDown をアプリへ出した
-    FDeferred  : TPMLDeferredKeyQueue;
-    FNextTicket: LongWord;
-    FKeymap    : TPMLKeymap;
-    FKeycodeOptions: TPMLKeycodeOptions;
+    FImpl : TObject;   // 状態の本体（TPMLKeyboardImpl）。中身は implementation 側
     function  GetIsDown(AScancode: TPMLScancode): Boolean;
-    procedure ReleaseAll(AWindowID: TPMLWindowID);
-    procedure Emit(const AItem: TPMLDeferredKey; AWithText: Boolean);
-    procedure Drain;
-    // ヒント PAPIMELA_KEYCODE_OPTIONS の変更（SDL_KeycodeOptionsChanged）。
-    procedure KeycodeOptionsChanged(const AName: String; const AOld, ANew: TPMLHintValue);
-    // SDL_GetKeyFromScancode（key_event = true）。AModifiers は NumLock の判定に使う。
-    function  KeyForScancode(AScancode: TPMLScancode; AModifiers: TPMLKeyModifiers): TPMLKeycode;
+    function  GetKeymap: TPMLKeymap;
+    function  GetKeycodeOptions: TPMLKeycodeOptions;
+    procedure SetKeycodeOptions(AValue: TPMLKeycodeOptions);
+    function  GetModifiers: TPMLKeyModifiers;
+    function  GetFocusedWindow: TPMLWindowID;
+    function  GetConsumedCount: Integer;
   public
     constructor Create(AContextRef: TObject; AQueue: TPMLEventQueue);
     destructor Destroy; override;
@@ -335,13 +320,13 @@ type
     // キーが押されているか（SDL_GetKeyboardState）。ゲームの操作はこれで読む。
     property IsDown[AScancode: TPMLScancode]: Boolean read GetIsDown;
     // 今の配列のキーマップ。配列が届く前は既定（US 配列）と同じ意味の空のもの。
-    property Keymap       : TPMLKeymap read FKeymap;
+    property Keymap       : TPMLKeymap read GetKeymap;
     // キーイベントのキーコードの決め方（SDL_HINT_KEYCODE_OPTIONS）。
-    property KeycodeOptions: TPMLKeycodeOptions read FKeycodeOptions write FKeycodeOptions;
-    property Modifiers    : TPMLKeyModifiers read FModifiers;
-    property FocusedWindow: TPMLWindowID read FFocusedWindow;
+    property KeycodeOptions: TPMLKeycodeOptions read GetKeycodeOptions write SetKeycodeOptions;
+    property Modifiers    : TPMLKeyModifiers read GetModifiers;
+    property FocusedWindow: TPMLWindowID read GetFocusedWindow;
     // IME が消費したキーの累計。テストと診断用。
-    property ConsumedCount: Integer read FConsumed;
+    property ConsumedCount: Integer read GetConsumedCount;
     // IME の返信を待っているキー（とその後ろに並んだキー）の数。
     function  DeferredCount: Integer;
   end;
@@ -516,6 +501,7 @@ implementation
 uses
   BaseUnix, UnixType, TypInfo,
   PaPiMeLa.Events.Drop,
+  PaPiMeLa.Events.Keyboard,
   PaPiMeLa.Events.Quit;
 
 const
@@ -1036,284 +1022,99 @@ begin
     end;
 end;
 
-{ TPMLKeyboardState }
+{ ---- キーボードの状態機械（中身は PaPiMeLa.Events.Keyboard） ---- }
 
 constructor TPMLKeyboardState.Create(AContextRef: TObject; AQueue: TPMLEventQueue);
+var
+  Hints: TPMLHints;
 begin
   inherited Create(AContextRef, AQueue);
-  FQueue := AQueue;
-  // 配列が届くまでは空のキーマップ。空は既定（US 配列）と同じ意味になる。
-  FKeymap := TPMLKeymap.Create;
-  FKeycodeOptions := PML_DEFAULT_KEYCODE_OPTIONS;
-  FDeferred := TPMLDeferredKeyQueue.Create;
-  FNextTicket := 1;
-  // SDL_InitKeyboard と同じ。ヒントを見て FKeycodeOptions を決める
-  // （AddCallback はその場で 1 度呼ぶので、作った時点の値が入る）。
-  if (ContextServices <> nil) and (ContextServices.Hints <> nil) then
-    ContextServices.Hints.AddCallback(PML_HINT_KEYCODE_OPTIONS, @KeycodeOptionsChanged);
+  Hints := nil;
+  if ContextServices <> nil then
+    Hints := ContextServices.Hints;
+  FImpl := TPMLKeyboardImpl.Create(AQueue, Hints);
 end;
 
 destructor TPMLKeyboardState.Destroy;
 begin
-  // 何かを壊す前に外す（ヒントの変更がここへ届かないように）。
-  if (ContextServices <> nil) and (ContextServices.Hints <> nil) then
-    ContextServices.Hints.RemoveCallback(PML_HINT_KEYCODE_OPTIONS, @KeycodeOptionsChanged);
-  FreeAndNil(FDeferred);
-  FreeAndNil(FKeymap);
+  FreeAndNil(FImpl);
   inherited Destroy;
 end;
 
 function TPMLKeyboardState.GetIsDown(AScancode: TPMLScancode): Boolean;
 begin
-  Result := FDown[AScancode];
+  Result := TPMLKeyboardImpl(FImpl).GetIsDown(AScancode);
 end;
 
-procedure TPMLKeyboardState.KeycodeOptionsChanged(const AName: String;
-  const AOld, ANew: TPMLHintValue);
+function TPMLKeyboardState.GetKeymap: TPMLKeymap;
 begin
-  // 置かれていないヒントの Value は ''（PMLParseKeycodeOptions は既定を返す）。
-  FKeycodeOptions := PMLParseKeycodeOptions(ANew.Value);
+  Result := TPMLKeyboardImpl(FImpl).Keymap;
 end;
 
-{ SDL_GetKeyFromScancode（key_event = true）。キーマップから決めた後に、hide_numpad なら
-  テンキーのキーコードを置き換える。 }
-function TPMLKeyboardState.KeyForScancode(AScancode: TPMLScancode;
-  AModifiers: TPMLKeyModifiers): TPMLKeycode;
+function TPMLKeyboardState.GetKeycodeOptions: TPMLKeycodeOptions;
 begin
-  Result := FKeymap.KeyForEvent(AScancode, FKeycodeOptions);
-  if TPMLKeycodeOption.HideNumpad in FKeycodeOptions then
-    Result := PMLConvertNumpadKeycode(Result, TPMLKeyModifier.NumLock in AModifiers);
+  Result := TPMLKeyboardImpl(FImpl).KeycodeOptions;
+end;
+
+procedure TPMLKeyboardState.SetKeycodeOptions(AValue: TPMLKeycodeOptions);
+begin
+  TPMLKeyboardImpl(FImpl).KeycodeOptions := AValue;
+end;
+
+function TPMLKeyboardState.GetModifiers: TPMLKeyModifiers;
+begin
+  Result := TPMLKeyboardImpl(FImpl).Modifiers;
+end;
+
+function TPMLKeyboardState.GetFocusedWindow: TPMLWindowID;
+begin
+  Result := TPMLKeyboardImpl(FImpl).FocusedWindow;
+end;
+
+function TPMLKeyboardState.GetConsumedCount: Integer;
+begin
+  Result := TPMLKeyboardImpl(FImpl).ConsumedCount;
 end;
 
 function TPMLKeyboardState.DeferredCount: Integer;
 begin
-  Result := FDeferred.Count;
+  Result := TPMLKeyboardImpl(FImpl).DeferredCount;
 end;
 
-procedure TPMLKeyboardState.SetKeymap(AKeymap: TPMLKeymap);
+procedure TPMLKeyboardState.SendKey(AWindowID: TPMLWindowID;
+  const AKey: TPMLKeyEventData; ADown: Boolean; const AText: String);
 begin
-  if (AKeymap = nil) or (AKeymap = FKeymap) then
-    Exit;
-  AKeymap.DetectLayout;
-  FKeymap.Free;
-  FKeymap := AKeymap;
-  FQueue.PushSimple(TPMLEventKind.KeymapChanged, 0);
-end;
-
-{ 押されているキーをすべて離す（SDL_ResetKeyboard）。KeyUp は KeyDown を出した
-  キーにだけ出す。IME には通さない。フォーカスを失う IME には別に NotifyFocus が届く。 }
-procedure TPMLKeyboardState.ReleaseAll(AWindowID: TPMLWindowID);
-var
-  S: TPMLScancode;
-  Ev: TPMLEvent;
-begin
-  for S := Low(TPMLScancode) to High(TPMLScancode) do
-  begin
-    FDown[S] := False;
-    if FEmittedDown[S] then
-    begin
-      FEmittedDown[S] := False;
-      FillChar(Ev.Key, SizeOf(Ev.Key), 0);
-      Ev.Kind := TPMLEventKind.KeyUp;
-      Ev.Timestamp := PMLNowNS;
-      Ev.WindowID := AWindowID;
-      Ev.Text := '';
-      Ev.Segments := nil;
-      Ev.Strings := nil;
-      Ev.Key.Scancode := S;
-      Ev.Key.Key := KeyForScancode(S, FModifiers);
-      Ev.Key.Modifiers := FModifiers;
-      FQueue.Push(Ev);
-    end;
-  end;
+  TPMLKeyboardImpl(FImpl).SendKey(AWindowID, AKey, ADown, AText);
 end;
 
 procedure TPMLKeyboardState.SendModifiers(AModifiers: TPMLKeyModifiers);
 begin
-  FModifiers := AModifiers;
+  TPMLKeyboardImpl(FImpl).SendModifiers(AModifiers);
 end;
 
 procedure TPMLKeyboardState.SendFocus(AWindowID: TPMLWindowID; AGained: Boolean);
 begin
-  // IME にも伝える。フォーカスを失ったまま IME がこちらを注目し続けると、
-  // 別アプリと二重にフォーカスを持つ状態になる。
-  if Assigned(FQueue.KeyFilter) then
-    FQueue.KeyFilter.NotifyFocus(AWindowID, AGained);
-
-  if AGained then
-  begin
-    FFocusedWindow := AWindowID;
-    FQueue.PushSimple(TPMLEventKind.WindowFocusGained, AWindowID);
-  end
-  else
-  begin
-    // 返信を待っているキーを先に出す（順序を保つ）。その後、離したキーの KeyUp は
-    // フォーカスを失った後は届かないので、押されているキーを全部離す。
-    FlushDeferred;
-    ReleaseAll(AWindowID);
-    if FFocusedWindow = AWindowID then
-      FFocusedWindow := 0;
-    FQueue.PushSimple(TPMLEventKind.WindowFocusLost, AWindowID);
-  end;
+  TPMLKeyboardImpl(FImpl).SendFocus(AWindowID, AGained);
 end;
 
-{ 結果の出たキー 1 つをアプリへ出す。
-
-  押す: 消費されたら何も出さない。されなければ KeyDown と（あれば）TextInput。
-  離す: KeyDown を出したキーなら、IME の結果によらず KeyUp を出す（D-47）。 }
-procedure TPMLKeyboardState.Emit(const AItem: TPMLDeferredKey; AWithText: Boolean);
-var
-  Ev: TPMLEvent;
-  Known: Boolean;
+procedure TPMLKeyboardState.SetKeymap(AKeymap: TPMLKeymap);
 begin
-  if AItem.Consumed then
-    Inc(FConsumed);
-  Known := AItem.Key.Scancode <> TPMLScancode.UNKNOWN;
-  if AItem.Down then
-  begin
-    if AItem.Consumed then
-      Exit;
-    if Known then
-      FEmittedDown[AItem.Key.Scancode] := True;
-  end
-  else if Known then
-  begin
-    if not FEmittedDown[AItem.Key.Scancode] then
-      Exit;
-    FEmittedDown[AItem.Key.Scancode] := False;
-  end
-  else if AItem.Consumed then
-    Exit;
-
-  FillChar(Ev.Key, SizeOf(Ev.Key), 0);
-  if AItem.Down then
-    Ev.Kind := TPMLEventKind.KeyDown
-  else
-    Ev.Kind := TPMLEventKind.KeyUp;
-  Ev.Timestamp := PMLNowNS;
-  Ev.WindowID := AItem.WindowID;
-  Ev.Text := '';
-  Ev.Segments := nil;
-  Ev.Strings := nil;
-  Ev.Key := AItem.Key;
-  FQueue.Push(Ev);
-
-  // IME が受け取らなかった印字可能キーは、こちらで確定文字列にする。
-  if AItem.Down and AWithText and (AItem.Text <> '') then
-  begin
-    FillChar(Ev.Key, SizeOf(Ev.Key), 0);
-    Ev.Kind := TPMLEventKind.TextInput;
-    Ev.Timestamp := PMLNowNS;
-    Ev.WindowID := AItem.WindowID;
-    Ev.Text := AItem.Text;
-    Ev.Segments := nil;
-    Ev.Strings := nil;
-    FQueue.Push(Ev);
-  end;
-end;
-
-{ 先頭から、結果の出ているキーを順に出す。未解決のキーに当たったら止める。 }
-procedure TPMLKeyboardState.Drain;
-var
-  Item: TPMLDeferredKey;
-begin
-  while FDeferred.PopResolved(Item) do
-    Emit(Item, True);
+  TPMLKeyboardImpl(FImpl).SetKeymap(AKeymap);
 end;
 
 procedure TPMLKeyboardState.ResolveKey(ATicket: LongWord; AConsumed: Boolean);
 begin
-  if FDeferred.Resolve(ATicket, AConsumed) then
-    Drain;
+  TPMLKeyboardImpl(FImpl).ResolveKey(ATicket, AConsumed);
 end;
 
 procedure TPMLKeyboardState.FlushDeferred;
-var
-  Item: TPMLDeferredKey;
 begin
-  while FDeferred.Pop(Item) do
-    if Item.Resolved then
-      Emit(Item, True)
-    else
-    begin
-      Item.Consumed := False;
-      Emit(Item, False);
-    end;
+  TPMLKeyboardImpl(FImpl).FlushDeferred;
 end;
 
 procedure TPMLKeyboardState.ExpireDeferred(ANowNS, ATimeoutNS: Int64);
 begin
-  if FDeferred.Count = 0 then
-    Exit;
-  if FDeferred.ExpireBefore(ANowNS - ATimeoutNS) > 0 then
-    Drain;
-end;
-
-{ §7.5 の経路。
-
-  1. IME が有効なら、押下も解放も IME に通す（修飾キー単独押下もエンジンが
-     モード切替に使うため通す）
-  2. 結果がすぐ出れば（Consumed / PassThrough）、待っているキーが無い限りその場で出す
-  3. Deferred（非同期の返信待ち）なら並べて、ResolveKey を待つ。待っているキーが
-     あれば、すぐ結果の出たキーもその後ろに並べる（順序を保つ） }
-procedure TPMLKeyboardState.SendKey(AWindowID: TPMLWindowID;
-  const AKey: TPMLKeyEventData; ADown: Boolean; const AText: String);
-var
-  Item: TPMLDeferredKey;
-  Filtered: TPMLKeyFilterResult;
-  PrevModifiers: TPMLKeyModifiers;
-begin
-  // hide_numpad の NumLock は、SDL と同じくこのキーより前の状態（SDL の keyboard->modstate）で
-  // 見る。バックエンドは SendModifiers で状態を先に伝える。
-  PrevModifiers := FModifiers;
-  FModifiers := AKey.Modifiers;
-  Item.Key := AKey;
-
-  // 押下状態。IME に通す前に更新する（消費されたキーも物理的には押されている）。
-  if Item.Key.Scancode <> TPMLScancode.UNKNOWN then
-  begin
-    if ADown then
-    begin
-      if FDown[Item.Key.Scancode] then
-        Item.Key.IsRepeat := True;
-    end
-    else if not FDown[Item.Key.Scancode] then
-      // 押されていないキーの KeyUp は捨てる。フォーカスを失ったときに
-      // ReleaseAll が離したキーの、実際の KeyUp がここへ来る。
-      Exit;
-    FDown[Item.Key.Scancode] := ADown;
-    if Item.Key.Key = PMLK_UNKNOWN then
-      Item.Key.Key := KeyForScancode(Item.Key.Scancode, PrevModifiers);
-  end;
-
-  Item.Ticket := FNextTicket;
-  Inc(FNextTicket);
-  if FNextTicket = 0 then
-    FNextTicket := 1;
-  Item.WindowID := AWindowID;
-  Item.Down := ADown;
-  Item.Text := AText;
-  Item.SinceNS := PMLNowNS;
-  Item.Resolved := True;
-  Item.Consumed := False;
-
-  if Assigned(FQueue.KeyFilter) and FQueue.KeyFilter.KeyFilterActive then
-  begin
-    Filtered := FQueue.KeyFilter.FilterKey(Item.Key, not ADown, Item.Ticket);
-    case Filtered of
-      TPMLKeyFilterResult.Consumed: Item.Consumed := True;
-      TPMLKeyFilterResult.Deferred: Item.Resolved := False;
-    else
-    end;
-  end;
-
-  if Item.Resolved and (FDeferred.Count = 0) then
-    Emit(Item, True)
-  else
-  begin
-    FDeferred.Add(Item);
-    Drain;
-  end;
+  TPMLKeyboardImpl(FImpl).ExpireDeferred(ANowNS, ATimeoutNS);
 end;
 
 { TPMLMouseState }

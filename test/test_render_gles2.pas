@@ -517,6 +517,50 @@ begin
       Gradient.WritePixel(X, Y, TPMLColor.Make(X * 16, Y * 16, 255 - X * 16, 64 + Y * 12));
 end;
 
+{ 拡大の方式（§3 の 3a）。SDL の GLES2 のドライバは、PIXELART の本物のシェーダを OPENGLES_300 の
+  ときだけ使い、その定義はどこにも無いので、実際は NEAREST と同じ絵になる。papimela も同じ。 }
+procedure CheckScaleModes;
+var
+  Rs: array[0..2] of TPMLRenderer;
+  Shots: array[0..2] of TPMLSurface;
+  Modes: array[0..2] of TPMLScaleMode;
+  T: TPMLTexture;
+  I, X, Y, SameNP, DiffNL: Integer;
+begin
+  Modes[0] := TPMLScaleMode.Nearest;
+  Modes[1] := TPMLScaleMode.PixelArt;
+  Modes[2] := TPMLScaleMode.Linear;
+  for I := 0 to 2 do
+  begin
+    Rs[I] := NewGPU;
+    Background(Rs[I]);
+    T := Rs[I].CreateTextureFromSurface(Checker);
+    T.ScaleMode := Modes[I];
+    Rs[I].RenderTexture(T, FR(0, 0, 0, 0), FR(3, 3, 37, 41));
+    Shots[I] := Rs[I].ReadPixels(TPMLRect.Make(0, 0, 0, 0));
+  end;
+  try
+    SameNP := 0;
+    DiffNL := 0;
+    for Y := 0 to H - 1 do
+      for X := 0 to W - 1 do
+      begin
+        if Shots[0].ReadRaw(X, Y) = Shots[1].ReadRaw(X, Y) then
+          Inc(SameNP);
+        if Shots[0].ReadRaw(X, Y) <> Shots[2].ReadRaw(X, Y) then
+          Inc(DiffNL);
+      end;
+    Check(SameNP = W * H, 'GPU でも PixelArt は Nearest と同じ絵（SDL の GLES2 と同じ）');
+    Check(DiffNL > 0, '（確かめ）Linear は Nearest と違う絵になる');
+  finally
+    for I := 0 to 2 do
+    begin
+      Shots[I].Free;
+      Rs[I].Free;
+    end;
+  end;
+end;
+
 procedure OffscreenSection;
 var
   G: TPMLRenderer;
@@ -622,6 +666,7 @@ begin
   Compare('回す（90 度・反転・30 度）と平行四辺形', @SceneRotated, 0, 40);
   Compare('敷き詰めと 9 つ分け（9GridTiled を含む）', @SceneTiled9Grid, 0);
   Compare('描画先のテクスチャ（4 形式・合成・クリップ・描画先どうし）', @SceneRenderTargets, 2);
+  CheckScaleModes;
 end;
 
 { ---- ウィンドウ ---- }

@@ -1400,6 +1400,8 @@ begin
     end;
     if Data.Filter <> ACmd.ScaleMode then
     begin
+      // PORT-NOTE: PixelArt は Nearest と同じ。SDL の GLES2 は本物の PIXELART のシェーダを
+      // OPENGLES_300 のときだけ使うが、それはどこにも定義されていない（GL_NEAREST と texture2D に戻る）。
       if ACmd.ScaleMode = TPMLScaleMode.Linear then
         Filter := GL_LINEAR
       else

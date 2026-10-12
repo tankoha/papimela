@@ -84,8 +84,9 @@ type
     予約語で列挙子にできないため。 }
   TPMLBlendMode = (None, Blend, Add, Modulate, Multiply);
 
-  // 拡大縮小の補間。
-  TPMLScaleMode = (Nearest, Linear);
+  // 拡大縮小の補間（SDL_ScaleMode と同じ並び）。PixelArt は SDL 3.4 の SDL_SCALEMODE_PIXELART で、
+  // SDL のソフトウェアの経路と GLES2 のドライバでは Nearest と同じ絵になる（papimela も同じ）。
+  TPMLScaleMode = (Nearest, Linear, PixelArt);
 
 
   { 浮動小数点の点と矩形。レンダラの座標はすべてこちら。

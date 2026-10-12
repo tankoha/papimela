@@ -47,8 +47,8 @@
     - 線の描き方の切り替え（SDL_HINT_RENDER_LINE_METHOD）は無い。論理解像度では
       三角形、倍率だけなら矩形の並び、どちらも無ければドライバの線（SDL の既定の
       振り分けのうち、ソフトウェアのレンダラと同じもの）
-    - DebugText の文字の表は拡大を Nearest で行う（SDL は PIXELART）。整数倍では
-      同じ絵、小数倍では字形の画素の位置が 1 画素ずれることがある（SDL と実測で比べた）
+    - ソフトウェアのドライバの拡大は Linear でも Nearest で描く（PMLBlitScaled が方式を使わない）。
+      SDL のソフトウェアのレンダラは Linear で補間する
     - パレットと YUV のテクスチャは未実装
     - GPU のドライバは OpenGL ES 2.0（#43）だけ。デスクトップ GL（#44）は未着手
 
@@ -2592,8 +2592,7 @@ const
   PORT-NOTE: SDL は INDEX8 のサーフェス（パレット 2 色）から作るが、papimela の
   テクスチャはパレットをまだ持たない。白で、字形の画素だけアルファ 255 の
   ARGB8888 で直接作る。描いた結果は同じ（白 x 変調色）。
-  拡大の方式は SDL の PIXELART ではなく Nearest。papimela に PIXELART が無いため。
-  整数倍では同じ絵になる。 }
+  拡大の方式は SDL と同じ PixelArt（どのドライバでも Nearest と同じ絵）。 }
 procedure TPMLRenderer.CreateDebugFont;
 const
   CharW = PML_DEBUG_TEXT_FONT_CHARACTER_SIZE;
@@ -2634,7 +2633,7 @@ begin
   finally
     Atlas.Free;
   end;
-  FDebugFont.ScaleMode := TPMLScaleMode.Nearest;
+  FDebugFont.ScaleMode := TPMLScaleMode.PixelArt;   // SDL と同じ（どのドライバでも Nearest と同じ絵）
   FDebugFont.BlendMode := TPMLBlendMode.Blend;
 end;
 
