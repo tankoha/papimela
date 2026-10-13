@@ -4,7 +4,9 @@
   Origin : ported from SDL (src/render/opengles2/SDL_render_gles2.c,
            src/render/opengles2/SDL_shaders_gles2.c)
            Scope: 頂点シェーダと単色・テクスチャ（ARGB / ABGR / XRGB / XBGR）の
-           フラグメントシェーダ、合成モードから glBlendFunc への対応、
+           フラグメントシェーダ、パレット（INDEX8）のフラグメントシェーダ
+           （最近傍と線形、BGRA / BGRX の描画先向けの R と B の入れ替え付き）、
+           パレットの写し（256x1 のテクスチャ）の作成・更新・破棄、合成モードから glBlendFunc への対応、
            ビューポートとクリップ矩形の GL への写し方（ウィンドウは上下反転）、
            点と線の +0.5 画素補正と線分の端を延ばす細工（延ばす量は SDL の
            1/4 画素でなく 0.75 画素。RESOLVED を参照）、
@@ -43,14 +45,17 @@
     - オフスクリーンの EGL ディスプレイは全ドライバで 1 つを数えて共有する。
       eglTerminate は参照を数えないので、ドライバごとに終了すると、ほかのドライバの
       コンテキストが巻き添えになる（実測: EGL_BAD_DISPLAY）
+    - INDEX8 のテクスチャは GL_LUMINANCE の 1 バイト 1 画素で持つ。色はパレットの写し
+      （256x1 の RGBA テクスチャ。ユニット 1）をシェーダで引く。写しは白の不透明で
+      始めるので、アプリのパレットの外の添字は白で描かれる（ソフトウェアのドライバと同じ）。
+      線形補間はシェーダで 4 つの添字の色を混ぜる。添字のテクスチャの補間は常に最近傍
     - 描画先のテクスチャ（SetRenderTarget）は、テクスチャごとに自分を付けた FBO を持つ。
       FBO のメモリはテクスチャの形式の並びで書く（BGRA32 / BGRX32 の描画先には色の R と B を
       入れ替えて渡す）ので、あとでそのテクスチャを描くときも、形式どおりに読める。
       描画元と描画先の形式の組で選ぶシェーダは CopyShader の PORT-NOTE を参照
 
   NOT RESOLVED:
-    - YUV・パレット（INDEX8）・外部テクスチャ（OES）・
-      線形補間でないスケールモード（PIXELART）は未実装
+    - YUV・外部テクスチャ（OES）は未実装。PIXELART は最近傍と同じ
     - コンテキスト喪失（GL_CONTEXT_LOST）への対応
     - 斜めの線は GL の線の規則（菱形の出口規則）で決まる。ブレゼンハムとは
       数画素ずれる
@@ -85,8 +90,13 @@ type
       ABGR : メモリ上の並びが R,G,B,A のテクスチャ（そのまま）
       ARGB : 並びが B,G,R,A（R と B を入れ替える）
       RGB  : 並びが B,G,R,X（R と B を入れ替え、A を 1 にする）
-      BGR  : 並びが R,G,B,X（A を 1 にする） }
-  TPMLGLES2Shader = (Solid, ABGR, ARGB, RGB, BGR);
+      BGR  : 並びが R,G,B,X（A を 1 にする）
+      PalNearest    : INDEX8。パレットの色をそのまま（最近傍）
+      PalLinear     : INDEX8。4 つの添字の色を混ぜる（線形）
+      PalNearestSwap: PalNearest の R と B を入れ替える（BGRA32 / BGRX32 の描画先）
+      PalLinearSwap : PalLinear の R と B を入れ替える }
+  TPMLGLES2Shader = (Solid, ABGR, ARGB, RGB, BGR,
+    PalNearest, PalLinear, PalNearestSwap, PalLinearSwap);
 
   { リンク済みのプログラム。 }
   TPMLGLES2Program = record
@@ -135,7 +145,8 @@ type
     FCurShader : TPMLGLES2Shader;
     FBlendValid: Boolean;
     FCurBlend  : TPMLBlendMode;
-    FBoundTexture: GLuint;
+    FBoundTexture: GLuint;     // ユニット 0 に束縛したテクスチャ（0 = 未設定）
+    FBoundPalette: GLuint;     // ユニット 1 に束縛したパレットの写し（0 = 未設定）
     // 描画先のテクスチャ（SetRenderTarget）。nil はウィンドウかオフスクリーンの FBO。
     FTarget    : TObject;
 
@@ -180,6 +191,11 @@ type
     function  UpdateTexture(ATexture: TPMLTexture; const ARect: TPMLRect;
       APixels: Pointer; APitch: Integer): Boolean; override;
     procedure DestroyTexture(ATexture: TPMLTexture); override;
+    function  CreatePalette(APalette: TPMLTexturePalette): Boolean; override;
+    function  UpdatePalette(APalette: TPMLTexturePalette;
+      const AColors: array of TPMLColor): Boolean; override;
+    procedure DestroyPalette(APalette: TPMLTexturePalette); override;
+    procedure ChangeTexturePalette(ATexture: TPMLTexture); override;
     function  SupportsRenderTargets: Boolean; override;
     function  SetRenderTarget(ATexture: TPMLTexture): Boolean; override;
 
@@ -220,8 +236,9 @@ const
 { ---- シェーダのソース（SDL_shaders_gles2.c の GLSL ES をそのまま） ----
 
   PORT-NOTE: SDL の GLES2_Fragment_Include_Best_Texture_Precision に当たる前置きと、
-  頂点シェーダ、単色、テクスチャ 4 種（RGB / BGR / ARGB / ABGR）だけを写した。
-  ピクセルアート・パレット・YUV は持たない。精度を決めるマクロの名前だけ
+  頂点シェーダ、単色、テクスチャ 4 種（RGB / BGR / ARGB / ABGR）、パレット 4 種
+  （最近傍 / 線形 と、それぞれの colorswap）だけを写した。
+  ピクセルアート・YUV は持たない。精度を決めるマクロの名前だけ
   SDL_TEXCOORD_PRECISION から PML_TEXCOORD_PRECISION に変えた。
 
   PORT-NOTE: 頂点シェーダでテクスチャ座標に 1/10000 テクセルを足す（uniform
@@ -310,6 +327,86 @@ const
     '    gl_FragColor *= v_color;' + LF +
     '}' + LF;
 
+  { パレット（INDEX8）のシェーダ。SDL の PALETTE_SHADER_PROLOGUE と PALETTE_SHADER_FUNCTIONS、
+    GLES2_Fragment_TexturePalette_Nearest / Linear（と _Colorswap）。
+
+    PORT-NOTE: u_texel_size の精度を、SDL の mediump でなく
+    PML_TEXCOORD_PRECISION（highp が使えれば highp）にした。papimela の頂点シェーダも
+    この uniform を宣言していて（精度の指定なし = highp）、頂点と断片で精度が
+    食い違うと、リンクを通さない実装があるため。 }
+  PalettePrologue =
+    'uniform sampler2D u_texture;' + LF +
+    'uniform sampler2D u_palette;' + LF +
+    'uniform PML_TEXCOORD_PRECISION vec4 u_texel_size;' + LF +
+    'varying mediump vec4 v_color;' + LF +
+    'varying PML_TEXCOORD_PRECISION vec2 v_texCoord;' + LF +
+    LF;
+
+  PaletteFunctions =
+    'mediump vec4 SamplePaletteNearest(PML_TEXCOORD_PRECISION vec2 uv)' + LF +
+    '{' + LF +
+    '    mediump float index = texture2D(u_texture, uv).r * 255.0;' + LF +
+    '    return texture2D(u_palette, vec2((index + 0.5) / 256.0, 0.5));' + LF +
+    '}' + LF +
+    LF +
+    'mediump vec4 SamplePaletteLinear(PML_TEXCOORD_PRECISION vec2 uv)' + LF +
+    '{' + LF +
+    '    // scale & offset uvs to integer values at texel centers' + LF +
+    '    PML_TEXCOORD_PRECISION vec2 uv_texels = uv * u_texel_size.zw + 0.5;' + LF +
+    LF +
+    '    // get uvs for the center of the 4 surrounding texels by flooring' + LF +
+    '    PML_TEXCOORD_PRECISION vec4 uv_min_max = vec4((floor(uv_texels) - 0.5) * u_texel_size.xy, (floor(uv_texels) + 0.5) * u_texel_size.xy);' + LF +
+    LF +
+    '    // blend factor' + LF +
+    '    PML_TEXCOORD_PRECISION vec2 uv_frac = fract(uv_texels);' + LF +
+    LF +
+    '    // sample all 4 texels' + LF +
+    '    mediump vec4 texelA = SamplePaletteNearest(uv_min_max.xy);' + LF +
+    '    mediump vec4 texelB = SamplePaletteNearest(uv_min_max.xw);' + LF +
+    '    mediump vec4 texelC = SamplePaletteNearest(uv_min_max.zy);' + LF +
+    '    mediump vec4 texelD = SamplePaletteNearest(uv_min_max.zw);' + LF +
+    LF +
+    '    // bilinear interpolation' + LF +
+    '    return mix(mix(texelA, texelB, uv_frac.y), mix(texelC, texelD, uv_frac.y), uv_frac.x);' + LF +
+    '}' + LF +
+    LF;
+
+  FragmentPalNearest =
+    LF +
+    'void main()' + LF +
+    '{' + LF +
+    '    mediump vec4 color = SamplePaletteNearest(v_texCoord);' + LF +
+    '    gl_FragColor = color;' + LF +
+    '    gl_FragColor *= v_color;' + LF +
+    '}' + LF;
+
+  FragmentPalNearestSwap =
+    LF +
+    'void main()' + LF +
+    '{' + LF +
+    '    mediump vec4 color = SamplePaletteNearest(v_texCoord);' + LF +
+    '    gl_FragColor = vec4(color.b, color.g, color.r, color.a);' + LF +
+    '    gl_FragColor *= v_color;' + LF +
+    '}' + LF;
+
+  FragmentPalLinear =
+    LF +
+    'void main()' + LF +
+    '{' + LF +
+    '    mediump vec4 color = SamplePaletteLinear(v_texCoord);' + LF +
+    '    gl_FragColor = color;' + LF +
+    '    gl_FragColor *= v_color;' + LF +
+    '}' + LF;
+
+  FragmentPalLinearSwap =
+    LF +
+    'void main()' + LF +
+    '{' + LF +
+    '    mediump vec4 color = SamplePaletteLinear(v_texCoord);' + LF +
+    '    gl_FragColor = vec4(color.b, color.g, color.r, color.a);' + LF +
+    '    gl_FragColor *= v_color;' + LF +
+    '}' + LF;
+
 type
   { テクスチャの中身（TPMLTexture.DriverData）。 }
   TPMLGLES2Texture = class
@@ -324,6 +421,15 @@ type
     BFirst  : Boolean;
     // アルファを持つ（BGRA32 / RGBA32）か。X の形式は A を 1 として読む
     HasAlpha: Boolean;
+    // INDEX8（GL_LUMINANCE の 1 バイト 1 画素）か。BFirst と HasAlpha は意味を持たない。
+    // 補間は作成時から GL_NEAREST のまま変えない（線形はシェーダで混ぜる）
+    Indexed : Boolean;
+  end;
+
+  { パレットの写し（TPMLTexturePalette.DriverData）。256x1 の RGBA テクスチャ。 }
+  TPMLGLES2Palette = class
+  public
+    Id: GLuint;
   end;
 
 var
@@ -460,6 +566,20 @@ begin
     Result := TPMLGLES2Shader.ABGR
   else
     Result := TPMLGLES2Shader.BGR;
+end;
+
+{ 形式の 1 画素のバイト数（INDEX8 は 1、ほかは RGBA の 4）。 }
+function BytesPerTexel(AFormat: TPMLPixelFormat): PtrUInt; inline;
+begin
+  if AFormat = PML_PIXELFORMAT_INDEX8 then
+    Result := 1
+  else
+    Result := 4;
+end;
+
+function IsPaletteShader(AShader: TPMLGLES2Shader): Boolean; inline;
+begin
+  Result := AShader >= TPMLGLES2Shader.PalNearest;
 end;
 
 function TextureData(ATexture: TPMLTexture): TPMLGLES2Texture; inline;
@@ -717,10 +837,12 @@ begin
   FPrograms[AShader].ProjGen := -1;
   FPrograms[AShader].TexelSize := FGL.glGetUniformLocation(Id, 'u_texel_size');
   FPrograms[AShader].TexelOwner := 0;
-  // テクスチャは常にユニット 0。
+  // テクスチャは常にユニット 0、パレットの写しはユニット 1。
   FGL.glUseProgram(Id);
   if AShader <> TPMLGLES2Shader.Solid then
     FGL.glUniform1i(FGL.glGetUniformLocation(Id, 'u_texture'), 0);
+  if IsPaletteShader(AShader) then
+    FGL.glUniform1i(FGL.glGetUniformLocation(Id, 'u_palette'), 1);
 end;
 
 { プログラム、VBO、GL の固定の状態。コンテキストが現在であること。 }
@@ -738,6 +860,14 @@ begin
     BuildProgram(TPMLGLES2Shader.ARGB, FragmentPrecision + TexturePrologue + FragmentARGB, Vertex);
     BuildProgram(TPMLGLES2Shader.RGB, FragmentPrecision + TexturePrologue + FragmentRGB, Vertex);
     BuildProgram(TPMLGLES2Shader.BGR, FragmentPrecision + TexturePrologue + FragmentBGR, Vertex);
+    BuildProgram(TPMLGLES2Shader.PalNearest,
+      FragmentPrecision + PalettePrologue + PaletteFunctions + FragmentPalNearest, Vertex);
+    BuildProgram(TPMLGLES2Shader.PalLinear,
+      FragmentPrecision + PalettePrologue + PaletteFunctions + FragmentPalLinear, Vertex);
+    BuildProgram(TPMLGLES2Shader.PalNearestSwap,
+      FragmentPrecision + PalettePrologue + PaletteFunctions + FragmentPalNearestSwap, Vertex);
+    BuildProgram(TPMLGLES2Shader.PalLinearSwap,
+      FragmentPrecision + PalettePrologue + PaletteFunctions + FragmentPalLinearSwap, Vertex);
   finally
     FGL.glDeleteShader(Vertex);
   end;
@@ -925,7 +1055,8 @@ function TPMLGLES2RenderDriver.SupportsTextureFormat(AFormat: TPMLPixelFormat): 
 var
   BFirst, HasAlpha: Boolean;
 begin
-  Result := LayoutOfFormat(AFormat, BFirst, HasAlpha);
+  Result := (AFormat = PML_PIXELFORMAT_INDEX8)
+    or LayoutOfFormat(AFormat, BFirst, HasAlpha);
 end;
 
 { ---- テクスチャ ---- }
@@ -938,13 +1069,20 @@ end;
 function TPMLGLES2RenderDriver.CreateTexture(ATexture: TPMLTexture): Boolean;
 var
   Data: TPMLGLES2Texture;
-  BFirst, HasAlpha: Boolean;
+  BFirst, HasAlpha, Indexed: Boolean;
   Zero: Pointer;
   Size: PtrUInt;
   Err: GLenum;
+  GLFormat: GLenum;
 begin
   Result := False;
-  if not LayoutOfFormat(ATexture.Format, BFirst, HasAlpha) then
+  Indexed := ATexture.Format = PML_PIXELFORMAT_INDEX8;
+  if Indexed then
+  begin
+    BFirst := False;
+    HasAlpha := False;
+  end
+  else if not LayoutOfFormat(ATexture.Format, BFirst, HasAlpha) then
     Exit;
   if (ATexture.Width > FMaxTexture) or (ATexture.Height > FMaxTexture) then
     Exit;
@@ -954,6 +1092,7 @@ begin
   Data.Format := ATexture.Format;
   Data.BFirst := BFirst;
   Data.HasAlpha := HasAlpha;
+  Data.Indexed := Indexed;
   Data.Filter := TPMLScaleMode.Nearest;
   Data.Width := ATexture.Width;
   Data.Height := ATexture.Height;
@@ -963,12 +1102,17 @@ begin
   FGL.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
   FGL.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
   FGL.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-  Size := PtrUInt(ATexture.Width) * PtrUInt(ATexture.Height) * 4;
+  Size := PtrUInt(ATexture.Width) * PtrUInt(ATexture.Height) * BytesPerTexel(ATexture.Format);
+  // INDEX8 は GL_LUMINANCE（SDL の GLES2_CreateTexture と同じ）。1 バイトが R に読める
+  if Indexed then
+    GLFormat := GL_LUMINANCE
+  else
+    GLFormat := GL_RGBA;
   Zero := GetMem(Size);
   try
     FillChar(Zero^, Size, 0);
-    FGL.glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, ATexture.Width, ATexture.Height, 0,
-      GL_RGBA, GL_UNSIGNED_BYTE, Zero);
+    FGL.glTexImage2D(GL_TEXTURE_2D, 0, GLFormat, ATexture.Width, ATexture.Height, 0,
+      GLFormat, GL_UNSIGNED_BYTE, Zero);
   finally
     FreeMem(Zero);
   end;
@@ -1004,6 +1148,7 @@ var
   Blob: PByte;
   RowBytes: PtrUInt;
   Y: Integer;
+  GLFormat: GLenum;
 begin
   Result := False;
   Data := TextureData(ATexture);
@@ -1014,10 +1159,14 @@ begin
     Exit;
   EnsureCurrent;
   FGL.glBindTexture(GL_TEXTURE_2D, Data.Id);
-  RowBytes := PtrUInt(ARect.W) * 4;
+  RowBytes := PtrUInt(ARect.W) * BytesPerTexel(ATexture.Format);
+  if Data.Indexed then
+    GLFormat := GL_LUMINANCE
+  else
+    GLFormat := GL_RGBA;
   if PtrUInt(APitch) = RowBytes then
     FGL.glTexSubImage2D(GL_TEXTURE_2D, 0, ARect.X, ARect.Y, ARect.W, ARect.H,
-      GL_RGBA, GL_UNSIGNED_BYTE, APixels)
+      GLFormat, GL_UNSIGNED_BYTE, APixels)
   else
   begin
     Blob := GetMem(RowBytes * PtrUInt(ARect.H));
@@ -1026,7 +1175,7 @@ begin
         Move((PByte(APixels) + PtrUInt(Y) * PtrUInt(APitch))^,
           (Blob + PtrUInt(Y) * RowBytes)^, RowBytes);
       FGL.glTexSubImage2D(GL_TEXTURE_2D, 0, ARect.X, ARect.Y, ARect.W, ARect.H,
-        GL_RGBA, GL_UNSIGNED_BYTE, Blob);
+        GLFormat, GL_UNSIGNED_BYTE, Blob);
     finally
       FreeMem(Blob);
     end;
@@ -1058,6 +1207,87 @@ begin
       FLastNonFatalError := 'GLES2 texture cleanup failed: ' + E.Message;
   end;
   FreeAndNil(ATexture.DriverData);
+end;
+
+{ ---- パレット（SDL の GLES2_CreatePalette / UpdatePalette / DestroyPalette） ---- }
+
+{ 256x1 の RGBA テクスチャを作る。補間は最近傍、端は CLAMP_TO_EDGE。
+
+  PORT-NOTE: SDL は中身を未定義のまま作る（glTexImage2D の画素が NULL）。papimela は 256 色すべてを
+  白の不透明で始める。アプリのパレットが 256 色に満たないとき、表の外の添字が白で描かれ、
+  ソフトウェアのドライバ（256 色の写しが白で始まる。実測）と同じ絵になる。 }
+function TPMLGLES2RenderDriver.CreatePalette(APalette: TPMLTexturePalette): Boolean;
+var
+  Data: TPMLGLES2Palette;
+  White: array[0..255] of TPMLColor;
+  I: Integer;
+begin
+  Result := False;
+  EnsureCurrent;
+  FGL.glGetError();
+  for I := 0 to 255 do
+    White[I] := TPMLColor.White;
+  Data := TPMLGLES2Palette.Create;
+  FGL.glGenTextures(1, @Data.Id);
+  FGL.glBindTexture(GL_TEXTURE_2D, Data.Id);
+  FGL.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+  FGL.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  FGL.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  FGL.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  FGL.glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 256, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, @White[0]);
+  if FGL.glGetError() <> GL_NO_ERROR then
+  begin
+    FGL.glDeleteTextures(1, @Data.Id);
+    Data.Free;
+    Exit;
+  end;
+  APalette.DriverData := Data;
+  Result := True;
+end;
+
+{ 先頭の AColors の個数ぶんの色を写す。TPMLColor は R,G,B,A の順の 4 バイトなので、
+  GL_RGBA / GL_UNSIGNED_BYTE でそのまま渡せる。残りの色は前のまま。 }
+function TPMLGLES2RenderDriver.UpdatePalette(APalette: TPMLTexturePalette;
+  const AColors: array of TPMLColor): Boolean;
+var
+  Data: TPMLGLES2Palette;
+  Count: Integer;
+begin
+  Result := False;
+  if not (APalette.DriverData is TPMLGLES2Palette) then
+    Exit;
+  Data := TPMLGLES2Palette(APalette.DriverData);
+  Count := Min(Length(AColors), 256);
+  if Count <= 0 then
+    Exit(True);
+  EnsureCurrent;
+  FGL.glGetError();
+  FGL.glBindTexture(GL_TEXTURE_2D, Data.Id);
+  FGL.glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, Count, 1, GL_RGBA, GL_UNSIGNED_BYTE, @AColors[0]);
+  Result := FGL.glGetError() = GL_NO_ERROR;
+end;
+
+procedure TPMLGLES2RenderDriver.DestroyPalette(APalette: TPMLTexturePalette);
+var
+  Data: TPMLGLES2Palette;
+begin
+  if APalette.DriverData is TPMLGLES2Palette then
+  begin
+    Data := TPMLGLES2Palette(APalette.DriverData);
+    try
+      EnsureCurrent;
+      FGL.glDeleteTextures(1, @Data.Id);
+    except
+      on E: EPMLError do
+        FLastNonFatalError := 'GLES2 palette cleanup failed: ' + E.Message;
+    end;
+  end;
+  FreeAndNil(APalette.DriverData);
+end;
+
+{ 何もしない。描くときに ACmd.Texture.DriverPalette を読んで束縛する（ExecDraw）。 }
+procedure TPMLGLES2RenderDriver.ChangeTexturePalette(ATexture: TPMLTexture);
+begin
 end;
 
 function TPMLGLES2RenderDriver.SupportsRenderTargets: Boolean;
@@ -1182,6 +1412,9 @@ begin
   FBlendValid := False;
   FShaderValid := False;
   FBoundTexture := 0;
+  FBoundPalette := 0;
+  // 実行の前の呼び出し（テクスチャの更新など）が束縛を動かしても、ユニット 0 に戻す。
+  FGL.glActiveTexture(GL_TEXTURE0);
   // テクスチャの id は破棄のあとで使い回されるので、大きさの設定は持ち越さない。
   for S := Low(TPMLGLES2Shader) to High(TPMLGLES2Shader) do
     FPrograms[S].TexelOwner := 0;
@@ -1365,17 +1598,41 @@ end;
 procedure TPMLGLES2RenderDriver.ExecDraw(AMode: GLenum; const ACmd: TPMLRenderCommand);
 var
   Data: TPMLGLES2Texture;
+  Pal: TPMLGLES2Palette;
   Shader: TPMLGLES2Shader;
   Filter: GLint;
 begin
   Data := nil;
+  Pal := nil;
   Shader := TPMLGLES2Shader.Solid;
   if ACmd.Texture <> nil then
   begin
     Data := TextureData(ACmd.Texture);
     if Data = nil then
       Exit;       // 破棄されたテクスチャ。描くものが無い
-    Shader := CopyShader(Data.BFirst, Data.HasAlpha, TargetSwapsRB);
+    if Data.Indexed then
+    begin
+      // パレットの写しは実行のときに読む。写しの中身は、積む前に UpdatePalette が
+      // 流してある（レンダラが、版が変わったら先に吐き出す）
+      if (ACmd.Texture.DriverPalette = nil)
+      or not (ACmd.Texture.DriverPalette.DriverData is TPMLGLES2Palette) then
+        Exit;     // 破棄されたパレット。描くものが無い
+      Pal := TPMLGLES2Palette(ACmd.Texture.DriverPalette.DriverData);
+      // PixelArt は Nearest と同じ（下の PORT-NOTE）
+      if ACmd.ScaleMode = TPMLScaleMode.Linear then
+      begin
+        if TargetSwapsRB then
+          Shader := TPMLGLES2Shader.PalLinearSwap
+        else
+          Shader := TPMLGLES2Shader.PalLinear;
+      end
+      else if TargetSwapsRB then
+        Shader := TPMLGLES2Shader.PalNearestSwap
+      else
+        Shader := TPMLGLES2Shader.PalNearest;
+    end
+    else
+      Shader := CopyShader(Data.BFirst, Data.HasAlpha, TargetSwapsRB);
   end;
   if ACmd.Count <= 0 then
     Exit;
@@ -1387,6 +1644,14 @@ begin
 
   if Data <> nil then
   begin
+    if (Pal <> nil) and (FBoundPalette <> Pal.Id) then
+    begin
+      // パレットの写しはユニット 1。ユニット 0 に戻してから先へ進む
+      FGL.glActiveTexture(GL_TEXTURE1);
+      FGL.glBindTexture(GL_TEXTURE_2D, Pal.Id);
+      FGL.glActiveTexture(GL_TEXTURE0);
+      FBoundPalette := Pal.Id;
+    end;
     if FBoundTexture <> Data.Id then
     begin
       FGL.glBindTexture(GL_TEXTURE_2D, Data.Id);
@@ -1398,7 +1663,9 @@ begin
         Data.Width, Data.Height);
       FPrograms[Shader].TexelOwner := Data.Id;
     end;
-    if Data.Filter <> ACmd.ScaleMode then
+    // INDEX8 の添字のテクスチャは補間しない（Data.Filter は Nearest のまま）。
+    // 線形は PalLinear が 4 つの添字の色を混ぜる（SDL の SetTextureScaleMode と同じ）
+    if (not Data.Indexed) and (Data.Filter <> ACmd.ScaleMode) then
     begin
       // PORT-NOTE: PixelArt は Nearest と同じ。SDL の GLES2 は本物の PIXELART のシェーダを
       // OPENGLES_300 のときだけ使うが、それはどこにも定義されていない（GL_NEAREST と texture2D に戻る）。

@@ -620,6 +620,8 @@ type
   TPMLRenderCommand = PaPiMeLa.Render.TPMLRenderCommand;
   TPMLRenderCommands = PaPiMeLa.Render.TPMLRenderCommands;
   TPMLRenderQueue = PaPiMeLa.Render.TPMLRenderQueue;
+  TPMLTexturePalette = PaPiMeLa.Render.TPMLTexturePalette;
+  TPMLTexturePalettes = PaPiMeLa.Render.TPMLTexturePalettes;
   TPMLRenderDriver = PaPiMeLa.Render.TPMLRenderDriver;
   TPMLTextureAccess = PaPiMeLa.Render.TPMLTextureAccess;
   TPMLLogicalPresentation = PaPiMeLa.Render.TPMLLogicalPresentation;

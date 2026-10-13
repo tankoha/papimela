@@ -97,6 +97,8 @@ type
   TPMLPalette = class sealed(TPMLOwnedObject)
   strict private
     FColors: TPMLColors;
+    FVersion: LongWord;
+    procedure Touch;
     function  GetCount: Integer;
     function  GetColor(AIndex: Integer): TPMLColor;
     procedure SetColor(AIndex: Integer; const AValue: TPMLColor);
@@ -109,6 +111,9 @@ type
     procedure Reset;
     property Count: Integer read GetCount;
     property Colors[AIndex: Integer]: TPMLColor read GetColor write SetColor; default;
+    { 色を変えるたびに 1 つ進む版（SDL_Palette の version）。作った直後は 1 で、0 にはならない。
+      パレットを使うテクスチャは、描くときに版を比べて、変わっていればドライバの色表を流し直す。 }
+    property Version: LongWord read FVersion;
   end;
 
 const
@@ -804,6 +809,7 @@ begin
     ACount := 1;
   SetLength(FColors, ACount);
   Reset;
+  FVersion := 1;     // Reset が進めた分を戻す（SDL_CreatePalette と同じく 1 から）
 end;
 
 function TPMLPalette.GetCount: Integer;
@@ -822,7 +828,10 @@ end;
 procedure TPMLPalette.SetColor(AIndex: Integer; const AValue: TPMLColor);
 begin
   if (AIndex >= 0) and (AIndex < Length(FColors)) then
+  begin
     FColors[AIndex] := AValue;
+    Touch;
+  end;
 end;
 
 procedure TPMLPalette.SetColors(const AColors: array of TPMLColor; AFirst: Integer);
@@ -839,6 +848,7 @@ begin
       Inc(i);
       Inc(j);
     end;
+    Touch;
   end;
 end;
 
@@ -848,6 +858,17 @@ var
 begin
   for i := 0 to Length(FColors) - 1 do
     FColors[i] := TPMLColor.White;
+  Touch;
+end;
+
+{ 版を進める。一周するときは 0 を飛ばして 1 にする（0 は「まだ流していない」の印に使う）。
+  桁あふれの検査（-Co）を付けて作っても落ちないよう、Inc で回さない。 }
+procedure TPMLPalette.Touch;
+begin
+  if FVersion = High(LongWord) then
+    FVersion := 1
+  else
+    FVersion := FVersion + 1;
 end;
 
 end.

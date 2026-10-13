@@ -6,6 +6,8 @@
            Scope: コマンドの実行順、ビューポートとクリップ矩形の重ね方、
            ブレゼンハムの線の端点の扱い、合成つきの矩形塗り、
            ウィンドウの大きさが変わったら描画先を取り直すこと。
+           パレット（SW_CreatePalette などの 4 つ。ドライバの写しは 256 色の
+           TPMLPalette で、テクスチャのサーフェスに借りさせる）。
            SDL revision: see docs/ORIGIN.md
   Design : docs/DESIGN.md §4.3、§11 #42
 
@@ -83,6 +85,12 @@ type
       APixels: Pointer; APitch: Integer): Boolean; override;
     procedure DestroyTexture(ATexture: TPMLTexture); override;
     function  SupportsRenderTargets: Boolean; override;
+    // どの形式も持てる（INDEX8 もサーフェスのパレットで描く）。
+    function  SupportsTextureFormat(AFormat: TPMLPixelFormat): Boolean; override;
+    function  CreatePalette(APalette: TPMLTexturePalette): Boolean; override;
+    function  UpdatePalette(APalette: TPMLTexturePalette;
+      const AColors: array of TPMLColor): Boolean; override;
+    procedure ChangeTexturePalette(ATexture: TPMLTexture); override;
     function  SetRenderTarget(ATexture: TPMLTexture): Boolean; override;
 
     procedure QueueGeometry(AQueue: TPMLRenderQueue; var ACmd: TPMLRenderCommand;
@@ -225,6 +233,41 @@ begin
   if ATexture = FTargetTexture then
     SetRenderTarget(nil);
   FreeAndNil(ATexture.DriverData);
+end;
+
+function TPMLSoftwareRenderDriver.SupportsTextureFormat(AFormat: TPMLPixelFormat): Boolean;
+begin
+  Result := True;
+end;
+
+{ ドライバの写しは 256 色（SDL_CreatePalette(256)。白の不透明で始まる）。アプリのパレットが
+  4 色でも、表の外の添字は白で描かれる（SDL と同じ。実測）。色は UpdatePalette が写すので、
+  写した後にアプリがパレットを変えても、積んである描画の色は変わらない。 }
+function TPMLSoftwareRenderDriver.CreatePalette(APalette: TPMLTexturePalette): Boolean;
+begin
+  APalette.DriverData := TPMLPalette.Create(nil, nil, 256);
+  Result := True;
+end;
+
+function TPMLSoftwareRenderDriver.UpdatePalette(APalette: TPMLTexturePalette;
+  const AColors: array of TPMLColor): Boolean;
+begin
+  Result := APalette.DriverData is TPMLPalette;
+  if Result then
+    TPMLPalette(APalette.DriverData).SetColors(AColors, 0);
+end;
+
+procedure TPMLSoftwareRenderDriver.ChangeTexturePalette(ATexture: TPMLTexture);
+var
+  S: TPMLSurface;
+begin
+  S := TextureSurface(ATexture);
+  if S = nil then
+    Exit;
+  if (ATexture.DriverPalette <> nil) and (ATexture.DriverPalette.DriverData is TPMLPalette) then
+    S.SetPalette(TPMLPalette(ATexture.DriverPalette.DriverData), False)
+  else
+    S.SetPalette(nil, False);
 end;
 
 function TPMLSoftwareRenderDriver.SupportsRenderTargets: Boolean;

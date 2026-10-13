@@ -7,7 +7,9 @@
            同じ状態の描画を 1 つのコマンドにまとめる規則、矩形・線・点・
            テクスチャ転送を三角形に落とす変換、拡大率と論理解像度
            （UpdateLogicalPresentation、倍率のかかった点と線の描き方、
-           ウィンドウ座標との変換）、DebugText（文字の表の配置と字形の引き方）。
+           ウィンドウ座標との変換）、DebugText（文字の表の配置と字形の引き方）、
+           パレットのテクスチャ（SDL_SetTexturePalette、ドライバの写しの共有と版での
+           流し直し、ドライバが INDEX8 を持たないときの肩代わり texture->native）。
            字形の表は src/generated/debug_font.inc（tools/gendebugfont.bb が
            SDL_render_debug_font.h から生成。字形そのものは Public Domain）。
            SDL revision: see docs/ORIGIN.md
@@ -49,7 +51,9 @@
       振り分けのうち、ソフトウェアのレンダラと同じもの）
     - ソフトウェアのドライバの拡大は Linear でも Nearest で描く（PMLBlitScaled が方式を使わない）。
       SDL のソフトウェアのレンダラは Linear で補間する
-    - パレットと YUV のテクスチャは未実装
+    - YUV のテクスチャは未実装（§3 の 3c）。インデックス形式は INDEX8 だけ（SDL も INDEX1 / 2 / 4 の
+      テクスチャは作れない）。肩代わりの層はいまインデックス形式だけが使う
+    - テクスチャの Lock / Unlock（SDL_LockTexture）は無い
     - GPU のドライバは OpenGL ES 2.0（#43）だけ。デスクトップ GL（#44）は未着手
 
   Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
@@ -135,6 +139,18 @@ type
     property  RectCount: Integer read FRectCount;
   end;
 
+  { ドライバが持つパレットの写し（SDL_TexturePalette）。同じ TPMLPalette を使うテクスチャは
+    1 つを共有する。レンダラが作り、使うテクスチャが無くなったら消す。ドライバは
+    DriverData に中身（ソフトウェアは 256 色の TPMLPalette、GLES2 は 256x1 のテクスチャ）を置く。 }
+  TPMLTexturePalette = class
+  public
+    Source    : TPMLPalette;   // 写しのもと。テクスチャが借りているか、持っているもの
+    RefCount  : Integer;       // 使っているテクスチャの数
+    Version   : LongWord;      // ドライバへ最後に流した Source の版。0 = まだ流していない
+    DriverData: TObject;       // ドライバの中身。DestroyPalette が消す
+  end;
+  TPMLTexturePalettes = array of TPMLTexturePalette;
+
   { ドライバの抽象。SDL_Renderer の関数ポインタ群を置き換える。
 
     必須は QueueGeometry と RunCommandQueue とテクスチャの 3 つと出力まわり。
@@ -156,10 +172,23 @@ type
     function  Name: String; virtual; abstract;
     function  GetOutputSize(out AWidth, AHeight: Integer): Boolean; virtual; abstract;
     function  SupportsBlendMode(AMode: TPMLBlendMode): Boolean; virtual;
-    // このドライバがテクスチャとして直接持てる形式か。既定は True。
-    // False の形式は、CreateTextureFromSurface が ARGB8888 へ変換してから渡す。
+    // このドライバがテクスチャとして直接持てる形式か。既定はインデックス形式（INDEX8）だけ False、
+    // ほかは True。False の形式は、CreateTextureFromSurface が ARGB8888 へ変換してから渡す。
+    // INDEX8 が False なら、レンダラが ARGB8888 の肩代わりのテクスチャで描く（TPMLTexture.SetPalette）。
     // ARGB8888 はどのドライバも持てなければならない。
     function  SupportsTextureFormat(AFormat: TPMLPixelFormat): Boolean; virtual;
+
+    { パレット（SDL の CreatePalette / UpdatePalette / DestroyPalette / ChangeTexturePalette）。
+      INDEX8 を持てるドライバだけが呼ばれる。既定の Create と Update は持てない（False）、
+      Destroy は DriverData を解放する、Change は何もしない。
+      UpdatePalette の AColors は Source の全色（最大 256）。この後に積まれる描画から効く
+      （それより前に積んだ描画は、レンダラが先に描き切っている）。
+      ChangeTexturePalette は ATexture.DriverPalette が替わったときに呼ばれる（nil にもなる）。 }
+    function  CreatePalette(APalette: TPMLTexturePalette): Boolean; virtual;
+    function  UpdatePalette(APalette: TPMLTexturePalette;
+      const AColors: array of TPMLColor): Boolean; virtual;
+    procedure DestroyPalette(APalette: TPMLTexturePalette); virtual;
+    procedure ChangeTexturePalette(ATexture: TPMLTexture); virtual;
 
     function  CreateTexture(ATexture: TPMLTexture): Boolean; virtual; abstract;
     function  UpdateTexture(ATexture: TPMLTexture; const ARect: TPMLRect;
@@ -236,9 +265,20 @@ type
     FColorMod : TPMLColor;
     FAlphaMod : Byte;
     FScaleMode: TPMLScaleMode;
+    // パレット（インデックス形式だけ）。
+    FPalette      : TPMLPalette;          // 使うパレット。借り物か、FOwnsPalette なら持ち物
+    FOwnsPalette  : Boolean;
+    FDriverPalette: TPMLTexturePalette;   // ドライバの写し。肩代わりのときは nil
   private
     // 描画先にしたときの見え方。TPMLRenderer だけが触る。
     FView     : TPMLRenderViewState;
+    // 肩代わり（SDL の texture->native）。ドライバが形式を持てないとき、実際に描くのはこちら。
+    // 自分が持つ。レンダラのテクスチャの一覧には載せない。
+    FNative       : TPMLTexture;
+    FIndexPixels  : TPMLSurface;          // 肩代わりのときの添字（INDEX8。SDL の palette_surface）
+    FNativeVersion: LongWord;             // 肩代わりへ最後に写したパレットの版。0 = 写し直す
+    procedure ReleaseDriverPalette;
+    procedure RefreshNative;
   protected
     procedure OwnerDestroying; override;
   public
@@ -252,6 +292,13 @@ type
     // ARect が空ならテクスチャ全体。
     procedure Update(const ARect: TPMLRect; APixels: Pointer; APitch: Integer);
 
+    { パレットを替える（SDL_SetTexturePalette）。インデックス形式（INDEX8）のテクスチャだけ。
+      AOwned なら、替えたときかテクスチャを消すときに一緒に解放する。借りたパレットは、
+      このテクスチャが使う間（替えるか消すまで）生かしておくこと。nil でパレットを外す
+      （外したまま描くと EPMLRenderError）。色を変えると、次に積む描画から効く。
+      インデックス形式でなければ、または色の数が 256 を超えれば EPMLArgument。 }
+    procedure SetPalette(APalette: TPMLPalette; AOwned: Boolean = False);
+
     property Renderer : TPMLRenderer read FRenderer;
     property Format   : TPMLPixelFormat read FFormat;
     property Access   : TPMLTextureAccess read FAccess;
@@ -261,6 +308,9 @@ type
     property ColorMod : TPMLColor read FColorMod write FColorMod;
     property AlphaMod : Byte read FAlphaMod write FAlphaMod;
     property ScaleMode: TPMLScaleMode read FScaleMode write FScaleMode;
+    property Palette  : TPMLPalette read FPalette;
+    // ドライバ向け。このテクスチャが使うドライバのパレット（無ければ nil）。
+    property DriverPalette: TPMLTexturePalette read FDriverPalette;
   end;
   TPMLTextures = array of TPMLTexture;
 
@@ -334,8 +384,13 @@ type
       ALeft, ARight, ATop, ABottom, AScale: Single; const ADst: TPMLFRect;
       ATiled: Boolean; ATileScale: Single);
     procedure CreateDebugFont;
+    function  PrepareTexture(ATexture: TPMLTexture): TPMLTexture;
+    function  CreateIndexedFromSurface(ASurface: TPMLSurface): TPMLTexture;
   private
+    FPalettes: TPMLTexturePalettes;       // ドライバのパレット（SDL の renderer->palettes）
     procedure RemoveTexture(ATexture: TPMLTexture);
+    function  AcquirePalette(APalette: TPMLPalette): TPMLTexturePalette;
+    procedure ReleasePalette(APalette: TPMLTexturePalette);
   protected
     procedure DetachFromOwner; override;
     // IPMLWindowDependent。ウィンドウが消える直前に呼ばれ、自分を Free する。
@@ -705,7 +760,8 @@ end;
 
 function TPMLRenderDriver.SupportsTextureFormat(AFormat: TPMLPixelFormat): Boolean;
 begin
-  Result := True;
+  // パレットは CreatePalette などを実装したドライバだけが持てる。
+  Result := not PMLIsPixelFormatIndexed(AFormat);
 end;
 
 { 矩形 1 つを三角形 2 枚にする。
@@ -836,7 +892,220 @@ begin
   QueueDrawLinesAsGeometry(AQueue, ACmd, APoints);
 end;
 
+function TPMLRenderDriver.CreatePalette(APalette: TPMLTexturePalette): Boolean;
+begin
+  Result := False;
+end;
+
+function TPMLRenderDriver.UpdatePalette(APalette: TPMLTexturePalette;
+  const AColors: array of TPMLColor): Boolean;
+begin
+  Result := False;
+end;
+
+procedure TPMLRenderDriver.DestroyPalette(APalette: TPMLTexturePalette);
+begin
+  FreeAndNil(APalette.DriverData);
+end;
+
+procedure TPMLRenderDriver.ChangeTexturePalette(ATexture: TPMLTexture);
+begin
+end;
+
 { TPMLTexture }
+
+{ ---- パレット（SDL_render.c の SDL_SetTexturePalette と UpdateTexturePalette） ----
+
+  ドライバが INDEX8 を持つなら、同じ TPMLPalette を使うテクスチャがドライバの写し
+  （TPMLTexturePalette）を 1 つ共有し、描くときに版を比べて流し直す。持たなければ
+  肩代わり（FNative。ARGB8888）を作り、添字は FIndexPixels に置いて、版が変わったら
+  色に直して肩代わりへ写す。
+
+  PORT-NOTE: SDL の肩代わりは「ドライバに一番近い形式」（texture_formats[0] になりうる）だが、
+  papimela は ARGB8888 に決めている（どのドライバも持てる約束。パレットのアルファも残る）。
+
+  PORT-NOTE: パレットの外の添字は白（不透明）で描く。SDL のソフトウェアのレンダラは
+  ドライバの写しが 256 色の白で始まるので白になる（実測）。GLES2 の写しのテクスチャは
+  中身を決めずに作られ、肩代わりの経路の SDL_BlitSurface は表の外を読む。papimela は
+  どのドライバでも白にそろえる。
+
+  PORT-NOTE: SDL はパレットを数えて共有する（refcount）。papimela は TPMLSurface.SetPalette と
+  同じく「借りるか持つか」にする。借りたパレットは使う側より長く生かす約束。 }
+
+procedure TPMLTexture.ReleaseDriverPalette;
+begin
+  if FDriverPalette = nil then
+    Exit;
+  if FRenderer <> nil then
+    FRenderer.ReleasePalette(FDriverPalette);
+  FDriverPalette := nil;
+end;
+
+procedure TPMLTexture.SetPalette(APalette: TPMLPalette; AOwned: Boolean);
+var
+  Old: TPMLPalette;
+  OldOwned: Boolean;
+  NewDP: TPMLTexturePalette;
+begin
+  if not PMLIsPixelFormatIndexed(FFormat) then
+    raise EPMLArgument.CreateFmt('%s textures have no palette', [PMLPixelFormatName(FFormat)]);
+  if (APalette <> nil) and (APalette.Count > 256) then
+    raise EPMLArgument.CreateFmt('palette has %d colors, an INDEX8 texture holds at most 256',
+      [APalette.Count]);
+  if FRenderer = nil then
+    raise EPMLRenderError.Create('texture has no renderer');
+  if APalette = FPalette then
+  begin
+    FOwnsPalette := AOwned and (APalette <> nil);
+    Exit;
+  end;
+  // 新しい写しを先に取る。作れなければ何も変えずに例外を投げる。
+  NewDP := nil;
+  if (APalette <> nil) and (FNative = nil) then
+    NewDP := FRenderer.AcquirePalette(APalette);
+  // 積んだ描画は前のパレットで描く。ドライバは描くときにテクスチャのパレットを読むので、
+  // 替える前に吐き出す。
+  // PORT-NOTE(bug): SDL は前のパレットの数えが 0 になるときだけ吐き出す。別のテクスチャが
+  // 前のパレットを共有していると、替える前に積んだ描画が新しいパレットで描かれる（D-61）。
+  FRenderer.Flush;
+  Old := FPalette;
+  OldOwned := FOwnsPalette;
+  ReleaseDriverPalette;
+  FPalette := APalette;
+  FOwnsPalette := AOwned and (APalette <> nil);
+  FDriverPalette := NewDP;
+  FNativeVersion := 0;
+  if FNative = nil then
+    FRenderer.Driver.ChangeTexturePalette(Self);
+  if FIndexPixels <> nil then
+    FIndexPixels.SetPalette(APalette, False);
+  if OldOwned then
+    Old.Free;
+end;
+
+{ 肩代わりの中身を、今のパレットの色で作り直す（SDL の UpdateTexturePalette の native の枝）。
+  版が同じなら何もしない。 }
+procedure TPMLTexture.RefreshNative;
+var
+  Lut: array[0..255] of LongWord;
+  Details: TPMLPixelFormatDetails;
+  Buf: array of LongWord;
+  C: TPMLColor;
+  I, X, Y: Integer;
+  Row: PByte;
+begin
+  if FNativeVersion = FPalette.Version then
+    Exit;
+  // 積んだ描画が肩代わりの古い中身を読むかもしれない。先に吐き出す。
+  FRenderer.Flush;
+  PMLGetPixelFormatDetails(FNative.Format, Details);
+  for I := 0 to 255 do
+  begin
+    if I < FPalette.Count then
+      C := FPalette[I]
+    else
+      C := TPMLColor.White;
+    Lut[I] := PMLMapColor(Details, nil, C);
+  end;
+  SetLength(Buf, FWidth * FHeight);
+  for Y := 0 to FHeight - 1 do
+  begin
+    Row := PByte(FIndexPixels.Pixels) + PtrUInt(Y) * PtrUInt(FIndexPixels.Pitch);
+    for X := 0 to FWidth - 1 do
+      Buf[Y * FWidth + X] := Lut[Row[X]];
+  end;
+  if not FRenderer.Driver.UpdateTexture(FNative, TPMLRect.Make(0, 0, FWidth, FHeight),
+    @Buf[0], FWidth * 4) then
+    raise EPMLRenderError.Create('could not refresh the texture that stands in for INDEX8');
+  FNativeVersion := FPalette.Version;
+end;
+
+function TPMLRenderer.AcquirePalette(APalette: TPMLPalette): TPMLTexturePalette;
+var
+  I: Integer;
+begin
+  for I := 0 to High(FPalettes) do
+    if FPalettes[I].Source = APalette then
+    begin
+      Inc(FPalettes[I].RefCount);
+      Exit(FPalettes[I]);
+    end;
+  Result := TPMLTexturePalette.Create;
+  Result.Source := APalette;
+  Result.RefCount := 1;
+  if not FDriver.CreatePalette(Result) then
+  begin
+    FDriver.DestroyPalette(Result);
+    Result.Free;
+    raise EPMLRenderError.CreateFmt('driver %s could not create a palette', [FDriver.Name]);
+  end;
+  SetLength(FPalettes, Length(FPalettes) + 1);
+  FPalettes[High(FPalettes)] := Result;
+end;
+
+procedure TPMLRenderer.ReleasePalette(APalette: TPMLTexturePalette);
+var
+  I, J: Integer;
+begin
+  Dec(APalette.RefCount);
+  if APalette.RefCount > 0 then
+    Exit;
+  // 積んだ描画がこの写しを読むかもしれない（SDL の FlushRenderCommandsIfPaletteNeeded）。
+  Flush;
+  FDriver.DestroyPalette(APalette);
+  for I := 0 to High(FPalettes) do
+    if FPalettes[I] = APalette then
+    begin
+      for J := I to High(FPalettes) - 1 do
+        FPalettes[J] := FPalettes[J + 1];
+      SetLength(FPalettes, Length(FPalettes) - 1);
+      Break;
+    end;
+  APalette.Free;
+end;
+
+{ 描く直前のテクスチャの用意（SDL の UpdateTexturePalette と、texture->native への差し替え）。
+  実際に積むテクスチャを返す。インデックス形式でなければ ATexture のまま。
+
+  PORT-NOTE: SDL はパレットの写しを使う描画が積まれているときだけ吐き出す
+  （last_command_generation）。papimela は版が変わったら必ず吐き出す。絵は同じ。 }
+function TPMLRenderer.PrepareTexture(ATexture: TPMLTexture): TPMLTexture;
+var
+  P: TPMLPalette;
+  DP: TPMLTexturePalette;
+  Colors: array of TPMLColor;
+  I: Integer;
+begin
+  Result := ATexture;
+  if (ATexture = nil) or not PMLIsPixelFormatIndexed(ATexture.Format) then
+    Exit;
+  P := ATexture.Palette;
+  if P = nil then
+    raise EPMLRenderError.Create('texture doesn''t have a palette');
+  if ATexture.FNative <> nil then
+  begin
+    ATexture.RefreshNative;
+    Result := ATexture.FNative;
+    // 積むときにドライバが読む値（変調色など）は肩代わりにも写す（SDL は設定のたびに写す）。
+    Result.BlendMode := ATexture.BlendMode;
+    Result.ColorMod := ATexture.ColorMod;
+    Result.AlphaMod := ATexture.AlphaMod;
+    Result.ScaleMode := ATexture.ScaleMode;
+    Exit;
+  end;
+  DP := ATexture.DriverPalette;
+  if DP.Version <> P.Version then
+  begin
+    Flush;
+    SetLength(Colors, P.Count);
+    for I := 0 to P.Count - 1 do
+      Colors[I] := P[I];
+    if not FDriver.UpdatePalette(DP, Colors) then
+      raise EPMLRenderError.CreateFmt('driver %s could not update a palette', [FDriver.Name]);
+    DP.Version := P.Version;
+  end;
+end;
+
 
 constructor TPMLTexture.Create(ARenderer: TPMLRenderer; AFormat: TPMLPixelFormat;
   AAccess: TPMLTextureAccess; AWidth, AHeight: Integer);
@@ -869,9 +1138,14 @@ begin
     // （SDL_DestroyTextureInternal と同じ）。
     if FRenderer.RenderTarget = Self then
       FRenderer.RenderTarget := nil;
+    ReleaseDriverPalette;
     FRenderer.Driver.DestroyTexture(Self);
     FRenderer.RemoveTexture(Self);
   end;
+  FreeAndNil(FNative);
+  FreeAndNil(FIndexPixels);
+  if FOwnsPalette then
+    FreeAndNil(FPalette);
   FreeAndNil(DriverData);
   inherited Destroy;
 end;
@@ -880,7 +1154,15 @@ end;
 procedure TPMLTexture.OwnerDestroying;
 begin
   if FRenderer <> nil then
+  begin
+    ReleaseDriverPalette;
+    if FNative <> nil then
+    begin
+      FNative.OwnerDestroying;
+      FNative := nil;
+    end;
     FRenderer.Driver.DestroyTexture(Self);
+  end;
   FRenderer := nil;
   inherited OwnerDestroying;
 end;
@@ -889,6 +1171,7 @@ procedure TPMLTexture.Update(const ARect: TPMLRect; APixels: Pointer;
   APitch: Integer);
 var
   R: TPMLRect;
+  Y: Integer;
 begin
   if FRenderer = nil then
     raise EPMLRenderError.Create('texture has no renderer');
@@ -898,6 +1181,19 @@ begin
     R := ARect;
   // 積んだ描画がこのテクスチャの古い中身を読むかもしれない。先に吐き出す。
   FRenderer.Flush;
+  if FIndexPixels <> nil then
+  begin
+    // 肩代わり。添字だけ置き、次に描くときに色へ直す（SDL_UpdateTexturePaletteSurface）。
+    if (R.X < 0) or (R.Y < 0) or (R.W <= 0) or (R.H <= 0)
+    or (R.X + R.W > FWidth) or (R.Y + R.H > FHeight) or (APixels = nil) then
+      raise EPMLRenderError.Create('texture update failed');
+    for Y := 0 to R.H - 1 do
+      Move((PByte(APixels) + PtrUInt(Y) * PtrUInt(APitch))^,
+        (PByte(FIndexPixels.Pixels) + PtrUInt(R.Y + Y) * PtrUInt(FIndexPixels.Pitch) + PtrUInt(R.X))^,
+        R.W);
+    FNativeVersion := 0;
+    Exit;
+  end;
   if not FRenderer.Driver.UpdateTexture(Self, R, APixels, APitch) then
     raise EPMLRenderError.Create('texture update failed');
 end;
@@ -1068,12 +1364,23 @@ destructor TPMLRenderer.Destroy;
 var
   I: Integer;
 begin
+  // 積んだ描画は捨てる（もう表示されない）。テクスチャを畳む途中で吐き出させない。
+  // 作る途中で失敗したときは、置き場がまだ無い。
+  if FQueue <> nil then
+    FQueue.Reset;
   // テクスチャはドライバが中身を持っているので、ドライバより先に畳む。
   for I := High(FTextures) downto 0 do
     if FTextures[I] <> nil then
       FTextures[I].OwnerDestroying;
   SetLength(FTextures, 0);
   FreeAndNil(FQueue);
+  // パレットの写しはテクスチャが畳むときに消えている。残っていれば（数え違い）ここで消す。
+  for I := 0 to High(FPalettes) do
+  begin
+    FDriver.DestroyPalette(FPalettes[I]);
+    FPalettes[I].Free;
+  end;
+  SetLength(FPalettes, 0);
   FreeAndNil(FDriver);
   inherited Destroy;
 end;
@@ -1385,6 +1692,8 @@ begin
     Exit;
   if ATexture.Renderer <> Self then
     raise EPMLArgument.Create('texture belongs to another renderer');
+  // パレットを流し直し、肩代わりがあればそれを積む。
+  ATexture := PrepareTexture(ATexture);
   if ASrc.IsEmpty then
     S := TPMLFRect.Make(0, 0, ATexture.Width, ATexture.Height)
   else
@@ -1442,6 +1751,7 @@ begin
     V[I].Position.Y := V[I].Position.Y * FCurrentScale.Y;
   end;
 
+  ATexture := PrepareTexture(ATexture);
   Cmd := NewDrawCommand(TPMLRenderCommandKind.Geometry);
   Cmd.Texture := ATexture;
   if ATexture <> nil then
@@ -1812,12 +2122,28 @@ end;
 function TPMLRenderer.CreateTexture(AFormat: TPMLPixelFormat;
   AAccess: TPMLTextureAccess; AWidth, AHeight: Integer): TPMLTexture;
 begin
+  // SDL も 1 画素 1 バイト未満の形式（INDEX1 / 2 / 4）は作れない（SDL_BYTESPERPIXEL が 0）。
+  if PMLIsPixelFormatIndexed(AFormat) and (AFormat <> PML_PIXELFORMAT_INDEX8) then
+    raise EPMLArgument.CreateFmt('%s textures are not supported (use INDEX8)',
+      [PMLPixelFormatName(AFormat)]);
+  if PMLIsPixelFormatIndexed(AFormat) and (AAccess = TPMLTextureAccess.Target) then
+    raise EPMLArgument.Create('palettized textures can''t be render targets');
   if (AAccess = TPMLTextureAccess.Target) and not FDriver.SupportsRenderTargets then
     raise EPMLUnsupported.CreateNative(
       Format('driver %s has no render target textures', [FDriver.Name]), 0, 'render');
   Result := TPMLTexture.Create(Self, AFormat, AAccess, AWidth, AHeight);
   try
-    if not FDriver.CreateTexture(Result) then
+    if PMLIsPixelFormatIndexed(AFormat) and not FDriver.SupportsTextureFormat(AFormat) then
+    begin
+      // 肩代わり（SDL の texture->native）。色に直した絵を ARGB8888 で持つ。
+      Result.FNative := TPMLTexture.Create(Self, PML_PIXELFORMAT_ARGB8888,
+        TPMLTextureAccess.Streaming, AWidth, AHeight);
+      if not FDriver.CreateTexture(Result.FNative) then
+        raise EPMLRenderError.CreateFmt('driver %s could not create an ARGB8888 texture',
+          [FDriver.Name]);
+      Result.FIndexPixels := TPMLSurface.Create(AWidth, AHeight, AFormat);
+    end
+    else if not FDriver.CreateTexture(Result) then
       raise EPMLRenderError.CreateFmt('driver %s could not create a %s texture',
         [FDriver.Name, PMLPixelFormatName(AFormat)]);
   except
@@ -1829,14 +2155,63 @@ begin
   FTextures[High(FTextures)] := Result;
 end;
 
+{ パレットつきの INDEX8 のサーフェスから INDEX8 のテクスチャを作る（SDL_CreateTextureFromSurface と
+  SDL_UpdateTextureFromSurface のインデックス形式の枝）。カラーキーがあれば、その色を透明にして
+  Blend にする。
+
+  PORT-NOTE: パレットは写しを作ってテクスチャに持たせる（SDL 3.4.2 と同じ）。参照版の SDL は
+  サーフェスのパレットを共有し、カラーキーの色のアルファをサーフェスのパレットの上で 0 にする。
+  するとキーを外した後もサーフェス自身の絵からその色が消える（D-60）。写しなら、サーフェスを
+  先に消してもテクスチャは描ける（papimela のパレットは数えて共有しないため、これも要る）。 }
+function TPMLRenderer.CreateIndexedFromSurface(ASurface: TPMLSurface): TPMLTexture;
+var
+  Pal: TPMLPalette;
+  I: Integer;
+  C: TPMLColor;
+begin
+  if ASurface.HasColorKey and (ASurface.ColorKey >= LongWord(Min(ASurface.Palette.Count, 256))) then
+    raise EPMLArgument.CreateFmt('color key %d is outside the palette', [ASurface.ColorKey]);
+  Result := CreateTexture(PML_PIXELFORMAT_INDEX8, TPMLTextureAccess.Static,
+    ASurface.Width, ASurface.Height);
+  try
+    Pal := TPMLPalette.Create(nil, nil, Min(ASurface.Palette.Count, 256));
+    try
+      for I := 0 to Pal.Count - 1 do
+        Pal[I] := ASurface.Palette[I];
+      if ASurface.HasColorKey then
+      begin
+        C := Pal[ASurface.ColorKey];
+        C.A := 0;
+        Pal[ASurface.ColorKey] := C;
+      end;
+      Result.SetPalette(Pal, True);
+    except
+      Pal.Free;
+      raise;
+    end;
+    Result.Update(TPMLRect.Make(0, 0, 0, 0), ASurface.Pixels, ASurface.Pitch);
+  except
+    Result.Free;
+    raise;
+  end;
+  if ASurface.HasColorKey then
+    Result.BlendMode := TPMLBlendMode.Blend;
+end;
+
 function TPMLRenderer.CreateTextureFromSurface(ASurface: TPMLSurface): TPMLTexture;
 var
   Src: TPMLSurface;
 begin
   if ASurface = nil then
     raise EPMLArgument.Create('CreateTextureFromSurface needs a surface');
+  if (ASurface.Format = PML_PIXELFORMAT_INDEX8) and (ASurface.Palette <> nil) then
+    Exit(CreateIndexedFromSurface(ASurface));
   // ドライバが直接持てない形式は ARGB8888 に変換する（SDL も対応形式へ変換する）。
-  if FDriver.SupportsTextureFormat(ASurface.Format) then
+  // ここに来るインデックス形式（パレットの無いもの、INDEX1 / 2 / 4）も変換する。
+  // PORT-NOTE: SDL は INDEX1 / 2 / 4 のサーフェスを INDEX8 のテクスチャへ広げるが、papimela の
+  // サーフェスは 1 画素 1 バイト未満の形式の画素を読み書きできないので、広げられない。
+  if FDriver.SupportsTextureFormat(ASurface.Format)
+  and not PMLIsPixelFormatIndexed(ASurface.Format) then
     Src := ASurface
   else
     Src := ASurface.Convert(PML_PIXELFORMAT_ARGB8888);
@@ -2589,10 +2964,8 @@ const
 { 文字の表のテクスチャを作る。字形の周りに 1 画素の余白を空け、拡大したときに
   隣の字形がにじまないようにする（SDL と同じ配置）。
 
-  PORT-NOTE: SDL は INDEX8 のサーフェス（パレット 2 色）から作るが、papimela の
-  テクスチャはパレットをまだ持たない。白で、字形の画素だけアルファ 255 の
-  ARGB8888 で直接作る。描いた結果は同じ（白 x 変調色）。
-  拡大の方式は SDL と同じ PixelArt（どのドライバでも Nearest と同じ絵）。 }
+  SDL と同じく INDEX8 で、パレットは 2 色（0 = 透明な白、1 = 不透明な白）。描いた結果は
+  白 x 変調色。拡大の方式は SDL と同じ PixelArt（どのドライバでも Nearest と同じ絵）。 }
 procedure TPMLRenderer.CreateDebugFont;
 const
   CharW = PML_DEBUG_TEXT_FONT_CHARACTER_SIZE;
@@ -2600,13 +2973,13 @@ const
 var
   Rows, Glyph, Col, Row, IX, IY, BX, BY: Integer;
   Atlas: TPMLSurface;
+  Pal: TPMLPalette;
   Bits: Byte;
 begin
   Rows := (PML_DEBUG_FONT_NUM_GLYPHS div DebugFontGlyphsPerRow) + 1;
   Atlas := TPMLSurface.Create((CharW + 2) * DebugFontGlyphsPerRow, Rows * (CharH + 2),
-    PML_PIXELFORMAT_ARGB8888);
+    PML_PIXELFORMAT_INDEX8);
   try
-    Atlas.Fill(TPMLColor.Make(255, 255, 255, 0));
     Col := 0;
     Row := 0;
     for Glyph := 0 to PML_DEBUG_FONT_NUM_GLYPHS - 1 do
@@ -2618,7 +2991,7 @@ begin
         Bits := PMLDebugFontData[Glyph * 8 + IY];
         for IX := 0 to CharW - 1 do
           if ((Bits shr IX) and 1) <> 0 then
-            Atlas.WritePixel(BX + IX, BY + IY, TPMLColor.Make(255, 255, 255, 255));
+            Atlas.WriteRaw(BX + IX, BY + IY, 1);
       end;
       Inc(Col);
       if Col >= DebugFontGlyphsPerRow then
@@ -2627,8 +3000,11 @@ begin
         Col := 0;
       end;
     end;
-    FDebugFont := CreateTexture(PML_PIXELFORMAT_ARGB8888, TPMLTextureAccess.Static,
+    FDebugFont := CreateTexture(PML_PIXELFORMAT_INDEX8, TPMLTextureAccess.Static,
       Atlas.Width, Atlas.Height);
+    Pal := TPMLPalette.Create(nil, nil, 2);
+    Pal[0] := TPMLColor.Make(255, 255, 255, 0);
+    FDebugFont.SetPalette(Pal, True);
     FDebugFont.Update(TPMLRect.Make(0, 0, 0, 0), Atlas.Pixels, Atlas.Pitch);
   finally
     Atlas.Free;

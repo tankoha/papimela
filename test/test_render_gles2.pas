@@ -7,6 +7,7 @@
     1. オフスクリーン（窓の無い GL）で、同じ場面を GLES2 のドライバとソフトウェアの
        ドライバの両方で描き、画素ごとに比べる。場面ごとに許す差（1 成分あたり）と、
        それを超えてよい画素の数を決めてある
+       パレット（INDEX8）の場面は、GPU がドライバの写しで描くことと、Linear の補間も見る
     2. ウィンドウ（実機のコンポジタがあるときだけ）: ドライバの選び方、読み戻しの
        向き、VSync、大きさの変更、破棄の順序
 
@@ -561,6 +562,140 @@ begin
   end;
 end;
 
+{ ---- パレット（§3 の 3b） ----
+
+  INDEX8 のテクスチャ。GLES2 のドライバは添字を 1 成分のテクスチャ、パレットを 256x1 の
+  テクスチャにしてシェーダで引く（SDL_shaders_gles2.c の PALETTE_SHADER_FUNCTIONS）。
+  場面は幅 7（4 の倍数でない行）で、パレットの外の添字（白で描く）、拡大、合成、変調、回転、
+  積んだ後の色の変更、部分更新、BGRA32 の描画先（R と B を入れ替えるシェーダ）を含む。 }
+
+function NewTestPalette: TPMLPalette;
+begin
+  Result := TPMLPalette.Create(nil, nil, 5);
+  Result[0] := TPMLColor.Make(255, 0, 0, 255);
+  Result[1] := TPMLColor.Make(0, 255, 0, 255);
+  Result[2] := TPMLColor.Make(0, 0, 255, 128);
+  Result[3] := TPMLColor.Make(255, 255, 0, 0);
+  Result[4] := TPMLColor.Make(30, 160, 90, 255);
+end;
+
+function NewPaletteTexture(R: TPMLRenderer; AW, AH: Integer): TPMLTexture;
+var
+  Idx: array of Byte;
+  I: Integer;
+begin
+  SetLength(Idx, AW * AH);
+  for I := 0 to High(Idx) do
+    if I mod 7 = 6 then
+      Idx[I] := 200        // パレットの外
+    else
+      Idx[I] := (I * 3 + I div AW) mod 5;
+  Result := R.CreateTexture(PML_PIXELFORMAT_INDEX8, TPMLTextureAccess.Static, AW, AH);
+  Result.Update(TPMLRect.Make(0, 0, 0, 0), @Idx[0], AW);
+  Result.SetPalette(NewTestPalette, True);
+end;
+
+procedure ScenePalette(R: TPMLRenderer);
+var
+  T, Tgt: TPMLTexture;
+  Part: array[0..2] of Byte;
+begin
+  Background(R);
+  T := NewPaletteTexture(R, 7, 5);
+  R.RenderTexture(T, FR(0, 0, 0, 0), FR(1, 1, 7, 5));
+  R.RenderTexture(T, FR(0, 0, 0, 0), FR(10, 1, 14, 10));
+  T.BlendMode := TPMLBlendMode.Blend;
+  R.RenderTexture(T, FR(0, 0, 0, 0), FR(26, 1, 21, 15));
+  T.ColorMod := TPMLColor.Make(200, 128, 255);
+  T.AlphaMod := 180;
+  R.RenderTexture(T, FR(1, 1, 5, 3), FR(48, 1, 15, 9));
+  T.ColorMod := TPMLColor.White;
+  T.AlphaMod := 255;
+  R.RenderTextureRotated(T, FR(0, 0, 0, 0), FR(2, 20, 14, 10), 90);
+  // 積んだ後に色を変える。前に積んだ描画は前の色のまま
+  T.Palette[4] := TPMLColor.Make(250, 100, 10, 255);
+  R.RenderTexture(T, FR(0, 0, 0, 0), FR(20, 20, 14, 10));
+  Part[0] := 4;
+  Part[1] := 4;
+  Part[2] := 4;
+  T.Update(TPMLRect.Make(1, 2, 3, 1), @Part[0], 3);
+  R.RenderTexture(T, FR(0, 0, 0, 0), FR(36, 20, 14, 10));
+  // BGRA32 の描画先へ描いてから、それを出力へ
+  Tgt := R.CreateTexture(PML_PIXELFORMAT_BGRA32, TPMLTextureAccess.Target, 16, 12);
+  R.RenderTarget := Tgt;
+  R.DrawColor := TPMLColor.Make(20, 40, 60, 255);
+  R.Clear;
+  R.RenderTexture(T, FR(0, 0, 0, 0), FR(1, 1, 14, 10));
+  R.RenderTarget := nil;
+  R.RenderTexture(Tgt, FR(0, 0, 0, 0), FR(2, 40, 16, 12));
+end;
+
+{ GPU だけの確かめ。ドライバが INDEX8 を自分で持つこと（レンダラの肩代わりでないこと）と、
+  Linear の補間（シェーダで 4 つの添字の色を混ぜる）が、同じ色の ARGB8888 のテクスチャを
+  GL の補間で描いた絵とほぼ同じになること。ソフトウェアのドライバの Linear は Nearest
+  （§3 の 4）なので、ここは GPU 同士で比べる。 }
+procedure CheckPaletteNative;
+var
+  G: TPMLRenderer;
+  T, A: TPMLTexture;
+  S, Shot: TPMLSurface;
+  X, Y, D, MaxD, Bad: Integer;
+  C: TPMLColor;
+  P: TPMLPalette;
+begin
+  G := NewGPU;
+  S := nil;
+  Shot := nil;
+  try
+    Check(G.Driver.SupportsTextureFormat(PML_PIXELFORMAT_INDEX8),
+      'INDEX8 のテクスチャを直接持てる（パレットはシェーダで引く）');
+    T := NewPaletteTexture(G, 7, 5);
+    Check(T.DriverPalette <> nil, 'パレットはドライバの写し（256x1 のテクスチャ）で持つ');
+    // 比べる相手: 同じ添字をパレットで色に直した ARGB8888
+    P := T.Palette;
+    S := TPMLSurface.Create(7, 5, PML_PIXELFORMAT_ARGB8888);
+    for Y := 0 to 4 do
+      for X := 0 to 6 do
+      begin
+        if (Y * 7 + X) mod 7 = 6 then
+          C := TPMLColor.White
+        else
+          C := P[((Y * 7 + X) * 3 + Y) mod 5];
+        S.WritePixel(X, Y, C);
+      end;
+    A := G.CreateTexture(PML_PIXELFORMAT_ARGB8888, TPMLTextureAccess.Static, 7, 5);
+    A.Update(TPMLRect.Make(0, 0, 0, 0), S.Pixels, S.Pitch);
+    T.ScaleMode := TPMLScaleMode.Linear;
+    A.ScaleMode := TPMLScaleMode.Linear;
+    T.BlendMode := TPMLBlendMode.None;
+    A.BlendMode := TPMLBlendMode.None;
+    G.DrawColor := TPMLColor.Make(0, 0, 0, 255);
+    G.Clear;
+    G.RenderTexture(T, FR(0, 0, 0, 0), FR(0, 0, 31, 23));
+    G.RenderTexture(A, FR(0, 0, 0, 0), FR(32, 0, 31, 23));
+    G.RenderTexture(T, FR(0, 0, 0, 0), FR(0, 30, 13, 9));
+    G.RenderTexture(A, FR(0, 0, 0, 0), FR(32, 30, 13, 9));
+    Shot := G.ReadPixels(TPMLRect.Make(0, 0, 0, 0));
+    MaxD := 0;
+    Bad := 0;
+    for Y := 0 to 40 do
+      for X := 0 to 31 do
+      begin
+        D := ChannelDiff(Shot.ReadPixel(X, Y), Shot.ReadPixel(X + 32, Y));
+        if D > MaxD then
+          MaxD := D;
+        if D > 3 then
+          Inc(Bad);
+      end;
+    Check(Bad = 0, Format('Linear のパレットは ARGB8888 の Linear とほぼ同じ絵（最大差 %d、差 3 を超えた画素 %d）',
+      [MaxD, Bad]));
+  finally
+    Shot.Free;
+    S.Free;
+    G.Free;
+  end;
+end;
+
 procedure OffscreenSection;
 var
   G: TPMLRenderer;
@@ -667,6 +802,8 @@ begin
   Compare('敷き詰めと 9 つ分け（9GridTiled を含む）', @SceneTiled9Grid, 0);
   Compare('描画先のテクスチャ（4 形式・合成・クリップ・描画先どうし）', @SceneRenderTargets, 2);
   CheckScaleModes;
+  Compare('パレット（INDEX8。拡大・合成・変調・回転・色の変更・部分更新・BGRA32 の描画先）', @ScenePalette, 2);
+  CheckPaletteNative;
 end;
 
 { ---- ウィンドウ ---- }
