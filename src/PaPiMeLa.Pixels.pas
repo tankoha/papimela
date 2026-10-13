@@ -26,8 +26,9 @@
 
   NOT RESOLVED:
     - FourCC（YUV）形式は識別だけで、マスクも変換も持たない。SDL も
-      マスクは 0 にしている。変換は第 11 章 #42 の YUV と一緒に扱う
-    - 色空間（TPMLColorspace）は未実装。HDR と YUV の範囲指定が要るまで置く
+      マスクは 0 にしている。YUV から RGB への変換は PaPiMeLa.Surface.YUV（#68）
+    - 色空間（TPMLColorspace）は値と既定だけを持つ。いま使うのは YUV のテクスチャの
+      変換の行列と範囲の選択だけ（HDR・ガンマの変換は無い）
     - 10 ビット形式（XRGB2101010 等）は識別と算出はできるが、
       MapRGBA / GetRGBA は 8 ビット成分での入出力しか持たない
 
@@ -57,6 +58,10 @@ type
       bit 8..15   : 1 画素のビット数
       bit 0..7    : 1 画素のバイト数 }
   TPMLPixelFormat = type LongWord;
+
+  { 色空間（SDL_Colorspace と同じ 32 ビットの値。種類・範囲・色度・原色・伝達・行列を詰めたもの）。
+    いまは YUV のテクスチャの変換で、行列（BT.601 / BT.709 / BT.2020）と範囲（限定 / 全）を選ぶのに使う。 }
+  TPMLColorspace = type LongWord;
 
   TPMLPixelType = (
     Unknown, Index1, Index4, Index8, Packed8, Packed16, Packed32,
@@ -189,6 +194,21 @@ const
   PML_PIXELFORMAT_EXTERNAL_OES = TPMLPixelFormat($2053454F);
   PML_PIXELFORMAT_MJPG         = TPMLPixelFormat($47504A4D);
 
+  // 色空間（SDL_pixels.h の SDL_COLORSPACE_xxx と同じ値）。
+  PML_COLORSPACE_UNKNOWN        = TPMLColorspace(0);
+  PML_COLORSPACE_SRGB           = TPMLColorspace($120005A0);
+  PML_COLORSPACE_SRGB_LINEAR    = TPMLColorspace($12000500);
+  PML_COLORSPACE_HDR10          = TPMLColorspace($12002600);
+  PML_COLORSPACE_JPEG           = TPMLColorspace($220004C6);
+  PML_COLORSPACE_BT601_LIMITED  = TPMLColorspace($211018C6);
+  PML_COLORSPACE_BT601_FULL     = TPMLColorspace($221018C6);
+  PML_COLORSPACE_BT709_LIMITED  = TPMLColorspace($21100421);
+  PML_COLORSPACE_BT709_FULL     = TPMLColorspace($22100421);
+  PML_COLORSPACE_BT2020_LIMITED = TPMLColorspace($21102609);
+  PML_COLORSPACE_BT2020_FULL    = TPMLColorspace($22102609);
+  // YUV の既定（SDL_COLORSPACE_YUV_DEFAULT）。
+  PML_COLORSPACE_YUV_DEFAULT    = PML_COLORSPACE_BT601_LIMITED;
+
   { バイト配列として見たときの並びに対する別名。
 
     リトルエンディアン専用。papimela の初回スコープは Linux の x86_64 / ARM で、
@@ -221,6 +241,9 @@ function PMLIsPixelFormatAlpha(AFormat: TPMLPixelFormat): Boolean;
 function PMLIsPixelFormatFourCC(AFormat: TPMLPixelFormat): Boolean; inline;
 function PMLIsPixelFormatFloat(AFormat: TPMLPixelFormat): Boolean;
 function PMLIsPixelFormat10Bit(AFormat: TPMLPixelFormat): Boolean;
+// 形式の既定の色空間（SDL_GetDefaultColorspaceForFormat と同じ規則）。FourCC は YUV の既定
+// （MJPG は SRGB、P010 / I0FL / I4FL は HDR10）、浮動小数は SRGB_LINEAR、10 ビットは HDR10、ほかは SRGB。
+function PMLDefaultColorspace(AFormat: TPMLPixelFormat): TPMLColorspace;
 
 // 'PML_PIXELFORMAT_' を外した短い名前。未知の形式は 16 進で返す。
 function PMLPixelFormatName(AFormat: TPMLPixelFormat): String;
@@ -370,6 +393,26 @@ begin
              (PMLPixelType(AFormat) = TPMLPixelType.Packed32) and
              ((PMLPixelLayout(AFormat) = TPMLPackedLayout.Layout2101010) or
               (PMLPixelLayout(AFormat) = TPMLPackedLayout.Layout1010102));
+end;
+
+function PMLDefaultColorspace(AFormat: TPMLPixelFormat): TPMLColorspace;
+begin
+  if PMLIsPixelFormatFourCC(AFormat) then
+  begin
+    if AFormat = PML_PIXELFORMAT_MJPG then
+      Result := PML_COLORSPACE_SRGB
+    else if (AFormat = PML_PIXELFORMAT_P010) or (AFormat = PML_PIXELFORMAT_I0FL)
+    or (AFormat = PML_PIXELFORMAT_I4FL) then
+      Result := PML_COLORSPACE_HDR10
+    else
+      Result := PML_COLORSPACE_YUV_DEFAULT;
+  end
+  else if PMLIsPixelFormatFloat(AFormat) then
+    Result := PML_COLORSPACE_SRGB_LINEAR
+  else if PMLIsPixelFormat10Bit(AFormat) then
+    Result := PML_COLORSPACE_HDR10
+  else
+    Result := PML_COLORSPACE_SRGB;
 end;
 
 function PMLPixelFormatName(AFormat: TPMLPixelFormat): String;

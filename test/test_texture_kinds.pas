@@ -9,7 +9,9 @@
     2. パレット（INDEX8。SDL_SetTexturePalette）。パレットの版、作れないもの、描く色、
        積んだ後の色の変更、共有、部分更新、サーフェスから（写しとカラーキー）。
        ドライバが INDEX8 を直接持つときと、レンダラの肩代わりの層を通るときの 2 通り
-    （YUV の節は §3 の 3c で足す）
+    3. YUV（YV12 / IYUV / NV12 / NV21 / YUY2 / UYVY / YVYU）。大きさ、色空間、5 つの色空間の変換の値、
+       飽和（D-62）、7 形式が同じ絵になること（奇数の大きさ、行の幅の余り）、部分の更新、
+       UpdateYUV と UpdateNV、誤り
 
   WHY:
     §3 の 3（テクスチャの種類）の受け入れ検査。表示サーバは要らない。GPU のドライバの分は
@@ -27,6 +29,7 @@ uses
   PaPiMeLa.Pixels,
   PaPiMeLa.Surface,
   PaPiMeLa.Surface.Blit,
+  PaPiMeLa.Surface.YUV,
   PaPiMeLa.Render,
   PaPiMeLa.Render.Software;
 
@@ -541,12 +544,565 @@ begin
   end;
 end;
 
+{ ---- 3. YUV（YV12 / IYUV / NV12 / NV21 / YUY2 / UYVY / YVYU） ----
+
+  期待値は参照版の SDL をソフトウェアのレンダラで描かせて取った（docs/TEST-LOG.md の使い捨て検証）。
+  ソフトウェアのレンダラは YUV を持たないので、どれもレンダラの肩代わりの層（ARGB8888 へ直す）を通る。
+
+  絵は「論理の YUV」（Y は画素ごと、U と V は 2x2 の区画ごと）から各形式に詰めて作る。4:2:2 の形式は
+  同じ区画の色を 2 行で使うので、どの形式でも同じ絵になるはず。 }
+
+type
+  TYUVImage = record
+    W, H, CW, CH: Integer;
+    Y, U, V: TBytes;
+  end;
+
+const
+  YUVFormats: array[0..6] of TPMLPixelFormat = (
+    PML_PIXELFORMAT_YV12, PML_PIXELFORMAT_IYUV, PML_PIXELFORMAT_NV12, PML_PIXELFORMAT_NV21,
+    PML_PIXELFORMAT_YUY2, PML_PIXELFORMAT_UYVY, PML_PIXELFORMAT_YVYU);
+
+var
+  Lcg: LongWord;
+
+function NextByte: Byte;
+begin
+  Lcg := Lcg * 1103515245 + 12345;
+  Result := Byte(Lcg shr 16);
+end;
+
+function MakeYUV(AW, AH: Integer; ASeed: LongWord): TYUVImage;
+var
+  I: Integer;
+begin
+  Result.W := AW;
+  Result.H := AH;
+  Result.CW := (AW + 1) div 2;
+  Result.CH := (AH + 1) div 2;
+  SetLength(Result.Y, AW * AH);
+  SetLength(Result.U, Result.CW * Result.CH);
+  SetLength(Result.V, Result.CW * Result.CH);
+  Lcg := ASeed;
+  for I := 0 to High(Result.Y) do
+    Result.Y[I] := NextByte;
+  for I := 0 to High(Result.U) do
+  begin
+    Result.U[I] := NextByte;
+    Result.V[I] := NextByte;
+  end;
+end;
+
+function IsPacked422(AFormat: TPMLPixelFormat): Boolean;
+begin
+  Result := (AFormat = PML_PIXELFORMAT_YUY2) or (AFormat = PML_PIXELFORMAT_UYVY)
+    or (AFormat = PML_PIXELFORMAT_YVYU);
+end;
+
+{ 論理の YUV を AFormat の詰めた画素にする。APitch は Y の行の幅（0 なら詰める）。
+  平面の形式の U・V の行の幅は SDL と同じく (APitch + 1) div 2。 }
+function PackYUV(const AImg: TYUVImage; AFormat: TPMLPixelFormat; var APitch: Integer): TBytes;
+var
+  X, Y, CP, Base, I, YB: Integer;
+  YV, UV: Byte;
+  Q: array[0..3] of Byte;
+begin
+  Result := nil;
+  if IsPacked422(AFormat) then
+  begin
+    if APitch = 0 then
+      APitch := AImg.CW * 4;
+    SetLength(Result, APitch * AImg.H);
+    FillChar(Result[0], Length(Result), 0);
+    for Y := 0 to AImg.H - 1 do
+      for X := 0 to AImg.CW - 1 do
+      begin
+        Base := Y * APitch + X * 4;
+        I := (Y div 2) * AImg.CW + X;
+        YV := AImg.Y[Y * AImg.W + X * 2];
+        if X * 2 + 1 < AImg.W then
+          YB := AImg.Y[Y * AImg.W + X * 2 + 1]
+        else
+          YB := 0;
+        if AFormat = PML_PIXELFORMAT_YUY2 then
+        begin
+          Q[0] := YV; Q[1] := AImg.U[I]; Q[2] := YB; Q[3] := AImg.V[I];
+        end
+        else if AFormat = PML_PIXELFORMAT_UYVY then
+        begin
+          Q[0] := AImg.U[I]; Q[1] := YV; Q[2] := AImg.V[I]; Q[3] := YB;
+        end
+        else
+        begin
+          Q[0] := YV; Q[1] := AImg.V[I]; Q[2] := YB; Q[3] := AImg.U[I];
+        end;
+        Move(Q[0], Result[Base], 4);
+      end;
+    Exit;
+  end;
+  if APitch = 0 then
+    APitch := AImg.W;
+  CP := (APitch + 1) div 2;
+  if (AFormat = PML_PIXELFORMAT_NV12) or (AFormat = PML_PIXELFORMAT_NV21) then
+    CP := 2 * CP;
+  if (AFormat = PML_PIXELFORMAT_NV12) or (AFormat = PML_PIXELFORMAT_NV21) then
+    SetLength(Result, APitch * AImg.H + CP * AImg.CH)
+  else
+    SetLength(Result, APitch * AImg.H + 2 * CP * AImg.CH);
+  FillChar(Result[0], Length(Result), 0);
+  for Y := 0 to AImg.H - 1 do
+    Move(AImg.Y[Y * AImg.W], Result[Y * APitch], AImg.W);
+  Base := APitch * AImg.H;
+  for Y := 0 to AImg.CH - 1 do
+    for X := 0 to AImg.CW - 1 do
+    begin
+      I := Y * AImg.CW + X;
+      if AFormat = PML_PIXELFORMAT_IYUV then
+      begin
+        Result[Base + Y * CP + X] := AImg.U[I];
+        Result[Base + CP * AImg.CH + Y * CP + X] := AImg.V[I];
+      end
+      else if AFormat = PML_PIXELFORMAT_YV12 then
+      begin
+        Result[Base + Y * CP + X] := AImg.V[I];
+        Result[Base + CP * AImg.CH + Y * CP + X] := AImg.U[I];
+      end
+      else
+      begin
+        if AFormat = PML_PIXELFORMAT_NV12 then
+          UV := AImg.U[I]
+        else
+          UV := AImg.V[I];
+        Result[Base + Y * CP + X * 2] := UV;
+        if AFormat = PML_PIXELFORMAT_NV12 then
+          Result[Base + Y * CP + X * 2 + 1] := AImg.V[I]
+        else
+          Result[Base + Y * CP + X * 2 + 1] := AImg.U[I];
+      end;
+    end;
+end;
+
+{ AFormat のテクスチャに AImg を詰めて入れ、1:1 で描いた絵（呼び出し側が Free）。 }
+function DrawYUV(const AImg: TYUVImage; AFormat: TPMLPixelFormat; AColorspace: TPMLColorspace;
+  APitch: Integer = 0): TPMLSurface;
+var
+  R: TPMLRenderer;
+  T: TPMLTexture;
+  Buf: TBytes;
+begin
+  Result := TPMLSurface.Create(AImg.W, AImg.H, PML_PIXELFORMAT_ARGB8888);
+  R := TPMLRenderer.CreateSoftware(Result);
+  try
+    T := R.CreateTexture(AFormat, TPMLTextureAccess.Static, AImg.W, AImg.H, AColorspace);
+    Buf := PackYUV(AImg, AFormat, APitch);
+    T.Update(TPMLRect.Make(0, 0, 0, 0), @Buf[0], APitch);
+    R.RenderTexture(T, TPMLFRect.Make(0, 0, 0, 0), TPMLFRect.Make(0, 0, 0, 0));
+    R.Present;
+  finally
+    R.Free;
+  end;
+end;
+
+function RowsEqual(S: TPMLSurface; const AExpect: array of LongWord): Boolean;
+var
+  I: Integer;
+begin
+  Result := True;
+  for I := 0 to High(AExpect) do
+    if S.ReadRaw(I mod S.Width, I div S.Width) <> AExpect[I] then
+    begin
+      WriteLn(Format('      (%d, %d) = %.8x, expected %.8x', [I mod S.Width, I div S.Width,
+        S.ReadRaw(I mod S.Width, I div S.Width), AExpect[I]]));
+      Result := False;
+    end;
+end;
+
+function FixedImage: TYUVImage;
+const
+  Ys: array[0..7] of Byte = (16, 81, 145, 235, 128, 60, 200, 30);
+begin
+  Result.W := 4;
+  Result.H := 2;
+  Result.CW := 2;
+  Result.CH := 1;
+  SetLength(Result.Y, 8);
+  Move(Ys[0], Result.Y[0], 8);
+  SetLength(Result.U, 2);
+  SetLength(Result.V, 2);
+  Result.U[0] := 90;
+  Result.U[1] := 200;
+  Result.V[0] := 240;
+  Result.V[1] := 60;
+end;
+
+function FlatImage(AW, AH: Integer; AY, AU, AV: Byte): TYUVImage;
+begin
+  Result.W := AW;
+  Result.H := AH;
+  Result.CW := (AW + 1) div 2;
+  Result.CH := (AH + 1) div 2;
+  SetLength(Result.Y, AW * AH);
+  SetLength(Result.U, Result.CW * Result.CH);
+  SetLength(Result.V, Result.CW * Result.CH);
+  FillChar(Result.Y[0], Length(Result.Y), AY);
+  FillChar(Result.U[0], Length(Result.U), AU);
+  FillChar(Result.V[0], Length(Result.V), AV);
+end;
+
+procedure TestYUVBasics;
+var
+  Size: PtrUInt;
+  Pitch, I: Integer;
+  Kind: TPMLYCbCrType;
+  Ok: Boolean;
+begin
+  WriteLn('3.1 形式・大きさ・色空間');
+  Ok := True;
+  for I := 0 to High(YUVFormats) do
+    if not PMLIsYUVFormat(YUVFormats[I]) then
+      Ok := False;
+  Check(Ok and not PMLIsYUVFormat(PML_PIXELFORMAT_P010) and not PMLIsYUVFormat(PML_PIXELFORMAT_I444)
+    and not PMLIsYUVFormat(PML_PIXELFORMAT_ARGB8888), '変換できる YUV は 7 形式（P010 と I444 は持たない）');
+  Check(PMLCalculateYUVSize(PML_PIXELFORMAT_IYUV, 7, 5, Size, Pitch) and (Size = 59) and (Pitch = 7),
+    'IYUV 7x5 は 59 バイト、行の幅 7（SDL_CalculateYUVSize と同じ）');
+  Check(PMLCalculateYUVSize(PML_PIXELFORMAT_NV21, 7, 5, Size, Pitch) and (Size = 59) and (Pitch = 7),
+    'NV21 7x5 は 59 バイト、行の幅 7');
+  Check(PMLCalculateYUVSize(PML_PIXELFORMAT_YUY2, 7, 5, Size, Pitch) and (Size = 80) and (Pitch = 16),
+    'YUY2 7x5 は 80 バイト、行の幅 16');
+  Check(not PMLCalculateYUVSize(PML_PIXELFORMAT_ARGB8888, 7, 5, Size, Pitch), 'YUV でなければ False');
+  Check(PMLYCbCrTypeOf(PML_COLORSPACE_JPEG, Kind) and (Kind = TPMLYCbCrType.BT601Full)
+    and PMLYCbCrTypeOf(PML_COLORSPACE_BT601_FULL, Kind) and (Kind = TPMLYCbCrType.BT601Full)
+    and PMLYCbCrTypeOf(PML_COLORSPACE_BT601_LIMITED, Kind) and (Kind = TPMLYCbCrType.BT601Limited)
+    and PMLYCbCrTypeOf(PML_COLORSPACE_BT709_FULL, Kind) and (Kind = TPMLYCbCrType.BT709Full)
+    and PMLYCbCrTypeOf(PML_COLORSPACE_BT709_LIMITED, Kind) and (Kind = TPMLYCbCrType.BT709Limited)
+    and PMLYCbCrTypeOf(PML_COLORSPACE_BT2020_FULL, Kind) and (Kind = TPMLYCbCrType.BT2020Full),
+    '色空間から変換の種類を選ぶ（JPEG と BT.601 の全範囲は同じ）');
+  Check(not PMLYCbCrTypeOf(PML_COLORSPACE_BT2020_LIMITED, Kind) and not PMLYCbCrTypeOf(PML_COLORSPACE_SRGB, Kind),
+    'BT.2020 の限定範囲と SRGB は選べない（SDL と同じ）');
+  Check(PMLDefaultColorspace(PML_PIXELFORMAT_NV12) = PML_COLORSPACE_BT601_LIMITED,
+    'YUV の既定の色空間は BT.601 の限定範囲');
+end;
+
+procedure TestYUVValues;
+const
+  Names: array[0..4] of String = ('BT.601 限定', 'JPEG', 'BT.709 限定', 'BT.709 全', 'BT.2020 全');
+  // 参照版の SDL（SDL 3.4.2 も同じ）で 4x2 の IYUV を描いた値。BT.601 限定と BT.709 限定の (3, 0) の青は
+  // 表の外へ出る値で、幅 4 では SDL のスカラー版が回り込んで 00 になる（D-62）。ここは SSE2 版の値（FF）
+  Expect: array[0..4, 0..7] of LongWord = (
+    ($FFB20000, $FFFE0000, $FF2AB2FF, $FF94FFFF, $FFFF3736, $FFE60000, $FF6BF2FF, $FF002BA1),
+    ($FFAD0000, $FFEE0D0D, $FF31A9FF, $FF8BFFFF, $FFFF3C3C, $FFD90000, $FF68E0FF, $FF00369D),
+    ($FFC90000, $FFFF1800, $FF1CABFF, $FF86FFFF, $FFFF5033, $FFFC0000, $FF5DECFF, $FF0024A8),
+    ($FFC00000, $FFFF230A, $FF25A3FF, $FF7FFDFF, $FFFF5239, $FFEC0E00, $FF5CDAFF, $FF0030A3),
+    ($FFB40000, $FFF51609, $FF2DABFF, $FF87FFFF, $FFFF4538, $FFE00100, $FF64E2FF, $FF0038A6));
+var
+  Spaces: array[0..4] of TPMLColorspace;
+  S: TPMLSurface;
+  Img: TYUVImage;
+  Buf: TBytes;
+  Direct: array[0..7] of LongWord;
+  I, J, Pitch: Integer;
+  Ok: Boolean;
+begin
+  WriteLn('3.2 変換の値（5 つの色空間）');
+  Spaces[0] := PML_COLORSPACE_BT601_LIMITED;
+  Spaces[1] := PML_COLORSPACE_JPEG;
+  Spaces[2] := PML_COLORSPACE_BT709_LIMITED;
+  Spaces[3] := PML_COLORSPACE_BT709_FULL;
+  Spaces[4] := PML_COLORSPACE_BT2020_FULL;
+  Img := FixedImage;
+  for I := 0 to 4 do
+  begin
+    S := DrawYUV(Img, PML_PIXELFORMAT_IYUV, Spaces[I]);
+    try
+      Check(RowsEqual(S, Expect[I]), Names[I] + ' は SDL と同じ値（レンダラで描く）');
+    finally
+      S.Free;
+    end;
+    Pitch := 0;
+    Buf := PackYUV(Img, PML_PIXELFORMAT_IYUV, Pitch);
+    FillChar(Direct[0], SizeOf(Direct), 0);
+    PMLConvertYUVToARGB8888(4, 2, PML_PIXELFORMAT_IYUV, Spaces[I], @Buf[0], Pitch, @Direct[0], 16);
+    Ok := True;
+    for J := 0 to 7 do
+      if Direct[J] <> Expect[I, J] then
+        Ok := False;
+    Check(Ok, Names[I] + ' は PMLConvertYUVToARGB8888 でも同じ値');
+  end;
+
+  // 表の外へ出る値（D-62）。SDL のスカラー版は回り込んで、明るすぎる赤が 0、暗すぎる青が 255 になる。
+  S := DrawYUV(FlatImage(2, 2, 235, 128, 240), PML_PIXELFORMAT_IYUV, PML_COLORSPACE_BT709_LIMITED);
+  try
+    Check(RowsEqual(S, [$FFFFC5FF, $FFFFC5FF, $FFFFC5FF, $FFFFC5FF]),
+      'Y=235・Cr=240（BT.709 限定）の赤は 255 に飽和する（SDL のスカラー版は 0。D-62）');
+  finally
+    S.Free;
+  end;
+  S := DrawYUV(FlatImage(2, 2, 16, 16, 128), PML_PIXELFORMAT_IYUV, PML_COLORSPACE_BT601_LIMITED);
+  try
+    Check(RowsEqual(S, [$FF002B00, $FF002B00, $FF002B00, $FF002B00]),
+      'Y=16・Cb=16（BT.601 限定）の青は 0 に飽和する（SDL のスカラー版は 255。D-62）');
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TestYUVFormats;
+var
+  Big, Small: TYUVImage;
+  Ref, S: TPMLSurface;
+  I, X, Y, Bad: Integer;
+begin
+  WriteLn('3.3 7 形式が同じ絵になる（偶数・奇数の大きさ、行の幅に余りがあるとき）');
+  Big := MakeYUV(8, 6, 7);
+  // 7x5 は 8x6 の左上を切り出したもの（U と V は同じ 4x3）
+  Small.W := 7;
+  Small.H := 5;
+  Small.CW := 4;
+  Small.CH := 3;
+  SetLength(Small.Y, 35);
+  for Y := 0 to 4 do
+    Move(Big.Y[Y * 8], Small.Y[Y * 7], 7);
+  Small.U := Copy(Big.U);
+  Small.V := Copy(Big.V);
+  Ref := DrawYUV(Big, PML_PIXELFORMAT_IYUV, PML_COLORSPACE_BT709_LIMITED);
+  try
+    for I := 0 to High(YUVFormats) do
+    begin
+      S := DrawYUV(Big, YUVFormats[I], PML_COLORSPACE_BT709_LIMITED);
+      try
+        Check(DiffCount(S, Ref) = 0, PMLPixelFormatName(YUVFormats[I]) + ' 8x6 は IYUV と同じ絵');
+      finally
+        S.Free;
+      end;
+      S := DrawYUV(Small, YUVFormats[I], PML_COLORSPACE_BT709_LIMITED);
+      try
+        Bad := 0;
+        for Y := 0 to 4 do
+          for X := 0 to 6 do
+            if S.ReadRaw(X, Y) <> Ref.ReadRaw(X, Y) then
+              Inc(Bad);
+        Check(Bad = 0, PMLPixelFormatName(YUVFormats[I]) + ' 7x5（奇数）は 8x6 の左上と同じ絵（端の列と行）');
+      finally
+        S.Free;
+      end;
+      S := DrawYUV(Big, YUVFormats[I], PML_COLORSPACE_BT709_LIMITED, 20);
+      try
+        Check(DiffCount(S, Ref) = 0, PMLPixelFormatName(YUVFormats[I]) + ' 行の幅に余り（20 バイト）があっても同じ絵');
+      finally
+        S.Free;
+      end;
+    end;
+  finally
+    Ref.Free;
+  end;
+end;
+
+{ 部分の更新と、平面ごとの更新。A で全体を入れてから B の一部で書き換えた絵は、A と B を
+  合わせた論理の絵（C）を全体で入れた絵と同じ。 }
+procedure TestYUVUpdates;
+var
+  A, B, C, D, Sub: TYUVImage;
+  Out, Ref: TPMLSurface;
+  R: TPMLRenderer;
+  T: TPMLTexture;
+  Buf: TBytes;
+  F, X, Y, Pitch: Integer;
+  Fmt: TPMLPixelFormat;
+  Raised: Boolean;
+  UV: TBytes;
+begin
+  WriteLn('3.4 部分の更新・平面ごとの更新・誤り');
+  A := MakeYUV(8, 6, 11);
+  B := MakeYUV(8, 6, 12);
+  D := MakeYUV(8, 6, 13);
+  // 書き換える矩形 (2, 2, 4, 2)。Y はその画素、U と V は区画 (1, 1)・(2, 1)
+  C := A;
+  C.Y := Copy(A.Y);
+  C.U := Copy(A.U);
+  C.V := Copy(A.V);
+  for Y := 2 to 3 do
+    for X := 2 to 5 do
+      C.Y[Y * 8 + X] := B.Y[Y * 8 + X];
+  for X := 1 to 2 do
+  begin
+    C.U[1 * 4 + X] := B.U[1 * 4 + X];
+    C.V[1 * 4 + X] := B.V[1 * 4 + X];
+  end;
+  // B の矩形の部分だけの論理の絵（4x2、区画 2x1）
+  Sub.W := 4;
+  Sub.H := 2;
+  Sub.CW := 2;
+  Sub.CH := 1;
+  SetLength(Sub.Y, 8);
+  for Y := 0 to 1 do
+    Move(B.Y[(Y + 2) * 8 + 2], Sub.Y[Y * 4], 4);
+  SetLength(Sub.U, 2);
+  SetLength(Sub.V, 2);
+  for X := 0 to 1 do
+  begin
+    Sub.U[X] := B.U[4 + 1 + X];
+    Sub.V[X] := B.V[4 + 1 + X];
+  end;
+  for F := 0 to High(YUVFormats) do
+  begin
+    Fmt := YUVFormats[F];
+    Ref := DrawYUV(C, Fmt, PML_COLORSPACE_YUV_DEFAULT);
+    Out := TPMLSurface.Create(8, 6, PML_PIXELFORMAT_ARGB8888);
+    R := TPMLRenderer.CreateSoftware(Out);
+    try
+      T := R.CreateTexture(Fmt, TPMLTextureAccess.Streaming, 8, 6);
+      Pitch := 0;
+      Buf := PackYUV(A, Fmt, Pitch);
+      T.Update(TPMLRect.Make(0, 0, 0, 0), @Buf[0], Pitch);
+      Pitch := 0;
+      Buf := PackYUV(Sub, Fmt, Pitch);
+      T.Update(TPMLRect.Make(2, 2, 4, 2), @Buf[0], Pitch);
+      R.RenderTexture(T, TPMLFRect.Make(0, 0, 0, 0), TPMLFRect.Make(0, 0, 0, 0));
+      R.Present;
+      Check(DiffCount(Out, Ref) = 0, PMLPixelFormatName(Fmt) + ' の部分の更新 (2, 2, 4, 2)');
+
+      // 次の確かめの前に、別の絵（D）で全体を入れ替えておく。前の確かめの絵が残っていると、
+      // 更新されない平面があっても気づけない
+      Pitch := 0;
+      Buf := PackYUV(D, Fmt, Pitch);
+      T.Update(TPMLRect.Make(0, 0, 0, 0), @Buf[0], Pitch);
+
+      if (Fmt = PML_PIXELFORMAT_IYUV) or (Fmt = PML_PIXELFORMAT_YV12) then
+      begin
+        T.UpdateYUV(TPMLRect.Make(0, 0, 0, 0), @A.Y[0], 8, @A.U[0], 4, @A.V[0], 4);
+        T.UpdateYUV(TPMLRect.Make(2, 2, 4, 2), @Sub.Y[0], 4, @Sub.U[0], 2, @Sub.V[0], 2);
+        R.Clear;
+        R.RenderTexture(T, TPMLFRect.Make(0, 0, 0, 0), TPMLFRect.Make(0, 0, 0, 0));
+        R.Present;
+        Check(DiffCount(Out, Ref) = 0, PMLPixelFormatName(Fmt) + ' の UpdateYUV（全体と部分）');
+      end;
+      if (Fmt = PML_PIXELFORMAT_NV12) or (Fmt = PML_PIXELFORMAT_NV21) then
+      begin
+        SetLength(UV, 4 * 3 * 2);
+        for X := 0 to 11 do
+          if Fmt = PML_PIXELFORMAT_NV12 then
+          begin
+            UV[X * 2] := A.U[X];
+            UV[X * 2 + 1] := A.V[X];
+          end
+          else
+          begin
+            UV[X * 2] := A.V[X];
+            UV[X * 2 + 1] := A.U[X];
+          end;
+        T.UpdateNV(TPMLRect.Make(0, 0, 0, 0), @A.Y[0], 8, @UV[0], 8);
+        for X := 0 to 1 do
+          if Fmt = PML_PIXELFORMAT_NV12 then
+          begin
+            UV[X * 2] := Sub.U[X];
+            UV[X * 2 + 1] := Sub.V[X];
+          end
+          else
+          begin
+            UV[X * 2] := Sub.V[X];
+            UV[X * 2 + 1] := Sub.U[X];
+          end;
+        T.UpdateNV(TPMLRect.Make(2, 2, 4, 2), @Sub.Y[0], 4, @UV[0], 4);
+        R.Clear;
+        R.RenderTexture(T, TPMLFRect.Make(0, 0, 0, 0), TPMLFRect.Make(0, 0, 0, 0));
+        R.Present;
+        Check(DiffCount(Out, Ref) = 0, PMLPixelFormatName(Fmt) + ' の UpdateNV（全体と部分）');
+      end;
+    finally
+      R.Free;
+      Out.Free;
+      Ref.Free;
+    end;
+  end;
+
+  // 誤り
+  Out := TPMLSurface.Create(8, 6, PML_PIXELFORMAT_ARGB8888);
+  R := TPMLRenderer.CreateSoftware(Out);
+  try
+    Raised := False;
+    try
+      R.CreateTexture(PML_PIXELFORMAT_NV12, TPMLTextureAccess.Target, 8, 6);
+    except
+      on E: Exception do Raised := E is EPMLArgument;
+    end;
+    Check(Raised, 'YUV は描画先にできない');
+    Raised := False;
+    try
+      R.CreateTexture(PML_PIXELFORMAT_P010, TPMLTextureAccess.Static, 8, 6);
+    except
+      on E: Exception do Raised := E is EPMLArgument;
+    end;
+    Check(Raised, 'P010 は作れない（SDL のソフトウェアのレンダラも作れない）');
+    Raised := False;
+    try
+      R.CreateTexture(PML_PIXELFORMAT_IYUV, TPMLTextureAccess.Static, 8, 6, PML_COLORSPACE_SRGB);
+    except
+      on E: Exception do Raised := E is EPMLArgument;
+    end;
+    Check(Raised, 'YUV の色空間に SRGB は使えない');
+    T := R.CreateTexture(PML_PIXELFORMAT_NV12, TPMLTextureAccess.Static, 8, 6);
+    Check(T.Colorspace = PML_COLORSPACE_BT601_LIMITED, '色空間を決めなければ BT.601 の限定範囲');
+    Raised := False;
+    try
+      T.UpdateYUV(TPMLRect.Make(0, 0, 0, 0), @A.Y[0], 8, @A.U[0], 4, @A.V[0], 4);
+    except
+      on E: Exception do Raised := E is EPMLArgument;
+    end;
+    Check(Raised, 'NV12 に UpdateYUV は使えない');
+    T := R.CreateTexture(PML_PIXELFORMAT_IYUV, TPMLTextureAccess.Static, 8, 6);
+    Raised := False;
+    try
+      T.UpdateNV(TPMLRect.Make(0, 0, 0, 0), @A.Y[0], 8, @A.U[0], 8);
+    except
+      on E: Exception do Raised := E is EPMLArgument;
+    end;
+    Check(Raised, 'IYUV に UpdateNV は使えない');
+    T := R.CreateTexture(PML_PIXELFORMAT_ARGB8888, TPMLTextureAccess.Static, 8, 6);
+    Check(T.Colorspace = PML_COLORSPACE_SRGB, 'ARGB8888 の既定の色空間は SRGB');
+    // 平面の外は切る（SDL と同じ）。全部外なら何もしない
+    T := R.CreateTexture(PML_PIXELFORMAT_IYUV, TPMLTextureAccess.Static, 8, 6);
+    Raised := False;
+    try
+      T.UpdateYUV(TPMLRect.Make(20, 20, 4, 4), @A.Y[0], 8, @A.U[0], 4, @A.V[0], 4);
+    except
+      on E: Exception do Raised := True;
+    end;
+    Check(not Raised, 'テクスチャの外だけの UpdateYUV は何もしない');
+  finally
+    R.Free;
+    Out.Free;
+  end;
+end;
+
+type
+  TPlainProc = procedure;
+
+procedure GuardPlain(AProc: TPlainProc);
+begin
+  try
+    AProc;
+  except
+    on E: Exception do
+      Check(False, '思わぬ例外: ' + E.ClassName + ': ' + E.Message);
+  end;
+end;
+
+procedure TestYUV;
+begin
+  GuardPlain(@TestYUVBasics);
+  GuardPlain(@TestYUVValues);
+  GuardPlain(@TestYUVFormats);
+  GuardPlain(@TestYUVUpdates);
+end;
+
 begin
   WriteLn('test_texture_kinds — テクスチャの種類');
   WriteLn;
   TestPixelArt;
   WriteLn;
   TestPalette;
+  WriteLn;
+  TestYUV;
 
   WriteLn;
   if Failures = 0 then

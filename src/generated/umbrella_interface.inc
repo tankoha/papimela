@@ -12,6 +12,7 @@
 //   PaPiMeLa.Surface
 //   PaPiMeLa.Surface.Blit
 //   PaPiMeLa.Surface.BMP
+//   PaPiMeLa.Surface.YUV
 //   PaPiMeLa.IO
 //   PaPiMeLa.Video
 //   PaPiMeLa.Clipboard
@@ -405,6 +406,7 @@ const
 // ---- PaPiMeLa.Pixels
 type
   TPMLPixelFormat = PaPiMeLa.Pixels.TPMLPixelFormat;
+  TPMLColorspace = PaPiMeLa.Pixels.TPMLColorspace;
   TPMLPixelType = PaPiMeLa.Pixels.TPMLPixelType;
   TPMLPackedOrder = PaPiMeLa.Pixels.TPMLPackedOrder;
   TPMLArrayOrder = PaPiMeLa.Pixels.TPMLArrayOrder;
@@ -480,6 +482,18 @@ const
   PML_PIXELFORMAT_I4FL = PaPiMeLa.Pixels.PML_PIXELFORMAT_I4FL;
   PML_PIXELFORMAT_EXTERNAL_OES = PaPiMeLa.Pixels.PML_PIXELFORMAT_EXTERNAL_OES;
   PML_PIXELFORMAT_MJPG = PaPiMeLa.Pixels.PML_PIXELFORMAT_MJPG;
+  PML_COLORSPACE_UNKNOWN = PaPiMeLa.Pixels.PML_COLORSPACE_UNKNOWN;
+  PML_COLORSPACE_SRGB = PaPiMeLa.Pixels.PML_COLORSPACE_SRGB;
+  PML_COLORSPACE_SRGB_LINEAR = PaPiMeLa.Pixels.PML_COLORSPACE_SRGB_LINEAR;
+  PML_COLORSPACE_HDR10 = PaPiMeLa.Pixels.PML_COLORSPACE_HDR10;
+  PML_COLORSPACE_JPEG = PaPiMeLa.Pixels.PML_COLORSPACE_JPEG;
+  PML_COLORSPACE_BT601_LIMITED = PaPiMeLa.Pixels.PML_COLORSPACE_BT601_LIMITED;
+  PML_COLORSPACE_BT601_FULL = PaPiMeLa.Pixels.PML_COLORSPACE_BT601_FULL;
+  PML_COLORSPACE_BT709_LIMITED = PaPiMeLa.Pixels.PML_COLORSPACE_BT709_LIMITED;
+  PML_COLORSPACE_BT709_FULL = PaPiMeLa.Pixels.PML_COLORSPACE_BT709_FULL;
+  PML_COLORSPACE_BT2020_LIMITED = PaPiMeLa.Pixels.PML_COLORSPACE_BT2020_LIMITED;
+  PML_COLORSPACE_BT2020_FULL = PaPiMeLa.Pixels.PML_COLORSPACE_BT2020_FULL;
+  PML_COLORSPACE_YUV_DEFAULT = PaPiMeLa.Pixels.PML_COLORSPACE_YUV_DEFAULT;
   PML_PIXELFORMAT_RGBA32 = PaPiMeLa.Pixels.PML_PIXELFORMAT_RGBA32;
   PML_PIXELFORMAT_ARGB32 = PaPiMeLa.Pixels.PML_PIXELFORMAT_ARGB32;
   PML_PIXELFORMAT_BGRA32 = PaPiMeLa.Pixels.PML_PIXELFORMAT_BGRA32;
@@ -501,6 +515,7 @@ function PMLIsPixelFormatAlpha(AFormat: TPMLPixelFormat): Boolean; inline;
 function PMLIsPixelFormatFourCC(AFormat: TPMLPixelFormat): Boolean; inline;
 function PMLIsPixelFormatFloat(AFormat: TPMLPixelFormat): Boolean; inline;
 function PMLIsPixelFormat10Bit(AFormat: TPMLPixelFormat): Boolean; inline;
+function PMLDefaultColorspace(AFormat: TPMLPixelFormat): TPMLColorspace; inline;
 function PMLPixelFormatName(AFormat: TPMLPixelFormat): String; inline;
 function PMLGetPixelFormatDetails(
   AFormat: TPMLPixelFormat;
@@ -565,6 +580,26 @@ function PMLLoadBMP(AStream: TStream): TPMLSurface; inline;
 function PMLLoadBMPFile(const APath: String): TPMLSurface; inline;
 procedure PMLSaveBMP(AStream: TStream; ASurface: TPMLSurface); inline;
 procedure PMLSaveBMPFile(const APath: String; ASurface: TPMLSurface); inline;
+
+// ---- PaPiMeLa.Surface.YUV
+type
+  TPMLYCbCrType = PaPiMeLa.Surface.YUV.TPMLYCbCrType;
+  TPMLYUVPlanes = PaPiMeLa.Surface.YUV.TPMLYUVPlanes;
+function PMLIsYUVFormat(AFormat: TPMLPixelFormat): Boolean; inline;
+function PMLYCbCrTypeOf(AColorspace: TPMLColorspace; out AType: TPMLYCbCrType): Boolean; inline;
+function PMLCalculateYUVSize(
+  AFormat: TPMLPixelFormat;
+  AWidth, AHeight: Integer;
+  out ASize: PtrUInt;
+  out APitch: Integer): Boolean; inline;
+procedure PMLConvertYUVToARGB8888(
+  AWidth, AHeight: Integer;
+  AFormat: TPMLPixelFormat;
+  AColorspace: TPMLColorspace;
+  ASrc: Pointer;
+  ASrcPitch: Integer;
+  ADst: Pointer;
+  ADstPitch: Integer); inline;
 
 // ---- PaPiMeLa.IO
 type

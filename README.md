@@ -289,6 +289,9 @@ FPC 3.2.2。`docs/DESIGN.md` が設計、`docs/TEST-LOG.md` が実際に何を�
 ## License
 
 zlib, the same as SDL. See [LICENSE](LICENSE).
+The YUV-to-RGB conversion in `src/PaPiMeLa.Surface.YUV.pas` is translated from
+yuv2rgb (bundled with SDL) and also carries its BSD 3-Clause license, which is
+included in [LICENSE](LICENSE).
 
 ---
 

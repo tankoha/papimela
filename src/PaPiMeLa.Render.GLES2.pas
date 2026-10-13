@@ -6,7 +6,10 @@
            Scope: 頂点シェーダと単色・テクスチャ（ARGB / ABGR / XRGB / XBGR）の
            フラグメントシェーダ、パレット（INDEX8）のフラグメントシェーダ
            （最近傍と線形、BGRA / BGRX の描画先向けの R と B の入れ替え付き）、
-           パレットの写し（256x1 のテクスチャ）の作成・更新・破棄、合成モードから glBlendFunc への対応、
+           パレットの写し（256x1 のテクスチャ）の作成・更新・破棄、
+           YUV（YV12 / IYUV / NV12 / NV21）のテクスチャの作成・更新（詰めた画素と平面ごと）・
+           破棄と、変換のフラグメントシェーダ（R と B の入れ替え付き）、
+           合成モードから glBlendFunc への対応、
            ビューポートとクリップ矩形の GL への写し方（ウィンドウは上下反転）、
            点と線の +0.5 画素補正と線分の端を延ばす細工（延ばす量は SDL の
            1/4 画素でなく 0.75 画素。RESOLVED を参照）、
@@ -54,8 +57,28 @@
       入れ替えて渡す）ので、あとでそのテクスチャを描くときも、形式どおりに読める。
       描画元と描画先の形式の組で選ぶシェーダは CopyShader の PORT-NOTE を参照
 
+    - YV12 / IYUV / NV12 / NV21 は、平面ごとの GL テクスチャで持ち、変換はシェーダで行う
+      （SupportsTextureFormat が True を返すので、レンダラの ARGB8888 の肩代わりを通らない）。
+      Y はユニット 0、U（NV は UV）はユニット 1、V はユニット 2。色差は縦横とも半分の
+      大きさ（奇数は切り上げ）。NV の UV は GL_LUMINANCE_ALPHA（SDL の既定の RA 版）。
+      色空間ごとの行列は SDL の SDL_GetYCbCRtoRGBConversionMatrix の値のまま。補間
+      （Linear）は全部の平面に掛ける。YUY2 / UYVY / YVYU / P010 / I444 は持たない
+      （レンダラの肩代わりか、作成の拒否）
+    - 変換の結果は 0..1 に挟んでから頂点の色を掛ける（SDL は挟まない。
+      ソフトウェアのドライバは先に ARGB8888 へ直して挟むので、それに合わせる）
+    - 補間なし（Nearest / PixelArt）の YUV は、色差のテクセルをシェーダで「輝度のテクセル
+      n の n div 2 番」に決める。SDL のように輝度と同じ正規化した座標で読むと、幅か高さが
+      奇数のとき、ソフトウェアのドライバ（n div 2）と違う色差を引く（幅 7 で n = 5 は
+      2 番でなく 3 番）。詳しくは YUVPrologue の PORT-NOTE
+    - SDL の YUV のシェーダには colorswap が無い。BGRA32 / BGRX32 の描画先に R と B を
+      入れ替えて書くので、YUV にも入れ替え版（YUVSwap / NV12Swap / NV21Swap）を持つ
+
   NOT RESOLVED:
-    - YUV・外部テクスチャ（OES）は未実装。PIXELART は最近傍と同じ
+    - 外部テクスチャ（OES）は未実装。PIXELART は最近傍と同じ
+    - 補間あり（Linear）の YUV は SDL と同じく、色差を輝度と同じ正規化した座標で読む。
+      幅か高さが奇数のときの色差の位置は、色差のテクスチャが (n + 1) div 2 の大きさの
+      ぶん、半画素に満たない程度ずれる。ソフトウェアのドライバの Linear は Nearest なので、
+      比べる相手がない
     - コンテキスト喪失（GL_CONTEXT_LOST）への対応
     - 斜めの線は GL の線の規則（菱形の出口規則）で決まる。ブレゼンハムとは
       数画素ずれる
@@ -76,6 +99,7 @@ uses
   PaPiMeLa.Errors,
   PaPiMeLa.Pixels,
   PaPiMeLa.Surface,
+  PaPiMeLa.Surface.YUV,
   PaPiMeLa.Video.Backend,
   PaPiMeLa.Video,
   PaPiMeLa.Render,
@@ -94,8 +118,15 @@ type
       PalNearest    : INDEX8。パレットの色をそのまま（最近傍）
       PalLinear     : INDEX8。4 つの添字の色を混ぜる（線形）
       PalNearestSwap: PalNearest の R と B を入れ替える（BGRA32 / BGRX32 の描画先）
-      PalLinearSwap : PalLinear の R と B を入れ替える }
+      PalLinearSwap : PalLinear の R と B を入れ替える
+      YUV      : YV12 / IYUV。Y・U・V の 3 平面を変換する
+      NV12     : Y と、U,V の順に詰めた UV の平面を変換する
+      NV21     : Y と、V,U の順に詰めた平面を変換する
+      YUVSwap, NV12Swap, NV21Swap: それぞれの R と B を入れ替える
+
+    並びの注意: YUV 系はパレット系より前に置く（IsPaletteShader が順序で判定する）。 }
   TPMLGLES2Shader = (Solid, ABGR, ARGB, RGB, BGR,
+    YUV, NV12, NV21, YUVSwap, NV12Swap, NV21Swap,
     PalNearest, PalLinear, PalNearestSwap, PalLinearSwap);
 
   { リンク済みのプログラム。 }
@@ -105,6 +136,17 @@ type
     ProjGen   : Integer;    // 最後に送った射影行列の世代
     TexelSize : GLint;      // u_texel_size の位置
     TexelOwner: GLuint;     // u_texel_size を最後に設定したテクスチャ（0 = 未設定）
+    // YUV 系だけ。変換のパラメータ（u_offset, u_rcoeff, u_gcoeff, u_bcoeff）の位置と、
+    // 最後に設定した変換の種類（TPMLYCbCrType の序数。-1 = 未設定）
+    YUVOffset : GLint;
+    YUVRCoeff : GLint;
+    YUVGCoeff : GLint;
+    YUVBCoeff : GLint;
+    YUVKind   : Integer;
+    // 色差の座標を輝度のテクセルの 2x2 の区画に寄せるか（u_chroma_snap）の位置と、
+    // 最後に設定した値（0 / 1。-1 = 未設定）
+    YUVSnap   : GLint;
+    YUVSnapState: Integer;
   end;
 
   TPMLGLES2RenderDriver = class(TPMLRenderDriver)
@@ -146,7 +188,10 @@ type
     FBlendValid: Boolean;
     FCurBlend  : TPMLBlendMode;
     FBoundTexture: GLuint;     // ユニット 0 に束縛したテクスチャ（0 = 未設定）
-    FBoundPalette: GLuint;     // ユニット 1 に束縛したパレットの写し（0 = 未設定）
+    // ユニット 1 に束縛したもの（0 = 未設定）。パレットの写し、または YUV の U（NV は UV）の平面。
+    // GL のテクスチャの id は生きている間は重ならないので、1 つの変数で見分けられる
+    FBoundUnit1: GLuint;
+    FBoundUnit2: GLuint;       // ユニット 2 に束縛した YUV の V の平面（0 = 未設定）
     // 描画先のテクスチャ（SetRenderTarget）。nil はウィンドウかオフスクリーンの FBO。
     FTarget    : TObject;
 
@@ -170,6 +215,12 @@ type
     procedure ApplyScissor;
     procedure ApplyBlend(ABlend: TPMLBlendMode);
     procedure UseShader(AShader: TPMLGLES2Shader);
+    function  CreatePlane(AWidth, AHeight: Integer; AGLFormat: GLenum;
+      ABytesPerTexel: PtrUInt; out AId: GLuint): Boolean;
+    procedure UploadPlane(AId: GLuint; AX, AY, AWidth, AHeight: Integer;
+      AGLFormat: GLenum; APixels: Pointer; APitch: Integer; ABytesPerTexel: PtrUInt);
+    procedure BindUnit(AUnit: GLenum; AId: GLuint);
+    procedure SetPlaneFilter(AFilter: GLint);
     procedure ExecClear(const ACmd: TPMLRenderCommand);
     procedure ExecDraw(AMode: GLenum; const ACmd: TPMLRenderCommand);
   public
@@ -190,6 +241,11 @@ type
     function  CreateTexture(ATexture: TPMLTexture): Boolean; override;
     function  UpdateTexture(ATexture: TPMLTexture; const ARect: TPMLRect;
       APixels: Pointer; APitch: Integer): Boolean; override;
+    function  UpdateTextureYUV(ATexture: TPMLTexture; const ARect: TPMLRect;
+      AY: Pointer; AYPitch: Integer; AU: Pointer; AUPitch: Integer;
+      AV: Pointer; AVPitch: Integer): Boolean; override;
+    function  UpdateTextureNV(ATexture: TPMLTexture; const ARect: TPMLRect;
+      AY: Pointer; AYPitch: Integer; AUV: Pointer; AUVPitch: Integer): Boolean; override;
     procedure DestroyTexture(ATexture: TPMLTexture); override;
     function  CreatePalette(APalette: TPMLTexturePalette): Boolean; override;
     function  UpdatePalette(APalette: TPMLTexturePalette;
@@ -237,8 +293,9 @@ const
 
   PORT-NOTE: SDL の GLES2_Fragment_Include_Best_Texture_Precision に当たる前置きと、
   頂点シェーダ、単色、テクスチャ 4 種（RGB / BGR / ARGB / ABGR）、パレット 4 種
-  （最近傍 / 線形 と、それぞれの colorswap）だけを写した。
-  ピクセルアート・YUV は持たない。精度を決めるマクロの名前だけ
+  （最近傍 / 線形 と、それぞれの colorswap）、YUV 3 種（YUV / NV12_RA / NV21_RA と、
+  それぞれの colorswap）だけを写した。
+  ピクセルアート・NV12 の RG 版は持たない。精度を決めるマクロの名前だけ
   SDL_TEXCOORD_PRECISION から PML_TEXCOORD_PRECISION に変えた。
 
   PORT-NOTE: 頂点シェーダでテクスチャ座標に 1/10000 テクセルを足す（uniform
@@ -407,6 +464,85 @@ const
     '    gl_FragColor *= v_color;' + LF +
     '}' + LF;
 
+  { YUV のシェーダ。SDL の YUV_SHADER_PROLOGUE と YUV_SHADER_BODY、NV12_RA_SHADER_BODY、
+    NV21_RA_SHADER_BODY（GLES2_Fragment_TextureYUV / NV12_RA / NV21_RA）。
+    本体は「平面を読む」「変換する」「出力する（colorswap の有無）」の 3 つの断片を
+    つなげて作る。
+
+    PORT-NOTE: SDL の u_matrix（mat3）の代わりに、行ごとの vec3 を 3 つ（u_rcoeff,
+    u_gcoeff, u_bcoeff）持つ。SDL は rgb = yuv * u_matrix（行列の列 = 各係数の行）なので、
+    rgb.r = dot(yuv, u_rcoeff) と同じ計算。SDL の変換の結果は lowp の vec3 で、挟まずに
+    頂点の色を掛ける。ここは mediump で受けて 0..1 に挟んでから掛ける。ソフトウェアの
+    ドライバは先に ARGB8888 に直す（挟まれる）ので、色の変調や合成の結果をそろえるため。
+
+    PORT-NOTE: 補間なし（最近傍と PixelArt）のとき、色差は u_texel_size を使って座標を
+    自分で決める。輝度のテクセルの番号 n に対し、色差は n div 2 番のテクセルの中心。
+    SDL は輝度と同じ正規化した座標で色差を読むので、幅か高さが奇数のとき、色差の
+    テクスチャが (n + 1) div 2 の大きさであるぶん、選ぶテクセルが n div 2 からずれる
+    （幅 7 で n = 5 は、2 番でなく 3 番を引く）。ソフトウェアのドライバ（SDL_SW_YUVTexture と
+    同じ n div 2）と同じ絵にするための変更。偶数の大きさでは SDL と同じテクセルを選ぶ。
+    Linear は SDL どおり輝度と同じ座標（GL が混ぜる）。切り替えは u_chroma_snap。
+
+    PORT-NOTE: SDL の YUV のシェーダには colorswap が無い。papimela は BGRA32 / BGRX32 の
+    描画先に R と B を入れ替えて書くので（TargetSwapsRB）、YUV にも入れ替え版を持つ。 }
+  YUVPrologue =
+    'uniform sampler2D u_texture;' + LF +
+    'uniform sampler2D u_texture_u;' + LF +
+    'uniform sampler2D u_texture_v;' + LF +
+    'uniform vec3 u_offset;' + LF +
+    'uniform vec3 u_rcoeff;' + LF +
+    'uniform vec3 u_gcoeff;' + LF +
+    'uniform vec3 u_bcoeff;' + LF +
+    'uniform PML_TEXCOORD_PRECISION vec4 u_texel_size;' + LF +
+    'uniform int u_chroma_snap;' + LF +
+    'varying mediump vec4 v_color;' + LF +
+    'varying PML_TEXCOORD_PRECISION vec2 v_texCoord;' + LF +
+    LF +
+    'void main()' + LF +
+    '{' + LF +
+    '    mediump vec3 yuv;' + LF +
+    '    mediump vec3 rgb;' + LF +
+    LF +
+    '    // Chroma coordinate. Nearest: the 2x2 block of the luma texel (x div 2),' + LF +
+    '    // as the software converter does. Linear: the same coordinate as luma.' + LF +
+    '    PML_TEXCOORD_PRECISION vec2 uv_c = v_texCoord;' + LF +
+    '    if (u_chroma_snap != 0) {' + LF +
+    '        PML_TEXCOORD_PRECISION vec2 luma = floor(v_texCoord * u_texel_size.zw);' + LF +
+    '        uv_c = (floor(luma * 0.5) + 0.5) / floor((u_texel_size.zw + 1.0) * 0.5);' + LF +
+    '    }' + LF +
+    LF +
+    '    // Get the YUV values' + LF;
+
+  YUVSamplePlanar =
+    '    yuv.x = texture2D(u_texture,   v_texCoord).r;' + LF +
+    '    yuv.y = texture2D(u_texture_u, uv_c).r;' + LF +
+    '    yuv.z = texture2D(u_texture_v, uv_c).r;' + LF;
+
+  YUVSampleNV12 =
+    '    yuv.x = texture2D(u_texture,   v_texCoord).r;' + LF +
+    '    yuv.yz = texture2D(u_texture_u, uv_c).ra;' + LF;
+
+  YUVSampleNV21 =
+    '    yuv.x = texture2D(u_texture,   v_texCoord).r;' + LF +
+    '    yuv.yz = texture2D(u_texture_u, uv_c).ar;' + LF;
+
+  YUVTransform =
+    LF +
+    '    // Do the color transform' + LF +
+    '    yuv += u_offset;' + LF +
+    '    rgb = clamp(vec3(dot(yuv, u_rcoeff), dot(yuv, u_gcoeff), dot(yuv, u_bcoeff)), 0.0, 1.0);' + LF +
+    LF;
+
+  YUVOutput =
+    '    gl_FragColor = vec4(rgb, 1.0);' + LF +
+    '    gl_FragColor *= v_color;' + LF +
+    '}' + LF;
+
+  YUVOutputSwap =
+    '    gl_FragColor = vec4(rgb.b, rgb.g, rgb.r, 1.0);' + LF +
+    '    gl_FragColor *= v_color;' + LF +
+    '}' + LF;
+
 type
   { テクスチャの中身（TPMLTexture.DriverData）。 }
   TPMLGLES2Texture = class
@@ -424,6 +560,16 @@ type
     // INDEX8（GL_LUMINANCE の 1 バイト 1 画素）か。BFirst と HasAlpha は意味を持たない。
     // 補間は作成時から GL_NEAREST のまま変えない（線形はシェーダで混ぜる）
     Indexed : Boolean;
+    // YV12 / IYUV（3 平面）か、NV12 / NV21（Y と UV の 2 平面）か。どちらも Format で決まる。
+    // 補間は平面ごとのテクスチャすべてに同じ値を掛ける
+    Planar  : Boolean;
+    NV      : Boolean;
+    // 色差の平面。Planar は IdU に U、IdV に V（メモリの並びが YV12 の V,U でも、
+    // 中身で決める）。NV は IdU に UV（GL_LUMINANCE_ALPHA）。ほかは 0
+    IdU     : GLuint;
+    IdV     : GLuint;
+    // 変換の種類（行列の表の添字）。YUV のときだけ意味を持つ
+    YCbCr   : TPMLYCbCrType;
   end;
 
   { パレットの写し（TPMLTexturePalette.DriverData）。256x1 の RGBA テクスチャ。 }
@@ -431,6 +577,41 @@ type
   public
     Id: GLuint;
   end;
+
+const
+  { YUV → RGB の係数。SDL_pixels.c の mat_BT601_Full_8bit などの値のまま（各行の 4 つ目の
+    0.0f は使わないので省いた）。1 種類 12 個: オフセット(Y, U, V)、R の係数、G の係数、
+    B の係数。並びは TPMLYCbCrType と同じ。
+
+    PORT-NOTE: SDL の BT.2020 の全範囲の行列は 10 ビット用（オフセットが -0.500488759）。
+    SDL は 8 ビットの形式にも同じ表を使うので、ここも同じ値を使う。限定範囲の BT.2020 は
+    PMLYCbCrTypeOf が受け付けないので持たない。 }
+  YUVMatrix: array[TPMLYCbCrType] of array[0..11] of Single = (
+    // BT601Full
+    (0.0, -0.501960814, -0.501960814,
+     1.0000, 0.0000, 1.4075,
+     1.0000, -0.3455, -0.7169,
+     1.0000, 1.7790, 0.0000),
+    // BT601Limited
+    (-0.0627451017, -0.501960814, -0.501960814,
+     1.1644, 0.0000, 1.5960,
+     1.1644, -0.3918, -0.8130,
+     1.1644, 2.0172, 0.0000),
+    // BT709Full
+    (0.0, -0.501960814, -0.501960814,
+     1.0000, 0.0000, 1.5810,
+     1.0000, -0.1881, -0.4700,
+     1.0000, 1.8629, 0.0000),
+    // BT709Limited
+    (-0.0627451017, -0.501960814, -0.501960814,
+     1.1644, 0.0000, 1.7927,
+     1.1644, -0.2132, -0.5329,
+     1.1644, 2.1124, 0.0000),
+    // BT2020Full
+    (0.0, -0.500488759, -0.500488759,
+     1.0000, 0.0000, 1.4760,
+     1.0000, -0.1647, -0.5719,
+     1.0000, 1.8832, 0.0000));
 
 var
   // PMLLoadGLES2Functions に渡す取得関数は C の関数ポインタ（cdecl）で、
@@ -568,10 +749,17 @@ begin
     Result := TPMLGLES2Shader.BGR;
 end;
 
-{ 形式の 1 画素のバイト数（INDEX8 は 1、ほかは RGBA の 4）。 }
+{ このドライバが平面で持つ YUV の形式（平面ごとに分かれる 4 つ）か。 }
+function IsPlanarYUVFormat(AFormat: TPMLPixelFormat): Boolean; inline;
+begin
+  Result := (AFormat = PML_PIXELFORMAT_YV12) or (AFormat = PML_PIXELFORMAT_IYUV)
+    or (AFormat = PML_PIXELFORMAT_NV12) or (AFormat = PML_PIXELFORMAT_NV21);
+end;
+
+{ 形式の主な平面（YUV は Y）の 1 画素のバイト数（INDEX8 と YUV は 1、ほかは RGBA の 4）。 }
 function BytesPerTexel(AFormat: TPMLPixelFormat): PtrUInt; inline;
 begin
-  if AFormat = PML_PIXELFORMAT_INDEX8 then
+  if (AFormat = PML_PIXELFORMAT_INDEX8) or IsPlanarYUVFormat(AFormat) then
     Result := 1
   else
     Result := 4;
@@ -580,6 +768,11 @@ end;
 function IsPaletteShader(AShader: TPMLGLES2Shader): Boolean; inline;
 begin
   Result := AShader >= TPMLGLES2Shader.PalNearest;
+end;
+
+function IsYUVShader(AShader: TPMLGLES2Shader): Boolean; inline;
+begin
+  Result := (AShader >= TPMLGLES2Shader.YUV) and (AShader < TPMLGLES2Shader.PalNearest);
 end;
 
 function TextureData(ATexture: TPMLTexture): TPMLGLES2Texture; inline;
@@ -837,12 +1030,31 @@ begin
   FPrograms[AShader].ProjGen := -1;
   FPrograms[AShader].TexelSize := FGL.glGetUniformLocation(Id, 'u_texel_size');
   FPrograms[AShader].TexelOwner := 0;
-  // テクスチャは常にユニット 0、パレットの写しはユニット 1。
+  FPrograms[AShader].YUVOffset := -1;
+  FPrograms[AShader].YUVRCoeff := -1;
+  FPrograms[AShader].YUVGCoeff := -1;
+  FPrograms[AShader].YUVBCoeff := -1;
+  FPrograms[AShader].YUVKind := -1;
+  FPrograms[AShader].YUVSnap := -1;
+  FPrograms[AShader].YUVSnapState := -1;
+  // テクスチャは常にユニット 0、パレットの写しと YUV の U（NV は UV）はユニット 1、
+  // YUV の V はユニット 2。
   FGL.glUseProgram(Id);
   if AShader <> TPMLGLES2Shader.Solid then
     FGL.glUniform1i(FGL.glGetUniformLocation(Id, 'u_texture'), 0);
   if IsPaletteShader(AShader) then
     FGL.glUniform1i(FGL.glGetUniformLocation(Id, 'u_palette'), 1);
+  if IsYUVShader(AShader) then
+  begin
+    FGL.glUniform1i(FGL.glGetUniformLocation(Id, 'u_texture_u'), 1);
+    // NV12 / NV21 のシェーダは u_texture_v を使わない（位置は -1 で、設定は無視される）
+    FGL.glUniform1i(FGL.glGetUniformLocation(Id, 'u_texture_v'), 2);
+    FPrograms[AShader].YUVOffset := FGL.glGetUniformLocation(Id, 'u_offset');
+    FPrograms[AShader].YUVRCoeff := FGL.glGetUniformLocation(Id, 'u_rcoeff');
+    FPrograms[AShader].YUVGCoeff := FGL.glGetUniformLocation(Id, 'u_gcoeff');
+    FPrograms[AShader].YUVBCoeff := FGL.glGetUniformLocation(Id, 'u_bcoeff');
+    FPrograms[AShader].YUVSnap := FGL.glGetUniformLocation(Id, 'u_chroma_snap');
+  end;
 end;
 
 { プログラム、VBO、GL の固定の状態。コンテキストが現在であること。 }
@@ -860,6 +1072,18 @@ begin
     BuildProgram(TPMLGLES2Shader.ARGB, FragmentPrecision + TexturePrologue + FragmentARGB, Vertex);
     BuildProgram(TPMLGLES2Shader.RGB, FragmentPrecision + TexturePrologue + FragmentRGB, Vertex);
     BuildProgram(TPMLGLES2Shader.BGR, FragmentPrecision + TexturePrologue + FragmentBGR, Vertex);
+    BuildProgram(TPMLGLES2Shader.YUV,
+      FragmentPrecision + YUVPrologue + YUVSamplePlanar + YUVTransform + YUVOutput, Vertex);
+    BuildProgram(TPMLGLES2Shader.NV12,
+      FragmentPrecision + YUVPrologue + YUVSampleNV12 + YUVTransform + YUVOutput, Vertex);
+    BuildProgram(TPMLGLES2Shader.NV21,
+      FragmentPrecision + YUVPrologue + YUVSampleNV21 + YUVTransform + YUVOutput, Vertex);
+    BuildProgram(TPMLGLES2Shader.YUVSwap,
+      FragmentPrecision + YUVPrologue + YUVSamplePlanar + YUVTransform + YUVOutputSwap, Vertex);
+    BuildProgram(TPMLGLES2Shader.NV12Swap,
+      FragmentPrecision + YUVPrologue + YUVSampleNV12 + YUVTransform + YUVOutputSwap, Vertex);
+    BuildProgram(TPMLGLES2Shader.NV21Swap,
+      FragmentPrecision + YUVPrologue + YUVSampleNV21 + YUVTransform + YUVOutputSwap, Vertex);
     BuildProgram(TPMLGLES2Shader.PalNearest,
       FragmentPrecision + PalettePrologue + PaletteFunctions + FragmentPalNearest, Vertex);
     BuildProgram(TPMLGLES2Shader.PalLinear,
@@ -1051,17 +1275,98 @@ begin
   Result := True;
 end;
 
+{ YV12 / IYUV / NV12 / NV21 は平面ごとのテクスチャで持つ（SDL の GLES2 も同じ 4 つに
+  I444 を加えて持つ）。YUY2 / UYVY / YVYU / P010 / I444 は持たない。 }
 function TPMLGLES2RenderDriver.SupportsTextureFormat(AFormat: TPMLPixelFormat): Boolean;
 var
   BFirst, HasAlpha: Boolean;
 begin
   Result := (AFormat = PML_PIXELFORMAT_INDEX8)
+    or IsPlanarYUVFormat(AFormat)
     or LayoutOfFormat(AFormat, BFirst, HasAlpha);
 end;
 
 { ---- テクスチャ ---- }
 
+{ 1 枚の平面のテクスチャを、ユニット 0 に束縛して作る。補間は最近傍、端は CLAMP_TO_EDGE、
+  中身はすべて 0。AId は失敗しても（作れた分は）返すので、呼び出し側が消す。
+  GL の誤りがなければ True。 }
+function TPMLGLES2RenderDriver.CreatePlane(AWidth, AHeight: Integer; AGLFormat: GLenum;
+  ABytesPerTexel: PtrUInt; out AId: GLuint): Boolean;
+var
+  Zero: Pointer;
+  Size: PtrUInt;
+begin
+  AId := 0;
+  FGL.glGenTextures(1, @AId);
+  FGL.glBindTexture(GL_TEXTURE_2D, AId);
+  FGL.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+  FGL.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  FGL.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  FGL.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  Size := PtrUInt(AWidth) * PtrUInt(AHeight) * ABytesPerTexel;
+  Zero := GetMem(Size);
+  try
+    FillChar(Zero^, Size, 0);
+    FGL.glTexImage2D(GL_TEXTURE_2D, 0, AGLFormat, AWidth, AHeight, 0,
+      AGLFormat, GL_UNSIGNED_BYTE, Zero);
+  finally
+    FreeMem(Zero);
+  end;
+  Result := FGL.glGetError() = GL_NO_ERROR;
+end;
+
+{ 平面 AId の矩形 (AX, AY, AWidth, AHeight) を更新する。いまのユニットに束縛する。
+  GLES2 の核には UNPACK_ROW_LENGTH が無いので、行の幅が詰まっていなければ詰め直した複製を
+  作って 1 回で上げる（SDL の GLES2_TexSubImage2D と同じ）。ABytesPerTexel は 1 画素のバイト数
+  （LUMINANCE は 1、LUMINANCE_ALPHA は 2、RGBA は 4）。 }
+procedure TPMLGLES2RenderDriver.UploadPlane(AId: GLuint; AX, AY, AWidth, AHeight: Integer;
+  AGLFormat: GLenum; APixels: Pointer; APitch: Integer; ABytesPerTexel: PtrUInt);
+var
+  Blob: PByte;
+  RowBytes: PtrUInt;
+  Y: Integer;
+begin
+  FGL.glBindTexture(GL_TEXTURE_2D, AId);
+  RowBytes := PtrUInt(AWidth) * ABytesPerTexel;
+  if PtrUInt(APitch) = RowBytes then
+    FGL.glTexSubImage2D(GL_TEXTURE_2D, 0, AX, AY, AWidth, AHeight,
+      AGLFormat, GL_UNSIGNED_BYTE, APixels)
+  else
+  begin
+    Blob := GetMem(RowBytes * PtrUInt(AHeight));
+    try
+      for Y := 0 to AHeight - 1 do
+        Move((PByte(APixels) + PtrUInt(Y) * PtrUInt(APitch))^,
+          (Blob + PtrUInt(Y) * RowBytes)^, RowBytes);
+      FGL.glTexSubImage2D(GL_TEXTURE_2D, 0, AX, AY, AWidth, AHeight,
+        AGLFormat, GL_UNSIGNED_BYTE, Blob);
+    finally
+      FreeMem(Blob);
+    end;
+  end;
+end;
+
+{ ユニット AUnit に AId を束縛して、ユニット 0 に戻す。 }
+procedure TPMLGLES2RenderDriver.BindUnit(AUnit: GLenum; AId: GLuint);
+begin
+  FGL.glActiveTexture(AUnit);
+  FGL.glBindTexture(GL_TEXTURE_2D, AId);
+  FGL.glActiveTexture(GL_TEXTURE0);
+end;
+
+{ いまのユニットに束縛してあるテクスチャの補間を設定する。 }
+procedure TPMLGLES2RenderDriver.SetPlaneFilter(AFilter: GLint);
+begin
+  FGL.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, AFilter);
+  FGL.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, AFilter);
+end;
+
 { 形式に合ったテクスチャを作る。中身はすべて 0（透明な黒）にしておく。
+
+  YV12 / IYUV は Y・U・V の 3 枚（GL_LUMINANCE。U と V は縦横とも (n + 1) div 2）、
+  NV12 / NV21 は Y（GL_LUMINANCE）と UV（GL_LUMINANCE_ALPHA、同じ半分の大きさ）の 2 枚
+  （SDL の GLES2_CreateTexture）。色空間は作るときに変換の種類へ決める。
 
   PORT-NOTE: SDL は中身を未定義のまま作る（glTexImage2D の画素が NULL）。ソフトウェアの
   ドライバは 0 で始まるので、GPU でも同じにして、未更新のテクスチャを描いたときの
@@ -1069,18 +1374,30 @@ end;
 function TPMLGLES2RenderDriver.CreateTexture(ATexture: TPMLTexture): Boolean;
 var
   Data: TPMLGLES2Texture;
-  BFirst, HasAlpha, Indexed: Boolean;
-  Zero: Pointer;
-  Size: PtrUInt;
-  Err: GLenum;
+  BFirst, HasAlpha, Indexed, Planar, NV, Created: Boolean;
+  YCbCr: TPMLYCbCrType;
+  CW, CH: Integer;
   GLFormat: GLenum;
 begin
   Result := False;
   Indexed := ATexture.Format = PML_PIXELFORMAT_INDEX8;
+  Planar := (ATexture.Format = PML_PIXELFORMAT_YV12) or (ATexture.Format = PML_PIXELFORMAT_IYUV);
+  NV := (ATexture.Format = PML_PIXELFORMAT_NV12) or (ATexture.Format = PML_PIXELFORMAT_NV21);
+  YCbCr := TPMLYCbCrType.BT601Limited;
   if Indexed then
   begin
     BFirst := False;
     HasAlpha := False;
+  end
+  else if Planar or NV then
+  begin
+    BFirst := False;
+    HasAlpha := False;
+    // YUV は描画先にできない。色空間に変換の行列が無ければ作らない
+    if ATexture.Access = TPMLTextureAccess.Target then
+      Exit;
+    if not PMLYCbCrTypeOf(ATexture.Colorspace, YCbCr) then
+      Exit;
   end
   else if not LayoutOfFormat(ATexture.Format, BFirst, HasAlpha) then
     Exit;
@@ -1093,45 +1410,50 @@ begin
   Data.BFirst := BFirst;
   Data.HasAlpha := HasAlpha;
   Data.Indexed := Indexed;
+  Data.Planar := Planar;
+  Data.NV := NV;
+  Data.YCbCr := YCbCr;
   Data.Filter := TPMLScaleMode.Nearest;
   Data.Width := ATexture.Width;
   Data.Height := ATexture.Height;
-  FGL.glGenTextures(1, @Data.Id);
-  FGL.glBindTexture(GL_TEXTURE_2D, Data.Id);
-  FGL.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-  FGL.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-  FGL.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-  FGL.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-  Size := PtrUInt(ATexture.Width) * PtrUInt(ATexture.Height) * BytesPerTexel(ATexture.Format);
-  // INDEX8 は GL_LUMINANCE（SDL の GLES2_CreateTexture と同じ）。1 バイトが R に読める
-  if Indexed then
+  // INDEX8 と YUV の Y は GL_LUMINANCE（SDL の GLES2_CreateTexture と同じ）。1 バイトが R に読める
+  if Indexed or Planar or NV then
     GLFormat := GL_LUMINANCE
   else
     GLFormat := GL_RGBA;
-  Zero := GetMem(Size);
-  try
-    FillChar(Zero^, Size, 0);
-    FGL.glTexImage2D(GL_TEXTURE_2D, 0, GLFormat, ATexture.Width, ATexture.Height, 0,
-      GLFormat, GL_UNSIGNED_BYTE, Zero);
-  finally
-    FreeMem(Zero);
+  Created := CreatePlane(ATexture.Width, ATexture.Height, GLFormat,
+    BytesPerTexel(ATexture.Format), Data.Id);
+  if Planar or NV then
+  begin
+    CW := (ATexture.Width + 1) div 2;
+    CH := (ATexture.Height + 1) div 2;
+    if Planar then
+    begin
+      Created := CreatePlane(CW, CH, GL_LUMINANCE, 1, Data.IdU) and Created;
+      Created := CreatePlane(CW, CH, GL_LUMINANCE, 1, Data.IdV) and Created;
+    end
+    else
+      Created := CreatePlane(CW, CH, GL_LUMINANCE_ALPHA, 2, Data.IdU) and Created;
   end;
-  Err := FGL.glGetError();
-  if (Err = GL_NO_ERROR) and (ATexture.Access = TPMLTextureAccess.Target) then
+  if Created and (ATexture.Access = TPMLTextureAccess.Target) then
   begin
     // 描画先にできるテクスチャは、自分を付けた FBO を持つ（SDL の GLES2_CreateTexture）。
     FGL.glGenFramebuffers(1, @Data.FBO);
     FGL.glBindFramebuffer(GL_FRAMEBUFFER, Data.FBO);
     FGL.glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, Data.Id, 0);
     if FGL.glCheckFramebufferStatus(GL_FRAMEBUFFER) <> GL_FRAMEBUFFER_COMPLETE then
-      Err := GL_INVALID_OPERATION;
+      Created := False;
     BindDrawFramebuffer;
   end;
-  if Err <> GL_NO_ERROR then
+  if not Created then
   begin
     if Data.FBO <> 0 then
       FGL.glDeleteFramebuffers(1, @Data.FBO);
     FGL.glDeleteTextures(1, @Data.Id);
+    if Data.IdU <> 0 then
+      FGL.glDeleteTextures(1, @Data.IdU);
+    if Data.IdV <> 0 then
+      FGL.glDeleteTextures(1, @Data.IdV);
     Data.Free;
     Exit;
   end;
@@ -1139,16 +1461,20 @@ begin
   Result := True;
 end;
 
-{ 矩形の部分を更新する。GLES2 の核には UNPACK_ROW_LENGTH が無いので、行の幅が
-  詰まっていなければ詰め直した複製を作って 1 回で上げる（SDL の GLES2_TexSubImage2D と同じ）。 }
+{ 矩形の部分を更新する。行の幅が詰まっていないときの詰め直しは UploadPlane。
+
+  YUV（YV12 / IYUV / NV12 / NV21）は詰めた画素で来る（PMLCalculateYUVSize と同じ並び）。
+  ARect の Y が ARect.H 行、続いて色差の平面が、行の幅 (APitch + 1) div 2（NV は
+  UV を交互に詰めた 2 * ((APitch + 1) div 2)）で ((ARect.H + 1) div 2) 行ずつ。
+  YV12 は V、U の順、IYUV は U、V の順（SDL の GLES2_UpdateTexture）。 }
 function TPMLGLES2RenderDriver.UpdateTexture(ATexture: TPMLTexture;
   const ARect: TPMLRect; APixels: Pointer; APitch: Integer): Boolean;
 var
   Data: TPMLGLES2Texture;
-  Blob: PByte;
-  RowBytes: PtrUInt;
-  Y: Integer;
   GLFormat: GLenum;
+  Src: PByte;
+  ChromaPitch, CX, CY, CW, CH: Integer;
+  First, Second: GLuint;
 begin
   Result := False;
   Data := TextureData(ATexture);
@@ -1158,30 +1484,92 @@ begin
   or (ARect.X + ARect.W > ATexture.Width) or (ARect.Y + ARect.H > ATexture.Height) then
     Exit;
   EnsureCurrent;
-  FGL.glBindTexture(GL_TEXTURE_2D, Data.Id);
-  RowBytes := PtrUInt(ARect.W) * BytesPerTexel(ATexture.Format);
+  if Data.Planar or Data.NV then
+  begin
+    FGL.glGetError();
+    UploadPlane(Data.Id, ARect.X, ARect.Y, ARect.W, ARect.H, GL_LUMINANCE, APixels, APitch, 1);
+    CX := ARect.X div 2;
+    CY := ARect.Y div 2;
+    CW := (ARect.W + 1) div 2;
+    CH := (ARect.H + 1) div 2;
+    ChromaPitch := (APitch + 1) div 2;
+    // 色差の平面は、Y の ARect.H 行のあと
+    Src := PByte(APixels) + PtrInt(ARect.H) * PtrInt(APitch);
+    if Data.Planar then
+    begin
+      if Data.Format = PML_PIXELFORMAT_YV12 then
+      begin
+        First := Data.IdV;
+        Second := Data.IdU;
+      end
+      else
+      begin
+        First := Data.IdU;
+        Second := Data.IdV;
+      end;
+      UploadPlane(First, CX, CY, CW, CH, GL_LUMINANCE, Src, ChromaPitch, 1);
+      Src := Src + PtrInt(CH) * PtrInt(ChromaPitch);
+      UploadPlane(Second, CX, CY, CW, CH, GL_LUMINANCE, Src, ChromaPitch, 1);
+    end
+    else
+      UploadPlane(Data.IdU, CX, CY, CW, CH, GL_LUMINANCE_ALPHA, Src, 2 * ChromaPitch, 2);
+    Result := FGL.glGetError() = GL_NO_ERROR;
+    Exit;
+  end;
   if Data.Indexed then
     GLFormat := GL_LUMINANCE
   else
     GLFormat := GL_RGBA;
-  if PtrUInt(APitch) = RowBytes then
-    FGL.glTexSubImage2D(GL_TEXTURE_2D, 0, ARect.X, ARect.Y, ARect.W, ARect.H,
-      GLFormat, GL_UNSIGNED_BYTE, APixels)
-  else
-  begin
-    Blob := GetMem(RowBytes * PtrUInt(ARect.H));
-    try
-      for Y := 0 to ARect.H - 1 do
-        Move((PByte(APixels) + PtrUInt(Y) * PtrUInt(APitch))^,
-          (Blob + PtrUInt(Y) * RowBytes)^, RowBytes);
-      FGL.glTexSubImage2D(GL_TEXTURE_2D, 0, ARect.X, ARect.Y, ARect.W, ARect.H,
-        GLFormat, GL_UNSIGNED_BYTE, Blob);
-    finally
-      FreeMem(Blob);
-    end;
-  end;
+  UploadPlane(Data.Id, ARect.X, ARect.Y, ARect.W, ARect.H, GLFormat, APixels, APitch,
+    BytesPerTexel(ATexture.Format));
   // 次の実行は束縛を作り直す（BeginRun）ので、ここで元に戻さなくてよい。
   Result := True;
+end;
+
+{ 平面ごとの更新（SDL の GLES2_UpdateTextureYUV）。YV12 / IYUV。 }
+function TPMLGLES2RenderDriver.UpdateTextureYUV(ATexture: TPMLTexture; const ARect: TPMLRect;
+  AY: Pointer; AYPitch: Integer; AU: Pointer; AUPitch: Integer;
+  AV: Pointer; AVPitch: Integer): Boolean;
+var
+  Data: TPMLGLES2Texture;
+begin
+  Result := False;
+  Data := TextureData(ATexture);
+  if (Data = nil) or not Data.Planar or (AY = nil) or (AU = nil) or (AV = nil) then
+    Exit;
+  if (ARect.X < 0) or (ARect.Y < 0) or (ARect.W <= 0) or (ARect.H <= 0)
+  or (ARect.X + ARect.W > ATexture.Width) or (ARect.Y + ARect.H > ATexture.Height) then
+    Exit;
+  EnsureCurrent;
+  FGL.glGetError();
+  UploadPlane(Data.IdV, ARect.X div 2, ARect.Y div 2, (ARect.W + 1) div 2, (ARect.H + 1) div 2,
+    GL_LUMINANCE, AV, AVPitch, 1);
+  UploadPlane(Data.IdU, ARect.X div 2, ARect.Y div 2, (ARect.W + 1) div 2, (ARect.H + 1) div 2,
+    GL_LUMINANCE, AU, AUPitch, 1);
+  UploadPlane(Data.Id, ARect.X, ARect.Y, ARect.W, ARect.H, GL_LUMINANCE, AY, AYPitch, 1);
+  Result := FGL.glGetError() = GL_NO_ERROR;
+end;
+
+{ Y と、U・V を交互に詰めた平面での更新（SDL の GLES2_UpdateTextureNV）。NV12 / NV21。
+  UV の平面は 1 画素 2 バイトの GL_LUMINANCE_ALPHA で、AUVPitch はバイト数。 }
+function TPMLGLES2RenderDriver.UpdateTextureNV(ATexture: TPMLTexture; const ARect: TPMLRect;
+  AY: Pointer; AYPitch: Integer; AUV: Pointer; AUVPitch: Integer): Boolean;
+var
+  Data: TPMLGLES2Texture;
+begin
+  Result := False;
+  Data := TextureData(ATexture);
+  if (Data = nil) or not Data.NV or (AY = nil) or (AUV = nil) then
+    Exit;
+  if (ARect.X < 0) or (ARect.Y < 0) or (ARect.W <= 0) or (ARect.H <= 0)
+  or (ARect.X + ARect.W > ATexture.Width) or (ARect.Y + ARect.H > ATexture.Height) then
+    Exit;
+  EnsureCurrent;
+  FGL.glGetError();
+  UploadPlane(Data.IdU, ARect.X div 2, ARect.Y div 2, (ARect.W + 1) div 2, (ARect.H + 1) div 2,
+    GL_LUMINANCE_ALPHA, AUV, AUVPitch, 2);
+  UploadPlane(Data.Id, ARect.X, ARect.Y, ARect.W, ARect.H, GL_LUMINANCE, AY, AYPitch, 1);
+  Result := FGL.glGetError() = GL_NO_ERROR;
 end;
 
 procedure TPMLGLES2RenderDriver.DestroyTexture(ATexture: TPMLTexture);
@@ -1202,6 +1590,10 @@ begin
     if Data.FBO <> 0 then
       FGL.glDeleteFramebuffers(1, @Data.FBO);
     FGL.glDeleteTextures(1, @Data.Id);
+    if Data.IdU <> 0 then
+      FGL.glDeleteTextures(1, @Data.IdU);
+    if Data.IdV <> 0 then
+      FGL.glDeleteTextures(1, @Data.IdV);
   except
     on E: EPMLError do
       FLastNonFatalError := 'GLES2 texture cleanup failed: ' + E.Message;
@@ -1412,7 +1804,8 @@ begin
   FBlendValid := False;
   FShaderValid := False;
   FBoundTexture := 0;
-  FBoundPalette := 0;
+  FBoundUnit1 := 0;
+  FBoundUnit2 := 0;
   // 実行の前の呼び出し（テクスチャの更新など）が束縛を動かしても、ユニット 0 に戻す。
   FGL.glActiveTexture(GL_TEXTURE0);
   // テクスチャの id は破棄のあとで使い回されるので、大きさの設定は持ち越さない。
@@ -1601,6 +1994,7 @@ var
   Pal: TPMLGLES2Palette;
   Shader: TPMLGLES2Shader;
   Filter: GLint;
+  Snap: Integer;
 begin
   Data := nil;
   Pal := nil;
@@ -1631,6 +2025,28 @@ begin
       else
         Shader := TPMLGLES2Shader.PalNearest;
     end
+    else if Data.Planar then
+    begin
+      // YUV は変換のシェーダ。描画先の並びが B,G,R なら R と B を入れ替える版
+      if TargetSwapsRB then
+        Shader := TPMLGLES2Shader.YUVSwap
+      else
+        Shader := TPMLGLES2Shader.YUV;
+    end
+    else if Data.NV then
+    begin
+      if Data.Format = PML_PIXELFORMAT_NV12 then
+      begin
+        if TargetSwapsRB then
+          Shader := TPMLGLES2Shader.NV12Swap
+        else
+          Shader := TPMLGLES2Shader.NV12;
+      end
+      else if TargetSwapsRB then
+        Shader := TPMLGLES2Shader.NV21Swap
+      else
+        Shader := TPMLGLES2Shader.NV21;
+    end
     else
       Shader := CopyShader(Data.BFirst, Data.HasAlpha, TargetSwapsRB);
   end;
@@ -1644,13 +2060,25 @@ begin
 
   if Data <> nil then
   begin
-    if (Pal <> nil) and (FBoundPalette <> Pal.Id) then
+    if (Pal <> nil) and (FBoundUnit1 <> Pal.Id) then
     begin
       // パレットの写しはユニット 1。ユニット 0 に戻してから先へ進む
-      FGL.glActiveTexture(GL_TEXTURE1);
-      FGL.glBindTexture(GL_TEXTURE_2D, Pal.Id);
-      FGL.glActiveTexture(GL_TEXTURE0);
-      FBoundPalette := Pal.Id;
+      BindUnit(GL_TEXTURE1, Pal.Id);
+      FBoundUnit1 := Pal.Id;
+    end;
+    if Data.IdU <> 0 then
+    begin
+      // YUV の U（NV は UV）はユニット 1、V はユニット 2。Y はこのあとユニット 0
+      if FBoundUnit1 <> Data.IdU then
+      begin
+        BindUnit(GL_TEXTURE1, Data.IdU);
+        FBoundUnit1 := Data.IdU;
+      end;
+      if (Data.IdV <> 0) and (FBoundUnit2 <> Data.IdV) then
+      begin
+        BindUnit(GL_TEXTURE2, Data.IdV);
+        FBoundUnit2 := Data.IdV;
+      end;
     end;
     if FBoundTexture <> Data.Id then
     begin
@@ -1663,6 +2091,39 @@ begin
         Data.Width, Data.Height);
       FPrograms[Shader].TexelOwner := Data.Id;
     end;
+    if IsYUVShader(Shader) and (FPrograms[Shader].YUVKind <> Ord(Data.YCbCr)) then
+    begin
+      // 変換のパラメータ（オフセットと、R・G・B の係数）。色空間ごとに 1 組
+      with FPrograms[Shader] do
+      begin
+        if YUVOffset <> -1 then
+          FGL.glUniform3f(YUVOffset, YUVMatrix[Data.YCbCr][0], YUVMatrix[Data.YCbCr][1],
+            YUVMatrix[Data.YCbCr][2]);
+        if YUVRCoeff <> -1 then
+          FGL.glUniform3f(YUVRCoeff, YUVMatrix[Data.YCbCr][3], YUVMatrix[Data.YCbCr][4],
+            YUVMatrix[Data.YCbCr][5]);
+        if YUVGCoeff <> -1 then
+          FGL.glUniform3f(YUVGCoeff, YUVMatrix[Data.YCbCr][6], YUVMatrix[Data.YCbCr][7],
+            YUVMatrix[Data.YCbCr][8]);
+        if YUVBCoeff <> -1 then
+          FGL.glUniform3f(YUVBCoeff, YUVMatrix[Data.YCbCr][9], YUVMatrix[Data.YCbCr][10],
+            YUVMatrix[Data.YCbCr][11]);
+        YUVKind := Ord(Data.YCbCr);
+      end;
+    end;
+    if IsYUVShader(Shader) then
+    begin
+      // 補間なしのときだけ、色差の座標を 2x2 の区画に寄せる（シェーダの PORT-NOTE）
+      if ACmd.ScaleMode = TPMLScaleMode.Linear then
+        Snap := 0
+      else
+        Snap := 1;
+      if (FPrograms[Shader].YUVSnapState <> Snap) and (FPrograms[Shader].YUVSnap <> -1) then
+      begin
+        FGL.glUniform1i(FPrograms[Shader].YUVSnap, Snap);
+        FPrograms[Shader].YUVSnapState := Snap;
+      end;
+    end;
     // INDEX8 の添字のテクスチャは補間しない（Data.Filter は Nearest のまま）。
     // 線形は PalLinear が 4 つの添字の色を混ぜる（SDL の SetTextureScaleMode と同じ）
     if (not Data.Indexed) and (Data.Filter <> ACmd.ScaleMode) then
@@ -1673,8 +2134,20 @@ begin
         Filter := GL_LINEAR
       else
         Filter := GL_NEAREST;
-      FGL.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, Filter);
-      FGL.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, Filter);
+      SetPlaneFilter(Filter);
+      if Data.IdU <> 0 then
+      begin
+        // YUV は全部の平面に同じ補間を掛ける（SDL の SetCopyState と同じ）。
+        // 平面はこの直前に、U（NV は UV）がユニット 1、V がユニット 2 に束縛してある
+        FGL.glActiveTexture(GL_TEXTURE1);
+        SetPlaneFilter(Filter);
+        if Data.IdV <> 0 then
+        begin
+          FGL.glActiveTexture(GL_TEXTURE2);
+          SetPlaneFilter(Filter);
+        end;
+        FGL.glActiveTexture(GL_TEXTURE0);
+      end;
       Data.Filter := ACmd.ScaleMode;
     end;
   end;

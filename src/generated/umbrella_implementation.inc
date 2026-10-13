@@ -12,6 +12,7 @@
 //   PaPiMeLa.Surface
 //   PaPiMeLa.Surface.Blit
 //   PaPiMeLa.Surface.BMP
+//   PaPiMeLa.Surface.YUV
 //   PaPiMeLa.IO
 //   PaPiMeLa.Video
 //   PaPiMeLa.Clipboard
@@ -158,6 +159,11 @@ begin
   Result := PaPiMeLa.Pixels.PMLIsPixelFormat10Bit(AFormat);
 end;
 
+function PMLDefaultColorspace(AFormat: TPMLPixelFormat): TPMLColorspace;
+begin
+  Result := PaPiMeLa.Pixels.PMLDefaultColorspace(AFormat);
+end;
+
 function PMLPixelFormatName(AFormat: TPMLPixelFormat): String;
 begin
   Result := PaPiMeLa.Pixels.PMLPixelFormatName(AFormat);
@@ -282,6 +288,38 @@ end;
 procedure PMLSaveBMPFile(const APath: String; ASurface: TPMLSurface);
 begin
   PaPiMeLa.Surface.BMP.PMLSaveBMPFile(APath, ASurface);
+end;
+
+// ---- PaPiMeLa.Surface.YUV
+function PMLIsYUVFormat(AFormat: TPMLPixelFormat): Boolean;
+begin
+  Result := PaPiMeLa.Surface.YUV.PMLIsYUVFormat(AFormat);
+end;
+
+function PMLYCbCrTypeOf(AColorspace: TPMLColorspace; out AType: TPMLYCbCrType): Boolean;
+begin
+  Result := PaPiMeLa.Surface.YUV.PMLYCbCrTypeOf(AColorspace, AType);
+end;
+
+function PMLCalculateYUVSize(
+  AFormat: TPMLPixelFormat;
+  AWidth, AHeight: Integer;
+  out ASize: PtrUInt;
+  out APitch: Integer): Boolean;
+begin
+  Result := PaPiMeLa.Surface.YUV.PMLCalculateYUVSize(AFormat, AWidth, AHeight, ASize, APitch);
+end;
+
+procedure PMLConvertYUVToARGB8888(
+  AWidth, AHeight: Integer;
+  AFormat: TPMLPixelFormat;
+  AColorspace: TPMLColorspace;
+  ASrc: Pointer;
+  ASrcPitch: Integer;
+  ADst: Pointer;
+  ADstPitch: Integer);
+begin
+  PaPiMeLa.Surface.YUV.PMLConvertYUVToARGB8888(AWidth, AHeight, AFormat, AColorspace, ASrc, ASrcPitch, ADst, ADstPitch);
 end;
 
 // ---- PaPiMeLa.IO

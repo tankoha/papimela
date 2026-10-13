@@ -85,7 +85,8 @@ type
       APixels: Pointer; APitch: Integer): Boolean; override;
     procedure DestroyTexture(ATexture: TPMLTexture); override;
     function  SupportsRenderTargets: Boolean; override;
-    // どの形式も持てる（INDEX8 もサーフェスのパレットで描く）。
+    // FourCC（YUV）のほかはどの形式も持てる（INDEX8 もサーフェスのパレットで描く）。
+    // YUV はレンダラの肩代わりで描く（SDL のソフトウェアのレンダラも YUV を持たない）。
     function  SupportsTextureFormat(AFormat: TPMLPixelFormat): Boolean; override;
     function  CreatePalette(APalette: TPMLTexturePalette): Boolean; override;
     function  UpdatePalette(APalette: TPMLTexturePalette;
@@ -237,7 +238,7 @@ end;
 
 function TPMLSoftwareRenderDriver.SupportsTextureFormat(AFormat: TPMLPixelFormat): Boolean;
 begin
-  Result := True;
+  Result := not PMLIsPixelFormatFourCC(AFormat);
 end;
 
 { ドライバの写しは 256 色（SDL_CreatePalette(256)。白の不透明で始まる）。アプリのパレットが

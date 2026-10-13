@@ -8,6 +8,7 @@
        ドライバの両方で描き、画素ごとに比べる。場面ごとに許す差（1 成分あたり）と、
        それを超えてよい画素の数を決めてある
        パレット（INDEX8）の場面は、GPU がドライバの写しで描くことと、Linear の補間も見る
+       YUV の場面は、GPU の浮動小数の行列とソフトウェアの整数の表の差（1 成分 3 まで）を許す
     2. ウィンドウ（実機のコンポジタがあるときだけ）: ドライバの選び方、読み戻しの
        向き、VSync、大きさの変更、破棄の順序
 
@@ -40,6 +41,7 @@ uses
   PaPiMeLa.Events,
   PaPiMeLa.Pixels,
   PaPiMeLa.Surface,
+  PaPiMeLa.Surface.YUV,
   PaPiMeLa.Video.Backend,
   PaPiMeLa.Video,
   PaPiMeLa.Video.Wayland,
@@ -696,6 +698,143 @@ begin
   end;
 end;
 
+{ ---- YUV（§3 の 3c） ----
+
+  GLES2 のドライバは YV12 / IYUV / NV12 / NV21 を平面のテクスチャで持ち、シェーダで色に直す
+  （SDL_shaders_gles2.c の YUV と NV12 のシェーダ）。YUY2 / UYVY / YVYU はレンダラの肩代わり。
+  ソフトウェアのドライバは整数の表で直すので、GPU の浮動小数の行列とは 1 成分あたり数だけ違いうる。 }
+
+var
+  YuvLcg: LongWord;
+
+function YuvByte: Byte;
+begin
+  YuvLcg := YuvLcg * 1103515245 + 12345;
+  Result := Byte(YuvLcg shr 16);
+end;
+
+{ 偽の乱数の YUV（詰めた画素）を入れたテクスチャ。 }
+function NewYUVTexture(R: TPMLRenderer; AFormat: TPMLPixelFormat; AColorspace: TPMLColorspace;
+  AW, AH: Integer; ASeed: LongWord): TPMLTexture;
+var
+  Buf: TBytes;
+  Size: PtrUInt;
+  Pitch, I: Integer;
+begin
+  PMLCalculateYUVSize(AFormat, AW, AH, Size, Pitch);
+  SetLength(Buf, Size);
+  YuvLcg := ASeed;
+  for I := 0 to High(Buf) do
+    Buf[I] := YuvByte;
+  Result := R.CreateTexture(AFormat, TPMLTextureAccess.Static, AW, AH, AColorspace);
+  Result.Update(TPMLRect.Make(0, 0, 0, 0), @Buf[0], Pitch);
+end;
+
+procedure SceneYUV(R: TPMLRenderer);
+const
+  Fmts: array[0..6] of TPMLPixelFormat = (PML_PIXELFORMAT_IYUV, PML_PIXELFORMAT_YV12,
+    PML_PIXELFORMAT_NV12, PML_PIXELFORMAT_NV21, PML_PIXELFORMAT_YUY2, PML_PIXELFORMAT_UYVY,
+    PML_PIXELFORMAT_YVYU);
+var
+  Spaces: array[0..4] of TPMLColorspace;
+  T: TPMLTexture;
+  Tgt: TPMLTexture;
+  I: Integer;
+  Y, U, V: array[0..63] of Byte;
+  UV: array[0..31] of Byte;
+begin
+  Background(R);
+  Spaces[0] := PML_COLORSPACE_BT601_LIMITED;
+  Spaces[1] := PML_COLORSPACE_JPEG;
+  Spaces[2] := PML_COLORSPACE_BT709_LIMITED;
+  Spaces[3] := PML_COLORSPACE_BT709_FULL;
+  Spaces[4] := PML_COLORSPACE_BT2020_FULL;
+  // 7 形式 x 1:1（8x6）
+  for I := 0 to 6 do
+  begin
+    T := NewYUVTexture(R, Fmts[I], PML_COLORSPACE_BT709_LIMITED, 8, 6, 100 + I);
+    R.RenderTexture(T, FR(0, 0, 0, 0), FR(1 + I * 9, 1, 8, 6));
+  end;
+  // 5 つの色空間（IYUV と NV12）
+  for I := 0 to 4 do
+  begin
+    T := NewYUVTexture(R, PML_PIXELFORMAT_IYUV, Spaces[I], 6, 4, 200 + I);
+    R.RenderTexture(T, FR(0, 0, 0, 0), FR(1 + I * 7, 9, 6, 4));
+    T := NewYUVTexture(R, PML_PIXELFORMAT_NV12, Spaces[I], 6, 4, 300 + I);
+    R.RenderTexture(T, FR(0, 0, 0, 0), FR(1 + I * 7, 14, 6, 4));
+  end;
+  // 奇数の大きさ（7x5）、2 倍、変調と Blend、回転
+  T := NewYUVTexture(R, PML_PIXELFORMAT_YV12, PML_COLORSPACE_YUV_DEFAULT, 7, 5, 400);
+  R.RenderTexture(T, FR(0, 0, 0, 0), FR(1, 20, 7, 5));
+  R.RenderTexture(T, FR(0, 0, 0, 0), FR(10, 20, 14, 10));
+  T := NewYUVTexture(R, PML_PIXELFORMAT_NV21, PML_COLORSPACE_YUV_DEFAULT, 8, 6, 401);
+  T.ColorMod := TPMLColor.Make(200, 255, 120);
+  T.AlphaMod := 160;
+  T.BlendMode := TPMLBlendMode.Blend;
+  R.RenderTexture(T, FR(0, 0, 0, 0), FR(26, 20, 16, 12));
+  T := NewYUVTexture(R, PML_PIXELFORMAT_UYVY, PML_COLORSPACE_YUV_DEFAULT, 8, 6, 402);
+  R.RenderTextureRotated(T, FR(0, 0, 0, 0), FR(44, 20, 16, 12), 90);
+  // 平面ごとの更新（UpdateYUV と UpdateNV。部分も）
+  YuvLcg := 500;
+  for I := 0 to 63 do
+  begin
+    Y[I] := YuvByte;
+    U[I] := YuvByte;
+    V[I] := YuvByte;
+  end;
+  for I := 0 to 31 do
+    UV[I] := YuvByte;
+  T := NewYUVTexture(R, PML_PIXELFORMAT_IYUV, PML_COLORSPACE_YUV_DEFAULT, 8, 6, 501);
+  T.UpdateYUV(TPMLRect.Make(2, 2, 4, 2), @Y[0], 4, @U[0], 2, @V[0], 2);
+  R.RenderTexture(T, FR(0, 0, 0, 0), FR(1, 34, 8, 6));
+  T := NewYUVTexture(R, PML_PIXELFORMAT_YV12, PML_COLORSPACE_YUV_DEFAULT, 8, 6, 502);
+  T.UpdateYUV(TPMLRect.Make(0, 0, 0, 0), @Y[0], 8, @U[0], 4, @V[0], 4);
+  R.RenderTexture(T, FR(0, 0, 0, 0), FR(10, 34, 8, 6));
+  T := NewYUVTexture(R, PML_PIXELFORMAT_NV12, PML_COLORSPACE_YUV_DEFAULT, 8, 6, 503);
+  T.UpdateNV(TPMLRect.Make(2, 2, 4, 2), @Y[0], 4, @UV[0], 4);
+  R.RenderTexture(T, FR(0, 0, 0, 0), FR(19, 34, 8, 6));
+  T := NewYUVTexture(R, PML_PIXELFORMAT_NV21, PML_COLORSPACE_YUV_DEFAULT, 8, 6, 504);
+  T.UpdateNV(TPMLRect.Make(0, 0, 0, 0), @Y[0], 8, @UV[0], 8);
+  R.RenderTexture(T, FR(0, 0, 0, 0), FR(28, 34, 8, 6));
+  // 詰めた画素の部分の更新
+  T := NewYUVTexture(R, PML_PIXELFORMAT_NV12, PML_COLORSPACE_YUV_DEFAULT, 8, 6, 505);
+  T.Update(TPMLRect.Make(2, 2, 4, 2), @Y[0], 4);
+  R.RenderTexture(T, FR(0, 0, 0, 0), FR(37, 34, 8, 6));
+  T := NewYUVTexture(R, PML_PIXELFORMAT_IYUV, PML_COLORSPACE_YUV_DEFAULT, 8, 6, 506);
+  T.Update(TPMLRect.Make(2, 2, 4, 2), @Y[0], 4);
+  R.RenderTexture(T, FR(0, 0, 0, 0), FR(46, 34, 8, 6));
+  // BGRA32 の描画先へ（R と B を入れ替えるシェーダ）
+  Tgt := R.CreateTexture(PML_PIXELFORMAT_BGRA32, TPMLTextureAccess.Target, 20, 8);
+  R.RenderTarget := Tgt;
+  R.DrawColor := TPMLColor.Make(20, 40, 60, 255);
+  R.Clear;
+  R.RenderTexture(NewYUVTexture(R, PML_PIXELFORMAT_IYUV, PML_COLORSPACE_BT709_FULL, 8, 6, 600),
+    FR(0, 0, 0, 0), FR(1, 1, 8, 6));
+  R.RenderTexture(NewYUVTexture(R, PML_PIXELFORMAT_NV21, PML_COLORSPACE_JPEG, 8, 6, 601),
+    FR(0, 0, 0, 0), FR(10, 1, 8, 6));
+  R.RenderTarget := nil;
+  R.RenderTexture(Tgt, FR(0, 0, 0, 0), FR(1, 44, 20, 8));
+end;
+
+{ GPU だけの確かめ。平面の 4 形式はドライバが自分で持つ（肩代わりでない）。 }
+procedure CheckYUVNative;
+var
+  G: TPMLRenderer;
+begin
+  G := NewGPU;
+  try
+    Check(G.Driver.SupportsTextureFormat(PML_PIXELFORMAT_IYUV)
+      and G.Driver.SupportsTextureFormat(PML_PIXELFORMAT_YV12)
+      and G.Driver.SupportsTextureFormat(PML_PIXELFORMAT_NV12)
+      and G.Driver.SupportsTextureFormat(PML_PIXELFORMAT_NV21),
+      'YV12 / IYUV / NV12 / NV21 のテクスチャを直接持てる（SDL の GLES2 と同じ）');
+    Check(not G.Driver.SupportsTextureFormat(PML_PIXELFORMAT_YUY2),
+      'YUY2 は持たない（レンダラの肩代わりで描く。SDL の GLES2 と同じ）');
+  finally
+    G.Free;
+  end;
+end;
+
 procedure OffscreenSection;
 var
   G: TPMLRenderer;
@@ -804,6 +943,8 @@ begin
   CheckScaleModes;
   Compare('パレット（INDEX8。拡大・合成・変調・回転・色の変更・部分更新・BGRA32 の描画先）', @ScenePalette, 2);
   CheckPaletteNative;
+  Compare('YUV（7 形式・5 つの色空間・奇数・拡大・変調・回転・平面ごとと部分の更新）', @SceneYUV, 3);
+  CheckYUVNative;
 end;
 
 { ---- ウィンドウ ---- }

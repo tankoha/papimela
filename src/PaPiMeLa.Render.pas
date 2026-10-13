@@ -9,7 +9,9 @@
            （UpdateLogicalPresentation、倍率のかかった点と線の描き方、
            ウィンドウ座標との変換）、DebugText（文字の表の配置と字形の引き方）、
            パレットのテクスチャ（SDL_SetTexturePalette、ドライバの写しの共有と版での
-           流し直し、ドライバが INDEX8 を持たないときの肩代わり texture->native）。
+           流し直し、ドライバが INDEX8 を持たないときの肩代わり texture->native）、
+           YUV のテクスチャ（SDL_UpdateYUVTexture・SDL_UpdateNVTexture。ドライバが持たない
+           形式は YUV の平面を置き、更新のたびに全体を ARGB8888 に直して肩代わりへ写す）。
            字形の表は src/generated/debug_font.inc（tools/gendebugfont.bb が
            SDL_render_debug_font.h から生成。字形そのものは Public Domain）。
            SDL revision: see docs/ORIGIN.md
@@ -51,8 +53,8 @@
       振り分けのうち、ソフトウェアのレンダラと同じもの）
     - ソフトウェアのドライバの拡大は Linear でも Nearest で描く（PMLBlitScaled が方式を使わない）。
       SDL のソフトウェアのレンダラは Linear で補間する
-    - YUV のテクスチャは未実装（§3 の 3c）。インデックス形式は INDEX8 だけ（SDL も INDEX1 / 2 / 4 の
-      テクスチャは作れない）。肩代わりの層はいまインデックス形式だけが使う
+    - インデックス形式は INDEX8 だけ（SDL も INDEX1 / 2 / 4 のテクスチャは作れない）。YUV は
+      PaPiMeLa.Surface.YUV が変換できる 7 形式だけ（I444・P010 などは無い）
     - テクスチャの Lock / Unlock（SDL_LockTexture）は無い
     - GPU のドライバは OpenGL ES 2.0（#43）だけ。デスクトップ GL（#44）は未着手
 
@@ -73,6 +75,7 @@ uses
   PaPiMeLa.Core.Base,
   PaPiMeLa.Pixels,
   PaPiMeLa.Surface,
+  PaPiMeLa.Surface.YUV,
   PaPiMeLa.Video;
 
 type
@@ -172,8 +175,8 @@ type
     function  Name: String; virtual; abstract;
     function  GetOutputSize(out AWidth, AHeight: Integer): Boolean; virtual; abstract;
     function  SupportsBlendMode(AMode: TPMLBlendMode): Boolean; virtual;
-    // このドライバがテクスチャとして直接持てる形式か。既定はインデックス形式（INDEX8）だけ False、
-    // ほかは True。False の形式は、CreateTextureFromSurface が ARGB8888 へ変換してから渡す。
+    // このドライバがテクスチャとして直接持てる形式か。既定はインデックス形式（INDEX8）と FourCC（YUV）が
+    // False、ほかは True。YUV が False なら、レンダラが ARGB8888 の肩代わりで描く（PaPiMeLa.Surface.YUV で直す）。False の形式は、CreateTextureFromSurface が ARGB8888 へ変換してから渡す。
     // INDEX8 が False なら、レンダラが ARGB8888 の肩代わりのテクスチャで描く（TPMLTexture.SetPalette）。
     // ARGB8888 はどのドライバも持てなければならない。
     function  SupportsTextureFormat(AFormat: TPMLPixelFormat): Boolean; virtual;
@@ -189,6 +192,16 @@ type
       const AColors: array of TPMLColor): Boolean; virtual;
     procedure DestroyPalette(APalette: TPMLTexturePalette); virtual;
     procedure ChangeTexturePalette(ATexture: TPMLTexture); virtual;
+
+    { YUV の平面ごとの更新（SDL の UpdateTextureYUV / UpdateTextureNV）。YUV の形式を
+      SupportsTextureFormat で受けるドライバだけが呼ばれる。ARect はテクスチャの中に切ってある。
+      既定は持てない（False）。詰めた画素の更新は UpdateTexture に来る（平面の並びは
+      PaPiMeLa.Surface.YUV の PMLCalculateYUVSize と同じ）。 }
+    function  UpdateTextureYUV(ATexture: TPMLTexture; const ARect: TPMLRect;
+      AY: Pointer; AYPitch: Integer; AU: Pointer; AUPitch: Integer;
+      AV: Pointer; AVPitch: Integer): Boolean; virtual;
+    function  UpdateTextureNV(ATexture: TPMLTexture; const ARect: TPMLRect;
+      AY: Pointer; AYPitch: Integer; AUV: Pointer; AUVPitch: Integer): Boolean; virtual;
 
     function  CreateTexture(ATexture: TPMLTexture): Boolean; virtual; abstract;
     function  UpdateTexture(ATexture: TPMLTexture; const ARect: TPMLRect;
@@ -265,6 +278,7 @@ type
     FColorMod : TPMLColor;
     FAlphaMod : Byte;
     FScaleMode: TPMLScaleMode;
+    FColorspace: TPMLColorspace;
     // パレット（インデックス形式だけ）。
     FPalette      : TPMLPalette;          // 使うパレット。借り物か、FOwnsPalette なら持ち物
     FOwnsPalette  : Boolean;
@@ -277,6 +291,8 @@ type
     FNative       : TPMLTexture;
     FIndexPixels  : TPMLSurface;          // 肩代わりのときの添字（INDEX8。SDL の palette_surface）
     FNativeVersion: LongWord;             // 肩代わりへ最後に写したパレットの版。0 = 写し直す
+    FYUV          : TPMLYUVPlanes;        // 肩代わりのときの YUV の平面（SDL の texture->yuv）
+    procedure RefreshNativeFromYUV;
     procedure ReleaseDriverPalette;
     procedure RefreshNative;
   protected
@@ -286,7 +302,8 @@ type
     DriverData: TObject;
 
     constructor Create(ARenderer: TPMLRenderer; AFormat: TPMLPixelFormat;
-      AAccess: TPMLTextureAccess; AWidth, AHeight: Integer);
+      AAccess: TPMLTextureAccess; AWidth, AHeight: Integer;
+      AColorspace: TPMLColorspace = PML_COLORSPACE_UNKNOWN);
     destructor Destroy; override;
 
     // ARect が空ならテクスチャ全体。
@@ -299,6 +316,14 @@ type
       インデックス形式でなければ、または色の数が 256 を超えれば EPMLArgument。 }
     procedure SetPalette(APalette: TPMLPalette; AOwned: Boolean = False);
 
+    { YUV の平面ごとに更新する（SDL_UpdateYUVTexture）。YV12 / IYUV だけ（ほかは EPMLArgument）。
+      ARect が空ならテクスチャ全体。テクスチャの外は切る。U と V は縦横とも半分の大きさ。 }
+    procedure UpdateYUV(const ARect: TPMLRect; AY: Pointer; AYPitch: Integer;
+      AU: Pointer; AUPitch: Integer; AV: Pointer; AVPitch: Integer);
+    { Y と、U・V を交互に詰めた平面で更新する（SDL_UpdateNVTexture）。NV12 / NV21 だけ。 }
+    procedure UpdateNV(const ARect: TPMLRect; AY: Pointer; AYPitch: Integer;
+      AUV: Pointer; AUVPitch: Integer);
+
     property Renderer : TPMLRenderer read FRenderer;
     property Format   : TPMLPixelFormat read FFormat;
     property Access   : TPMLTextureAccess read FAccess;
@@ -309,6 +334,8 @@ type
     property AlphaMod : Byte read FAlphaMod write FAlphaMod;
     property ScaleMode: TPMLScaleMode read FScaleMode write FScaleMode;
     property Palette  : TPMLPalette read FPalette;
+    // 作ったときに決めた色空間（YUV の形式では変換の行列と範囲）。
+    property Colorspace: TPMLColorspace read FColorspace;
     // ドライバ向け。このテクスチャが使うドライバのパレット（無ければ nil）。
     property DriverPalette: TPMLTexturePalette read FDriverPalette;
   end;
@@ -411,7 +438,11 @@ type
     destructor Destroy; override;
 
     function  CreateTexture(AFormat: TPMLPixelFormat; AAccess: TPMLTextureAccess;
-      AWidth, AHeight: Integer): TPMLTexture;
+      AWidth, AHeight: Integer): TPMLTexture; overload;
+    { 色空間を決めて作る（SDL_PROP_TEXTURE_CREATE_COLORSPACE_NUMBER）。YUV の形式は BT.601 / BT.709 の
+      限定・全範囲と BT.2020 の全範囲だけ（ほかは EPMLArgument）。PML_COLORSPACE_UNKNOWN は形式の既定。 }
+    function  CreateTexture(AFormat: TPMLPixelFormat; AAccess: TPMLTextureAccess;
+      AWidth, AHeight: Integer; AColorspace: TPMLColorspace): TPMLTexture; overload;
     function  CreateTextureFromSurface(ASurface: TPMLSurface): TPMLTexture;
 
     // 描画先全体を DrawColor で塗る。クリップ矩形は無視する（SDL と同じ）。
@@ -760,8 +791,8 @@ end;
 
 function TPMLRenderDriver.SupportsTextureFormat(AFormat: TPMLPixelFormat): Boolean;
 begin
-  // パレットは CreatePalette などを実装したドライバだけが持てる。
-  Result := not PMLIsPixelFormatIndexed(AFormat);
+  // パレットは CreatePalette などを、YUV は平面の扱いを実装したドライバだけが持てる。
+  Result := not (PMLIsPixelFormatIndexed(AFormat) or PMLIsPixelFormatFourCC(AFormat));
 end;
 
 { 矩形 1 つを三角形 2 枚にする。
@@ -910,6 +941,19 @@ end;
 
 procedure TPMLRenderDriver.ChangeTexturePalette(ATexture: TPMLTexture);
 begin
+end;
+
+function TPMLRenderDriver.UpdateTextureYUV(ATexture: TPMLTexture; const ARect: TPMLRect;
+  AY: Pointer; AYPitch: Integer; AU: Pointer; AUPitch: Integer;
+  AV: Pointer; AVPitch: Integer): Boolean;
+begin
+  Result := False;
+end;
+
+function TPMLRenderDriver.UpdateTextureNV(ATexture: TPMLTexture; const ARect: TPMLRect;
+  AY: Pointer; AYPitch: Integer; AUV: Pointer; AUVPitch: Integer): Boolean;
+begin
+  Result := False;
 end;
 
 { TPMLTexture }
@@ -1077,14 +1121,20 @@ var
   I: Integer;
 begin
   Result := ATexture;
-  if (ATexture = nil) or not PMLIsPixelFormatIndexed(ATexture.Format) then
+  if ATexture = nil then
     Exit;
-  P := ATexture.Palette;
-  if P = nil then
-    raise EPMLRenderError.Create('texture doesn''t have a palette');
+  P := nil;
+  if PMLIsPixelFormatIndexed(ATexture.Format) then
+  begin
+    P := ATexture.Palette;
+    if P = nil then
+      raise EPMLRenderError.Create('texture doesn''t have a palette');
+  end;
   if ATexture.FNative <> nil then
   begin
-    ATexture.RefreshNative;
+    // YUV の肩代わりは更新のときに写してある（SDL_UpdateTextureYUV）。パレットは描くときに写す。
+    if P <> nil then
+      ATexture.RefreshNative;
     Result := ATexture.FNative;
     // 積むときにドライバが読む値（変調色など）は肩代わりにも写す（SDL は設定のたびに写す）。
     Result.BlendMode := ATexture.BlendMode;
@@ -1093,6 +1143,8 @@ begin
     Result.ScaleMode := ATexture.ScaleMode;
     Exit;
   end;
+  if P = nil then
+    Exit;
   DP := ATexture.DriverPalette;
   if DP.Version <> P.Version then
   begin
@@ -1108,7 +1160,8 @@ end;
 
 
 constructor TPMLTexture.Create(ARenderer: TPMLRenderer; AFormat: TPMLPixelFormat;
-  AAccess: TPMLTextureAccess; AWidth, AHeight: Integer);
+  AAccess: TPMLTextureAccess; AWidth, AHeight: Integer;
+  AColorspace: TPMLColorspace);
 begin
   inherited Create(nil, ARenderer);
   if (AWidth <= 0) or (AHeight <= 0) then
@@ -1124,6 +1177,10 @@ begin
   FColorMod := TPMLColor.White;
   FAlphaMod := 255;
   FScaleMode := TPMLScaleMode.Nearest;
+  if AColorspace = PML_COLORSPACE_UNKNOWN then
+    FColorspace := PMLDefaultColorspace(AFormat)
+  else
+    FColorspace := AColorspace;
 end;
 
 destructor TPMLTexture.Destroy;
@@ -1144,6 +1201,7 @@ begin
   end;
   FreeAndNil(FNative);
   FreeAndNil(FIndexPixels);
+  FreeAndNil(FYUV);
   if FOwnsPalette then
     FreeAndNil(FPalette);
   FreeAndNil(DriverData);
@@ -1181,6 +1239,16 @@ begin
     R := ARect;
   // 積んだ描画がこのテクスチャの古い中身を読むかもしれない。先に吐き出す。
   FRenderer.Flush;
+  if FYUV <> nil then
+  begin
+    // 肩代わり。平面を置き、全体を色に直して肩代わりへ写す（SDL_UpdateTextureYUV）。
+    if (R.X < 0) or (R.Y < 0) or (R.W <= 0) or (R.H <= 0)
+    or (R.X + R.W > FWidth) or (R.Y + R.H > FHeight) or (APixels = nil) then
+      raise EPMLRenderError.Create('texture update failed');
+    FYUV.Update(R, APixels, APitch);
+    RefreshNativeFromYUV;
+    Exit;
+  end;
   if FIndexPixels <> nil then
   begin
     // 肩代わり。添字だけ置き、次に描くときに色へ直す（SDL_UpdateTexturePaletteSurface）。
@@ -1195,6 +1263,86 @@ begin
     Exit;
   end;
   if not FRenderer.Driver.UpdateTexture(Self, R, APixels, APitch) then
+    raise EPMLRenderError.Create('texture update failed');
+end;
+
+{ ---- YUV（SDL_render.c の SDL_UpdateYUVTexture、SDL_UpdateNVTexture、SDL_UpdateTextureYUV） ---- }
+
+{ 肩代わりの中身を YUV の平面から作り直す。SDL と同じく、どこを更新しても全体を直して写す。 }
+procedure TPMLTexture.RefreshNativeFromYUV;
+var
+  Buf: array of LongWord;
+begin
+  SetLength(Buf, FWidth * FHeight);
+  FYUV.ConvertToARGB8888(@Buf[0], FWidth * 4);
+  if not FRenderer.Driver.UpdateTexture(FNative, TPMLRect.Make(0, 0, FWidth, FHeight),
+    @Buf[0], FWidth * 4) then
+    raise EPMLRenderError.Create('could not refresh the texture that stands in for YUV');
+end;
+
+{ ARect（空なら全体）をテクスチャに切る。何も残らなければ False（SDL は何もせず成功を返す）。 }
+function ClipToTexture(ATexture: TPMLTexture; const ARect: TPMLRect; out AReal: TPMLRect): Boolean;
+var
+  X1, Y1, X2, Y2: Integer;
+begin
+  if ARect.IsEmpty then
+    AReal := TPMLRect.Make(0, 0, ATexture.Width, ATexture.Height)
+  else
+  begin
+    X1 := Max(ARect.X, 0);
+    Y1 := Max(ARect.Y, 0);
+    X2 := Min(ARect.X + ARect.W, ATexture.Width);
+    Y2 := Min(ARect.Y + ARect.H, ATexture.Height);
+    AReal := TPMLRect.Make(X1, Y1, Max(X2 - X1, 0), Max(Y2 - Y1, 0));
+  end;
+  Result := (AReal.W > 0) and (AReal.H > 0);
+end;
+
+procedure TPMLTexture.UpdateYUV(const ARect: TPMLRect; AY: Pointer; AYPitch: Integer;
+  AU: Pointer; AUPitch: Integer; AV: Pointer; AVPitch: Integer);
+var
+  R: TPMLRect;
+begin
+  if (FFormat <> PML_PIXELFORMAT_YV12) and (FFormat <> PML_PIXELFORMAT_IYUV) then
+    raise EPMLArgument.CreateFmt('UpdateYUV needs a YV12 or IYUV texture, not %s',
+      [PMLPixelFormatName(FFormat)]);
+  if (AY = nil) or (AU = nil) or (AV = nil) or (AYPitch = 0) or (AUPitch = 0) or (AVPitch = 0) then
+    raise EPMLArgument.Create('UpdateYUV needs three planes and their pitches');
+  if FRenderer = nil then
+    raise EPMLRenderError.Create('texture has no renderer');
+  if not ClipToTexture(Self, ARect, R) then
+    Exit;
+  FRenderer.Flush;
+  if FYUV <> nil then
+  begin
+    FYUV.UpdatePlanar(R, AY, AYPitch, AU, AUPitch, AV, AVPitch);
+    RefreshNativeFromYUV;
+  end
+  else if not FRenderer.Driver.UpdateTextureYUV(Self, R, AY, AYPitch, AU, AUPitch, AV, AVPitch) then
+    raise EPMLRenderError.Create('texture update failed');
+end;
+
+procedure TPMLTexture.UpdateNV(const ARect: TPMLRect; AY: Pointer; AYPitch: Integer;
+  AUV: Pointer; AUVPitch: Integer);
+var
+  R: TPMLRect;
+begin
+  if (FFormat <> PML_PIXELFORMAT_NV12) and (FFormat <> PML_PIXELFORMAT_NV21) then
+    raise EPMLArgument.CreateFmt('UpdateNV needs an NV12 or NV21 texture, not %s',
+      [PMLPixelFormatName(FFormat)]);
+  if (AY = nil) or (AUV = nil) or (AYPitch = 0) or (AUVPitch = 0) then
+    raise EPMLArgument.Create('UpdateNV needs two planes and their pitches');
+  if FRenderer = nil then
+    raise EPMLRenderError.Create('texture has no renderer');
+  if not ClipToTexture(Self, ARect, R) then
+    Exit;
+  FRenderer.Flush;
+  if FYUV <> nil then
+  begin
+    FYUV.UpdateNV(R, AY, AYPitch, AUV, AUVPitch);
+    RefreshNativeFromYUV;
+  end
+  else if not FRenderer.Driver.UpdateTextureNV(Self, R, AY, AYPitch, AUV, AUVPitch) then
     raise EPMLRenderError.Create('texture update failed');
 end;
 
@@ -2122,6 +2270,32 @@ end;
 function TPMLRenderer.CreateTexture(AFormat: TPMLPixelFormat;
   AAccess: TPMLTextureAccess; AWidth, AHeight: Integer): TPMLTexture;
 begin
+  Result := CreateTexture(AFormat, AAccess, AWidth, AHeight, PML_COLORSPACE_UNKNOWN);
+end;
+
+{ PORT-NOTE: YUV の色空間が変換できないとき、SDL は作るのは通し、更新のときに
+  「Unsupported YUV colorspace」で断る。papimela は作るときに断る。 }
+function TPMLRenderer.CreateTexture(AFormat: TPMLPixelFormat;
+  AAccess: TPMLTextureAccess; AWidth, AHeight: Integer;
+  AColorspace: TPMLColorspace): TPMLTexture;
+var
+  CS: TPMLColorspace;
+  YCbCr: TPMLYCbCrType;
+begin
+  if PMLIsPixelFormatFourCC(AFormat) and (AAccess = TPMLTextureAccess.Target) then
+    raise EPMLArgument.CreateFmt('%s textures can''t be render targets', [PMLPixelFormatName(AFormat)]);
+  if AColorspace = PML_COLORSPACE_UNKNOWN then
+    CS := PMLDefaultColorspace(AFormat)
+  else
+    CS := AColorspace;
+  if PMLIsPixelFormatFourCC(AFormat) then
+  begin
+    if not (PMLIsYUVFormat(AFormat) or FDriver.SupportsTextureFormat(AFormat)) then
+      raise EPMLArgument.CreateFmt('%s textures are not supported', [PMLPixelFormatName(AFormat)]);
+    if not PMLYCbCrTypeOf(CS, YCbCr) then
+      raise EPMLArgument.CreateFmt('colorspace $%.8x is not supported for %s textures',
+        [CS, PMLPixelFormatName(AFormat)]);
+  end;
   // SDL も 1 画素 1 バイト未満の形式（INDEX1 / 2 / 4）は作れない（SDL_BYTESPERPIXEL が 0）。
   if PMLIsPixelFormatIndexed(AFormat) and (AFormat <> PML_PIXELFORMAT_INDEX8) then
     raise EPMLArgument.CreateFmt('%s textures are not supported (use INDEX8)',
@@ -2131,9 +2305,18 @@ begin
   if (AAccess = TPMLTextureAccess.Target) and not FDriver.SupportsRenderTargets then
     raise EPMLUnsupported.CreateNative(
       Format('driver %s has no render target textures', [FDriver.Name]), 0, 'render');
-  Result := TPMLTexture.Create(Self, AFormat, AAccess, AWidth, AHeight);
+  Result := TPMLTexture.Create(Self, AFormat, AAccess, AWidth, AHeight, CS);
   try
-    if PMLIsPixelFormatIndexed(AFormat) and not FDriver.SupportsTextureFormat(AFormat) then
+    if PMLIsPixelFormatFourCC(AFormat) and not FDriver.SupportsTextureFormat(AFormat) then
+    begin
+      // 肩代わり（SDL の texture->native と texture->yuv）。色に直した絵を ARGB8888 で持つ。
+      Result.FNative := TPMLTexture.Create(Self, PML_PIXELFORMAT_ARGB8888, AAccess, AWidth, AHeight);
+      if not FDriver.CreateTexture(Result.FNative) then
+        raise EPMLRenderError.CreateFmt('driver %s could not create an ARGB8888 texture',
+          [FDriver.Name]);
+      Result.FYUV := TPMLYUVPlanes.Create(AFormat, CS, AWidth, AHeight);
+    end
+    else if PMLIsPixelFormatIndexed(AFormat) and not FDriver.SupportsTextureFormat(AFormat) then
     begin
       // 肩代わり（SDL の texture->native）。色に直した絵を ARGB8888 で持つ。
       Result.FNative := TPMLTexture.Create(Self, PML_PIXELFORMAT_ARGB8888,

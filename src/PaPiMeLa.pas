@@ -53,6 +53,7 @@ uses
   PaPiMeLa.Surface,
   PaPiMeLa.Surface.Blit,
   PaPiMeLa.Surface.BMP,
+  PaPiMeLa.Surface.YUV,
   PaPiMeLa.IO,
   PaPiMeLa.Video,
   PaPiMeLa.Clipboard,
