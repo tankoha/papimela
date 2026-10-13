@@ -1,19 +1,18 @@
 # 引き継ぎ資料
 
-新しいセッションは、`CLAUDE.md` の次にこれを読む。最終更新: 2026-10-10（Context を作る前のヒントのコミット `7880f02` の次）。
+新しいセッションは、`CLAUDE.md` の次にこれを読む。最終更新: 2026-10-13（キーボードの分離と PIXELART のコミット `5ce8953` の次）。
 
-> **2026-10-10 の手元のセッションで**: §8 の保留中の判断を持ち主に聞いて片付け（README に SDL の不具合 3 件と浮動小数点の
-> 例外を足した、D-44 の丸めは四捨五入のまま、Sonnet の疑い 3 つを実物で確かめた）、見つかった D-53（スワップ間隔）を
-> papimela 側で直し、#5・#6 を入れた。表示サーバ無しの 26 本はすべて通り、手元専用は GL の 3 本だけ流し直した
-> （`docs/TEST-LOG.md` の冒頭）。**手元の対話の確認は残っていない。** 次は §3 の候補と §8 の保留中の判断へ。
+> **2026-10-13 の手元のセッションで**: §3 の「ヒントを使う側」（A・B）を済ませ、キーボードの状態を
+> `PaPiMeLa.Events.Keyboard` に分け、テクスチャの種類の 3a（PIXELART）まで進めた。表示サーバ無しの 28 本はすべて通り、
+> 手元専用も流した（`docs/TEST-LOG.md` の冒頭）。**手元の対話の確認は残っていない。** 次は §3 の 1（3b パレット）から。
 
 ## 1. 今どこにいるか
 
 | 項目 | 状態 |
 |---|---|
 | リポジトリ | https://github.com/tankoha/papimela（公開、Issues 有効）。手元のセッションは `master` に直接 push、クラウドのセッションは指定のブランチへ push して、手元で早送りマージする |
-| CI | 緑。rawpaco 激辛、checkorigin、アンブレラの古さ（`genumbrella.bb --check`）、図の検査、表示サーバ無しのテスト 27 本、Pong の自己検査、GLES2 と ソフトウェアのドライバの画素比較（llvmpipe）。ジョブ 60 分・GLES2 の手順 5 分の時間制限つき |
-| テスト | 表示サーバ無しの 27 本・1117 件はすべて成功（2026-10-10 に手元で作り直して全部流した）。手元専用と対話の検査は `docs/TEST-LOG.md` の各行 |
+| CI | 緑。rawpaco 激辛、checkorigin、アンブレラの古さ（`genumbrella.bb --check`）、図の検査、表示サーバ無しのテスト 28 本、Pong の自己検査、GLES2 と ソフトウェアのドライバの画素比較（llvmpipe）。ジョブ 60 分・GLES2 の手順 5 分の時間制限つき |
+| テスト | 表示サーバ無しの 28 本・1120 件はすべて成功（2026-10-10 に手元で作り直して全部流した）。手元専用と対話の検査は `docs/TEST-LOG.md` の各行 |
 | 不具合 | 57 件。うち上流 SDL の 9 件は未報告（D-53 は SDL 自身が FIXME で知っている。他の 8 件は報告するかを検討中。方針は `CLAUDE.md`） |
 | 規模 | 手書き 52 ユニット（`src/*.pas`）+ 生成（Wayland プロトコル 21、キーボードの表 2、EGL / GLES2 の定数 2、DebugText の字形 1、アンブレラ 2）。約 4.2 万行 |
 
@@ -40,36 +39,52 @@ EGL の GL コンテキスト（スワップ間隔はコンテキストごと）
 未着手: #11、#18–21、#23、#30、#40、#44、
 #51–63（オーディオ、ジョイスティック、ゲームパッド、ハプティクス）、#65–69。
 
-## 2. 前のセッション（2026-10-10、手元）でしたこと
+## 2. 前のセッション（2026-10-12〜13、手元）でしたこと
 
 | コミット | 内容 | 担当 | 検査 |
 |---|---|---|---|
-| `2572a2d` | README に SDL の不具合 3 件（D-36、D-38、D-42）と、GL で浮動小数点の例外が無効になること（D-40）を載せた。D-44 は四捨五入のまま（持ち主の判断） | Opus | — |
-| `57c42f1` | Sonnet の疑い 3 つを SDL の実物で確かめた。スワップ間隔が全体で 1 つ（**D-53**）は本物、EGL 1.5 の判定と面無しの MakeCurrent は不具合ではない | Opus | 使い捨て検証 |
-| `1c17b36` | **スワップ間隔をコンテキストごとに**（D-53。持ち主の判断）。途中で、Wayland の Restore が最小化を解けないことを測って確かめた | Opus | T-21 に 7 件（先に書き、直す前に 4 件落ちた。変異 3 通り） |
-| `84fd159` | **Log（#5）・Properties とヒント（#6）**。Context が Log・Hints・Properties を持つ。SDL の誤り 4 つ（D-54〜D-57）を見つけ、papimela では直した | API・検査・Context への組み込みは Opus、実装は qwen を Opus が直した（解析 3 関数は書き直し） | T-45（95 件）、T-46（46 件）。空の実装で 75 件・42 件落ちた。変異 19 通り（18 通りが捕まる） |
+| `1682d18` | ヒントを使う側 A（§3 の済んだもの）。`TPMLContextBase` / `ContextServices` | 土台と検査は Opus、組み込みは Sonnet、棚卸しと検査の実行は Haiku | T-47（先に書き、空の実装で 15 件落ちた。変異 9 通り） |
+| `f863dc6` | ヒントを使う側 B。`PaPiMeLa.Events.Quit`（#72） | 検査と API は Opus、実装は Sonnet 2 人に並行で | T-47 に 38 件、手元専用の T-48（変異 11 通り + D-58） |
+| `5ce8953` | キーボードの状態を `PaPiMeLa.Events.Keyboard` に分けた。3a（PIXELART） | 分離は Sonnet、3a は Opus | T-49（新規）、T-22 に 2 件 |
+
+見つけた SDL の不具合: D-58（実時間の優先度を最初の 1 回だけ上限を読む前に決める）、D-59（"fifo" が RR になる）。
+どちらも SDL 3.4.2 の実物で確かめた。
 
 このセッションで分かったこと・やり方:
 
-- **SDL の実物は、作らなくても手元にある**: Ubuntu 26.04 に SDL 3.4.2 の共有ライブラリ（`/usr/lib/x86_64-linux-gnu/libSDL3.so.0`）
-  が入っている。cmake も ninja も無いが、`reference/SDL/include` のヘッダで C を書き、その .so に直接リンクすれば呼べる
-  （`gcc -I reference/SDL/include x.c /usr/lib/x86_64-linux-gnu/libSDL3.so.0`）。比べる前に、該当の関数が参照版と同じ中身かを
-  `git -C reference/SDL fetch --depth=1 origin refs/tags/release-3.4.2` と `git diff FETCH_HEAD HEAD -- <ファイル>` で確かめる
-- 検査の期待値を **SDL の実物で測った表**から取ると、移植で直すべき誤り（D-54〜D-57）が自然に見つかる。測る前に読んで
-  気づいた誤りも、測ってから記録した
-- qwen の実装は今回も読んでから直した（`CLAUDE.md` の qwen の節に実例を足した）。検査を先に書いていたので、どこが
-  誤りかがすぐ分かった
+- **Haiku の検査の実行の報告は使えなかった**（1 回目は終了コードの取り違え、2 回目は実在しない結論の行と合わない件数）。
+  棚卸しのような機械的な作業は正確だった。検査の合否は自分で流し直して決める（`CLAUDE.md` の Haiku の節）
+- 出力に NUL などが混ざる検査があり、`grep -c` が数えない。`grep -ac` で数える
+- こちらの仕様の誤りが 3 つ、検査で見つかった（名指しのドライバが作れないときの例外の種類、"fifo" の期待値、RLIMIT の表示）
+- SDL から写す部分は、クリーンルームのユニットに入れず移植のユニットに分ける（`Events.Drop`・`Events.Quit`・`Events.Keyboard`）
+- 手元専用の `test_key_routing` と `test_gl_window` の 7.（D-53）は、1 回目だけ落ちて次は通ることがある（TEST-LOG の冒頭）
 
 ## 3. 次の候補（おすすめ順）
 
-1. **ヒントを使う側（小さい）**: **A は 2026-10-13 に済んだ**（KEYCODE_OPTIONS と hide_numpad、APP_ID、RENDER_DRIVER / RENDER_VSYNC、EGL_LIBRARY / OPENGL_LIBRARY。T-47。下の層からは `ContextServices` で Context の土台に届く）。**B も同日に済んだ**（THREAD_PRIORITY_POLICY と実時間・D-58 の直し、IME_IMPLEMENTED_UI（papimela の既定は composition）、QUIT_ON_LAST_WINDOW_CLOSE、NO_SIGNAL_HANDLERS、EVENT_LOGGING。T-47 の 6〜10 と T-48。SDL から写した規則は `PaPiMeLa.Events.Quit`（#72）に分けた）。C（ダブルクリック、タッチとマウス、スクリーンセーバー、libdecor など）は機能そのものが先に要る。
-   ヒントは Context を作る前から置ける（`TPMLContextOptions.Hints`、2026-10-10）。
-   `PAPIMELA_VIDEO` / `PAPIMELA_IME` もヒントで選ぶようになった。次は SDL のヒントのうち papimela に効くもの
-   （THREAD_PRIORITY_POLICY の実時間スケジューリングなど）を足すこと。既存のコードの `FLastNonFatalError` のような
-   「黙って覚える」所を `Ctx.Log` へ流すのも、ここでできる
+持ち主の決めた順（2026-10-12）: ヒントを使う側 → テクスチャの種類 → オーディオ。ヒントを使う側は 2026-10-13 に済んだ（下）。
+
+1. **レンダラのテクスチャの種類（#41 / #43）**: **3a（PIXELART）は 2026-10-13 に済んだ**（`TPMLScaleMode.PixelArt`。
+   SDL のソフトウェアの経路と GLES2 では NEAREST と同じ絵。GLES2 の本物のシェーダは `OPENGLES_300` のときだけで、
+   その定義は SDL のどこにも無い。DebugText の文字の表も PixelArt。T-49 と T-22 に 2 件）。残り:
+   - **3b パレット（INDEX8）**: SDL 3.4 の `SDL_SetTexturePalette`。SDL は `SDL_render.c` の共通の層が、ドライバの
+     扱えない形式を「中身のテクスチャ」（`texture->native`）で肩代わりし、パレットの版（`public_palette->version`）が
+     変わったら流し直す。ドライバが INDEX8 を持てば `SDL_TexturePalette` を共有して `UpdatePalette` する。
+     ソフトウェアはサーフェスのパレット、GLES2 はパレットを 256x1 のテクスチャにしてシェーダで引く
+     （`SDL_shaders_gles2.c` の PALETTE_SHADER_FUNCTIONS）。papimela には `TPMLPalette` とパレットを読む転送がある。
+     まず共通の肩代わりの層を作る
+   - **3c YUV（NV12 / NV21 / IYUV / YV12 など）**: ソフトウェアは肩代わりの層 + `SDL_yuv_sw.c` + `SDL_yuv.c`（#68、
+     約 2,700 行、スカラー版だけ）、GLES2 は YUV のシェーダと色空間の行列。一番大きい
+   - 期待値は SDL 3.4.2 の実物（システムの libSDL3）でソフトウェアのレンダラに描かせて取る（§6）
 2. **オーディオ（#51 以降）**: 大きな段階。PipeWire から
-3. **レンダラのテクスチャの種類（#41 / #43）**: YUV、パレット（INDEX8）、PIXELART の拡大。描画先テクスチャ・回転・9-grid / タイルは 2026-10-09 に済んだ
-4. IME の残り: 埋め込み候補（`TextEditingCandidates`）、IBus の ForwardKeyEvent、ibus-anthy など他のエンジンの属性の実測、GNOME / KDE での IBus 直結（§7.5 の要検証）。IBus の検査環境は `tools/ibus-sandbox/`（ibus + ibus-mozc を入れた Ubuntu 24.04 の最小 rootfs を bwrap で隔離。デスクトップの fcitx5 と混ざらない）。実測の結果は `spikes/RESULTS.md` のスパイク 3
+3. IME の残り: 埋め込み候補（`TextEditingCandidates`）、IBus の ForwardKeyEvent、ibus-anthy など他のエンジンの属性の実測、GNOME / KDE での IBus 直結（§7.5 の要検証）。IBus の検査環境は `tools/ibus-sandbox/`（ibus + ibus-mozc を入れた Ubuntu 24.04 の最小 rootfs を bwrap で隔離。デスクトップの fcitx5 と混ざらない）。実測の結果は `spikes/RESULTS.md` のスパイク 3
+4. 見つけて残してあるもの: ソフトウェアのレンダラの Linear が実は Nearest（`PMLBlitScaled` が方式を使わない。SDL は補間する）
+
+済んだもの（2026-10-13）: **ヒントを使う側**。A（KEYCODE_OPTIONS と hide_numpad、APP_ID、RENDER_DRIVER / RENDER_VSYNC、
+EGL_LIBRARY / OPENGL_LIBRARY。下の層からは `ContextServices` で Context の土台に届く）と B（THREAD_PRIORITY_POLICY と
+実時間・D-58 の直し、IME_IMPLEMENTED_UI（papimela の既定は composition）、QUIT_ON_LAST_WINDOW_CLOSE、NO_SIGNAL_HANDLERS、
+EVENT_LOGGING。SDL から写した規則は `PaPiMeLa.Events.Quit`（#72））。T-47・T-48。C（ダブルクリック、タッチとマウス、
+スクリーンセーバー、libdecor など）は機能そのものが先に要る。**キーボードの状態を `PaPiMeLa.Events.Keyboard`
+（一部移植、#24）に分けた**（`PaPiMeLa.Events` はクリーンルームに戻った。公開 API は同じ）。
 
 済んだもの（2026-10-10、2 つ目）: Log（#5）・Properties とヒント（#6）、スワップ間隔をコンテキストごとに（D-53）。§2 の表。
 
@@ -107,7 +122,7 @@ Pong もすべて書き換え、今は `uses SysUtils, Math, PaPiMeLa` だけで
 表示サーバ無しで通るもの（CI と同じ）:
 
 ```bash
-for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_render_transform test_render_target test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_drop test_drag_source test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints; do
+for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_render_transform test_render_target test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_drop test_drag_source test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds; do
   fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/$t test/$t.pas && ./test/$t
 done
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -oexamples/pong examples/pong.pas && ./examples/pong --selftest
@@ -133,7 +148,7 @@ env -u WAYLAND_DISPLAY LIBGL_ALWAYS_SOFTWARE=1 ./test/test_render_gles2   # Mesa
 cd papimela && mkdir -p lib
 B='fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib'
 # 0. 表示サーバ無しの分（CI と同じ。手元の新しい Mesa でも通るか）
-for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints; do
+for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds; do
   $B -otest/$t test/$t.pas && ./test/$t | tail -1
 done
 # 1. 実機の Wayland（自動判定。最後の行が「結論」で終わればよい）
@@ -237,12 +252,9 @@ man-db などの設定は所有者の切り替えで失敗するが、`dpkg -r -
   外すと解放した要素を辿る、`SDL_ResetLogPriorities` とヒントの知らせが逆の順で排他を取る
 - SDL の X11 の GLX の経路では、作った直後のスワップ間隔が 1 だった（SDL の「既定で VSync 無し」が効いていない。
   D-53 の確認の途中で見た。追っていない。papimela は X11 を持たないので急がない）
-- **`PaPiMeLa.Events` の由来の食い違い**（2026-10-13 に気づいた）: ヘッダは「クリーンルーム」だが、中の
-  `TPMLKeyboardState`（押下状態の規則）は「SDL_keyboard.c に従う」という PORT-NOTE を持ち、設計書 #24 でも
-  「状態機械は移植」。checkorigin はヘッダと設計書 #22 しか見ないので通っている。キーボードの状態を
-  `PaPiMeLa.Events.Keyboard`（一部移植）に分けるか、ヘッダを「一部移植」に直すか。§3 の 1 の A で足した
-  hide_numpad の配線もこの部分にある
 - D-40 の「止まる」側の仕組み（llvmpipe の作業スレッドで例外が起きる）は推測のまま
+
+2026-10-13 に片付いたもの: `PaPiMeLa.Events` の由来の食い違い（キーボードの状態を `PaPiMeLa.Events.Keyboard` に分けた。持ち主の判断）。
 
 2026-10-10 に片付いたもの: README に D-36・D-38・D-42 と浮動小数点の例外（D-40）を載せた。同日、D-53〜D-57 と「現状」の数字も載せた。Context を作る前のヒントは `TPMLContextOptions.Hints` に置く形にして、実装した。D-44 の丸めは四捨五入のまま。
 Sonnet の疑い 3 つを確かめた（D-53 は本物で papimela を直した、残り 2 つは不具合ではない）。Log の既定は今の見え方を保つ
