@@ -305,7 +305,7 @@ compares that argument with itself, so a validation that *looks* like a
 validation always succeeds. It is in `docs/DEFECTS.md`. It has not been
 reported.
 
-It is not the only one. Seven more are in `docs/DEFECTS.md`, each confirmed by
+It is not the only one. Eleven more are in `docs/DEFECTS.md`, each confirmed by
 running SDL's own code rather than by reading alone, and none of them reported
 either:
 
@@ -337,6 +337,23 @@ either:
   when an environment variable is in effect, hint callbacks are told the
   wrong old value (`(null)` instead of the variable), and resetting a hint
   that was never set fires a callback although nothing changed.
+- **D-58**, `SDL_SetLinuxThreadPriorityAndPolicy` in `SDL_threadprio.c`: the
+  real-time priority is computed from RealtimeKit's maximum before that maximum
+  has been read, so the very first request uses the default of 99. Asking for
+  HIGH three times with a maximum of 20 gave 20, then 15, then 15.
+- **D-59**, same file: the `SDL_THREAD_PRIORITY_POLICY` hint documents `fifo`
+  as SCHED_FIFO, but on Linux SDL only asks RealtimeKit, which always hands out
+  SCHED_RR. Setting `fifo` gives RR.
+- **D-60**, `SDL_CreateTextureFromSurface` in `SDL_render.c` (only on the main
+  branch, not in 3.4.2): a texture made from a color-keyed INDEX8 surface now
+  shares the surface's palette, and the key color's alpha is set to 0 on that
+  shared palette. The surface itself is changed: after removing the color key,
+  blitting it still drops that color. 3.4.2 copied the palette and did not do
+  this.
+- **D-61**, `SDL_SetTexturePalette`: pending draw commands are flushed only
+  when the old palette's reference count reaches zero. If another texture still
+  shares the old palette, draws queued before the change come out in the new
+  palette's colors (red became blue).
 
 One more is different in kind. **D-53**: SDL documents the swap interval as
 belonging to "the current OpenGL context", but keeps a single value for the
@@ -373,7 +390,7 @@ SDL は AI 生成物の貢献を受け付けない方針を明示している。
 比較しているため、**検証の形をしたまま必ず成功する**。`docs/DEFECTS.md` に
 記録してある。報告はしていない。
 
-これだけではない。`docs/DEFECTS.md` にはあと 7 件ある。どれも読んだだけでなく
+これだけではない。`docs/DEFECTS.md` にはあと 11 件ある。どれも読んだだけでなく
 SDL のコードを実際に動かして確かめたもので、どれも報告していない。
 
 - **D-36**、`imKStoUCS.c` の 312 行目: 範囲の判定が表の先頭より 6 つ手前から
@@ -396,6 +413,18 @@ SDL のコードを実際に動かして確かめたもので、どれも報告�
 - **D-57**、`SDL_hints.c` の `SDL_SetHintWithPriority` と `SDL_ResetHint`: 環境変数が効いていると、
   ヒントの変化の知らせが前の値を誤り（環境変数ではなく `(null)` と知らせる）、一度も置いて
   いないヒントを Reset すると、何も変わっていないのに知らせが来る
+- **D-58**、`SDL_threadprio.c` の `SDL_SetLinuxThreadPriorityAndPolicy`: 実時間の優先度を
+  RealtimeKit の上限から計算するが、上限を読むのはその計算の後なので、最初の 1 回だけ既定の 99 で
+  計算する。上限 20 の機械で HIGH を 3 回頼むと、20、15、15 になった
+- **D-59**、同じファイル: `SDL_THREAD_PRIORITY_POLICY` のヒントは `fifo` を SCHED_FIFO と説明して
+  いるが、Linux の SDL は RealtimeKit に頼むだけで、RealtimeKit は常に SCHED_RR を渡す。`fifo` にしても RR になる
+- **D-60**、`SDL_render.c` の `SDL_CreateTextureFromSurface`（main ブランチだけ。3.4.2 には無い）:
+  カラーキーつきの INDEX8 のサーフェスから作ったテクスチャがサーフェスのパレットを共有するようになり、
+  キーの色のアルファをその共有のパレットの上で 0 にする。サーフェス自身が変わってしまい、キーを
+  外した後も、転送するとその色が消える。3.4.2 はパレットを写していて、こうならない
+- **D-61**、`SDL_SetTexturePalette`: 積んだ描画を吐き出すのは、前のパレットの参照が 0 になるとき
+  だけ。前のパレットを別のテクスチャが共有していると、パレットを替える前に積んだ描画まで新しい
+  パレットの色で描かれる（赤が青になった）
 
 もう 1 件は種類が違う。**D-53**: SDL はスワップ間隔を「現在の OpenGL コンテキストの」
 ものとして説明しているが、値はビデオの装置全体で 1 つしか持たず、コンテキストを
