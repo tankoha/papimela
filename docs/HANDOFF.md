@@ -1,21 +1,22 @@
 # 引き継ぎ資料
 
-新しいセッションは、`CLAUDE.md` の次にこれを読む。最終更新: 2026-10-14（§3 の 3c YUV のコミットと同時）。
+新しいセッションは、`CLAUDE.md` の次にこれを読む。最終更新: 2026-10-14（オーディオの 1 段目の前半、音声の変換のコミットと同時）。
 
 > **2026-10-14 の手元のセッションで**: §3 の 3b（パレット、INDEX8）と 3c（YUV。YV12 / IYUV / NV12 / NV21 / YUY2 / UYVY / YVYU）を
 > 済ませ、テクスチャの種類（§3 の 1）は終わった。README の上流の不具合に D-58〜D-61 を載せた（持ち主の判断）。SDL の不具合を
 > 4 つ見つけた（D-60〜D-63）。表示サーバ無しの 28 本（1243 件）と T-22（llvmpipe・radeonsi・窓）は全部通る。
-> **手元の対話の確認は残っていない。** 次は §3 の 2（オーディオ）から。
+> 続けてオーディオに入り、1 段目の前半（音声の形式・チャンネル数・並び・音量の変換、#52 の一部）を済ませた（SDL の不具合 D-64・D-65）。
+> 表示サーバ無しの 29 本（1262 件）が全部通る。**手元の対話の確認は残っていない。** 次は §3 の 1 のオーディオの 1 段目の後半（周波数の変換・キュー・ストリーム）から。
 
 ## 1. 今どこにいるか
 
 | 項目 | 状態 |
 |---|---|
 | リポジトリ | https://github.com/tankoha/papimela（公開、Issues 有効）。手元のセッションは `master` に直接 push、クラウドのセッションは指定のブランチへ push して、手元で早送りマージする |
-| CI | 緑。rawpaco 激辛、checkorigin、アンブレラの古さ（`genumbrella.bb --check`）、図の検査、表示サーバ無しのテスト 28 本、Pong の自己検査、GLES2 と ソフトウェアのドライバの画素比較（llvmpipe）。ジョブ 60 分・GLES2 の手順 5 分の時間制限つき |
-| テスト | 表示サーバ無しの 28 本・1243 件はすべて成功（2026-10-14 に手元で `-B` で作り直して全部流した）。手元専用と対話の検査は `docs/TEST-LOG.md` の各行 |
-| 不具合 | 63 件。うち上流 SDL の 15 件は未報告（D-53 は SDL 自身が FIXME で知っている。他の 14 件は報告するかを検討中。方針は `CLAUDE.md`） |
-| 規模 | 手書き 53 ユニット（`src/*.pas`）+ 生成（Wayland プロトコル 21、キーボードの表 2、EGL / GLES2 の定数 2、DebugText の字形 1、アンブレラ 2）。約 4.2 万行 |
+| CI | 緑。rawpaco 激辛、checkorigin、アンブレラの古さ（`genumbrella.bb --check`）、図の検査、表示サーバ無しのテスト 29 本、Pong の自己検査、GLES2 と ソフトウェアのドライバの画素比較（llvmpipe）。ジョブ 60 分・GLES2 の手順 5 分の時間制限つき |
+| テスト | 表示サーバ無しの 29 本・1262 件はすべて成功（2026-10-14 に手元で `-B` で作り直して全部流した）。手元専用と対話の検査は `docs/TEST-LOG.md` の各行 |
+| 不具合 | 65 件。うち上流 SDL の 17 件は未報告（D-53 は SDL 自身が FIXME で知っている。他の 16 件は報告するかを検討中。方針は `CLAUDE.md`） |
+| 規模 | 手書き 54 ユニット（`src/*.pas`）+ 生成（Wayland プロトコル 21、キーボードの表 2、EGL / GLES2 の定数 2、DebugText の字形 1、音声のチャンネル数の変換 1、アンブレラ 2）。約 4.2 万行 |
 
 ### 動いているもの
 
@@ -83,7 +84,17 @@ D-62（YUV から RGB のスカラー版が範囲の外の値を回り込ませ�
 
 持ち主の決めた順（2026-10-12）: ヒントを使う側 → テクスチャの種類 → オーディオ。ヒントを使う側は 2026-10-13、テクスチャの種類は 2026-10-13〜14 に済んだ（下）。
 
-1. **オーディオ（#51 以降）**: 次はこれ。大きな段階。PipeWire から。設計書第 11 章の #51〜 の行と、`reference/SDL/src/audio/` を読むところから
+1. **オーディオ（#51 以降）**: 進行中。PipeWire（#56）は中核（#51）・変換（#52）・キュー（#53）・Dummy（#55）の上に乗るので、依存の順に 3 段で進める:
+   - **1 段目（表示サーバも音の装置も要らない。CI で検査できる）**: 前半の**音声の形式・チャンネル数・並び・音量の変換は済んだ**
+     （`PaPiMeLa.Audio.Convert`、T-50。2026-10-14）。**次は後半**: 周波数の変換（`SDL_audioresample.c`、#52 の残り。係数の表は
+     生成器で）、キュー（`SDL_audioqueue.c`、#53）、`TPMLAudioStream`（`SDL_audiocvt.c` の後半。設計 §4.5）と
+     `PMLConvertAudioSamples`。期待値は T-50 と同じく、参照版の SDL のストリームの出力の FNV-1a を定数表にする
+   - **2 段目**: 中核（`SDL_audio.c`、#51。物理・論理デバイス、デバイススレッド、bind、混ぜる、hotplug のイベント）と Dummy（#55）。
+     Dummy で表示サーバ無しに検査する
+   - **3 段目**: PipeWire（`audio/pipewire/SDL_pipewire.c`、#56）。ヘッダの翻訳は C の sizeof / offsetof を実測して合わせる、
+     SPA の pod の組み立て（SDL はインラインの関数を使う）を写す、`pw_thread_loop` とデバイススレッド、hotplug。
+     手元の実機（PipeWire 1.6.2）で鳴らす対話の検査を作る
+   - 浮動小数の変換は、範囲の外の値で SDL の SSE2 版とスカラー版の結果が割れる（D-64・D-65）。期待値の入力は範囲の中に置く
 2. 残してあるテクスチャのもの: テクスチャの Lock / Unlock（`SDL_LockTexture`。Streaming のテクスチャ。YUV は SDL_SW_LockYUVTexture）、
    I444 / P010 などの YUV、サーフェスから作るときのカラーキー（INDEX8 のほかは見ていない）、ソフトウェアのレンダラの Linear が
    実は Nearest（`PMLBlitScaled` が方式を使わない。SDL は補間する）
@@ -134,7 +145,7 @@ Pong もすべて書き換え、今は `uses SysUtils, Math, PaPiMeLa` だけで
 表示サーバ無しで通るもの（CI と同じ）:
 
 ```bash
-for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_render_transform test_render_target test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_drop test_drag_source test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds; do
+for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_render_transform test_render_target test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_drop test_drag_source test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds test_audio_convert; do
   fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/$t test/$t.pas && ./test/$t
 done
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -oexamples/pong examples/pong.pas && ./examples/pong --selftest
@@ -160,7 +171,7 @@ env -u WAYLAND_DISPLAY LIBGL_ALWAYS_SOFTWARE=1 ./test/test_render_gles2   # Mesa
 cd papimela && mkdir -p lib
 B='fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib'
 # 0. 表示サーバ無しの分（CI と同じ。手元の新しい Mesa でも通るか）
-for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds; do
+for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds test_audio_convert; do
   $B -otest/$t test/$t.pas && ./test/$t | tail -1
 done
 # 1. 実機の Wayland（自動判定。最後の行が「結論」で終わればよい）

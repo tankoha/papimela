@@ -17,6 +17,7 @@
 //   PaPiMeLa.Video
 //   PaPiMeLa.Clipboard
 //   PaPiMeLa.Render
+//   PaPiMeLa.Audio.Convert
 //   PaPiMeLa.TextInput
 //   PaPiMeLa.Time
 //   PaPiMeLa.Atomic
@@ -672,6 +673,71 @@ const
   PML_DEBUG_TEXT_FONT_CHARACTER_SIZE = PaPiMeLa.Render.PML_DEBUG_TEXT_FONT_CHARACTER_SIZE;
 function PMLSameDrawState(const A, B: TPMLRenderCommand): Boolean; inline;
 function PMLRenderDriverNames: TStringArray; inline;
+
+// ---- PaPiMeLa.Audio.Convert
+type
+  TPMLAudioFormat = PaPiMeLa.Audio.Convert.TPMLAudioFormat;
+  TPMLAudioSpec = PaPiMeLa.Audio.Convert.TPMLAudioSpec;
+  TPMLChannelMap = PaPiMeLa.Audio.Convert.TPMLChannelMap;
+  TPMLChannelConverter = PaPiMeLa.Audio.Convert.TPMLChannelConverter;
+const
+  PML_AUDIO_MASK_BITSIZE = PaPiMeLa.Audio.Convert.PML_AUDIO_MASK_BITSIZE;
+  PML_AUDIO_MASK_FLOAT = PaPiMeLa.Audio.Convert.PML_AUDIO_MASK_FLOAT;
+  PML_AUDIO_MASK_BIG_ENDIAN = PaPiMeLa.Audio.Convert.PML_AUDIO_MASK_BIG_ENDIAN;
+  PML_AUDIO_MASK_SIGNED = PaPiMeLa.Audio.Convert.PML_AUDIO_MASK_SIGNED;
+  PML_AUDIO_UNKNOWN = PaPiMeLa.Audio.Convert.PML_AUDIO_UNKNOWN;
+  PML_AUDIO_U8 = PaPiMeLa.Audio.Convert.PML_AUDIO_U8;
+  PML_AUDIO_S8 = PaPiMeLa.Audio.Convert.PML_AUDIO_S8;
+  PML_AUDIO_S16LE = PaPiMeLa.Audio.Convert.PML_AUDIO_S16LE;
+  PML_AUDIO_S16BE = PaPiMeLa.Audio.Convert.PML_AUDIO_S16BE;
+  PML_AUDIO_S32LE = PaPiMeLa.Audio.Convert.PML_AUDIO_S32LE;
+  PML_AUDIO_S32BE = PaPiMeLa.Audio.Convert.PML_AUDIO_S32BE;
+  PML_AUDIO_F32LE = PaPiMeLa.Audio.Convert.PML_AUDIO_F32LE;
+  PML_AUDIO_F32BE = PaPiMeLa.Audio.Convert.PML_AUDIO_F32BE;
+  PML_AUDIO_S16 = PaPiMeLa.Audio.Convert.PML_AUDIO_S16;
+  PML_AUDIO_S32 = PaPiMeLa.Audio.Convert.PML_AUDIO_S32;
+  PML_AUDIO_F32 = PaPiMeLa.Audio.Convert.PML_AUDIO_F32;
+  PML_MAX_CHANNEL_MAP_CHANNELS = PaPiMeLa.Audio.Convert.PML_MAX_CHANNEL_MAP_CHANNELS;
+function PMLAudioBitSize(AFormat: TPMLAudioFormat): Integer; inline;
+function PMLAudioByteSize(AFormat: TPMLAudioFormat): Integer; inline;
+function PMLAudioIsFloat(AFormat: TPMLAudioFormat): Boolean; inline;
+function PMLAudioIsBigEndian(AFormat: TPMLAudioFormat): Boolean; inline;
+function PMLAudioIsSigned(AFormat: TPMLAudioFormat): Boolean; inline;
+function PMLIsSupportedAudioFormat(AFormat: TPMLAudioFormat): Boolean; inline;
+function PMLIsSupportedChannelCount(AChannels: Integer): Boolean; inline;
+function PMLAudioFormatName(AFormat: TPMLAudioFormat): String; inline;
+function PMLAudioSilenceValue(AFormat: TPMLAudioFormat): Byte; inline;
+function PMLChannelMapIsBogus(const AMap: TPMLChannelMap; AChannels: Integer): Boolean; inline;
+function PMLChannelMapIsDefault(const AMap: TPMLChannelMap; AChannels: Integer): Boolean; inline;
+function PMLChannelMapsEqual(AChannels: Integer; const A, B: TPMLChannelMap): Boolean; inline;
+procedure PMLConvertAudioToFloat(
+  ADst: PSingle;
+  ASrc: Pointer;
+  ANumSamples: Integer;
+  ASrcFormat: TPMLAudioFormat); inline;
+procedure PMLConvertAudioFromFloat(
+  ADst: Pointer;
+  ASrc: PSingle;
+  ANumSamples: Integer;
+  ADstFormat: TPMLAudioFormat); inline;
+procedure PMLConvertAudioSwapEndian(ADst, ASrc: Pointer; ANumSamples, ABitSize: Integer); inline;
+procedure PMLConvertAudio(
+  ANumFrames: Integer;
+  ASrc: Pointer;
+  ASrcFormat: TPMLAudioFormat;
+  ASrcChannels: Integer;
+  const ASrcMap: TPMLChannelMap;
+  ADst: Pointer;
+  ADstFormat: TPMLAudioFormat;
+  ADstChannels: Integer;
+  const ADstMap: TPMLChannelMap;
+  AScratch: Pointer;
+  AGain: Single); inline;
+function PMLAudioMaxFrameSize(
+  ASrcFormat: TPMLAudioFormat;
+  ASrcChannels: Integer;
+  ADstFormat: TPMLAudioFormat;
+  ADstChannels: Integer): Integer; inline;
 
 // ---- PaPiMeLa.TextInput
 type

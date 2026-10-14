@@ -63,6 +63,7 @@ uses
   PaPiMeLa.Log,
   PaPiMeLa.Video.Backend,
   PaPiMeLa.Render,
+  PaPiMeLa.Audio.Convert,
   PaPiMeLa.TextInput,
   PaPiMeLa.TextInput.Backend,
   PaPiMeLa.Time,

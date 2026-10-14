@@ -53,6 +53,7 @@
    {:unit "PaPiMeLa.Video"}
    {:unit "PaPiMeLa.Clipboard"}
    {:unit "PaPiMeLa.Render"}
+   {:unit "PaPiMeLa.Audio.Convert"}
    {:unit "PaPiMeLa.TextInput"}
    {:unit "PaPiMeLa.Time"}
    {:unit "PaPiMeLa.Atomic"}
