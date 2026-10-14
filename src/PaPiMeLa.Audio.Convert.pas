@@ -7,7 +7,9 @@
            チャンネルの並び（channel map）の判定、標本の型の変換（スカラー版のビット操作）、
            バイト順の入れ替え、チャンネル数の変換（56 個。src/generated/audio_channel_converters.inc。
            tools/genchannelconv.bb が生成）、並びの入れ替え（SwizzleAudio）、
-           それらをつなぐ ConvertAudio（周波数の変換は含まない）。
+           それらをつなぐ ConvertAudio（周波数の変換は含まない）、周波数の変換（SDL_audioresample.c の
+           スカラー版の 1 フレームの計算と 32.32 の位置の計算。係数の表は
+           src/generated/audio_resampler_filter.inc。tools/genresampler.bb が SDL のコードを C で動かして作る）。
            SDL revision: see docs/ORIGIN.md
   Design : docs/DESIGN.md §4.5、§11 #52
 
@@ -16,8 +18,8 @@
     チャンネルの並びの間で変換する。途中は 32 ビットの浮動小数を通る（SDL と同じ）。
 
   WHY:
-    SDL_AudioStream と、デバイスへ混ぜる処理の土台。周波数の変換（リサンプル）は
-    ストリームが受け持つ（#52 の残り、§3 のオーディオの 1 段目の後半）。
+    SDL_AudioStream と、デバイスへ混ぜる処理の土台。周波数の変換の部品もここに置き、
+    ストリーム（PaPiMeLa.Audio.Stream）が使う。
 
   RESOLVED:
     - スカラー版だけ（設計 §9.5）。SDL は x86 で SSE2 などの版を使うが、範囲の中の値では
@@ -32,7 +34,7 @@
     papimela はスカラー版どおり飽和させる。
 
   NOT RESOLVED:
-    - 周波数の変換と SDL_AudioStream は別（§3 のオーディオの 1 段目の後半）
+    - SDL_AudioStream は PaPiMeLa.Audio.Stream、キューは PaPiMeLa.Audio.Queue
 
   Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
   Copyright (C) 2026 papimela contributors
@@ -138,12 +140,30 @@ procedure PMLConvertAudio(ANumFrames: Integer;
 function PMLAudioMaxFrameSize(ASrcFormat: TPMLAudioFormat; ASrcChannels: Integer;
   ADstFormat: TPMLAudioFormat; ADstChannels: Integer): Integer;
 
+// ---- 周波数の変換（SDL_audioresample.c）。位置は 32.32 の固定小数点。
+// 変換の速さ（入力の 1 フレームが出力の何フレームか、の逆を 2^32 倍したもの。切り上げ）。
+function PMLGetResampleRate(ASrcRate, ADstRate: Integer): Int64;
+// 前の入力を何フレーム残しておくか（RESAMPLER_MAX_PADDING_FRAMES = 7）。
+function PMLResamplerHistoryFrames: Integer;
+// ARate で変換するとき、入力の前後に要る余白のフレーム数（0 なら変換しない）。
+function PMLResamplerPaddingFrames(ARate: Int64): Integer;
+// AOutputFrames を出すのに要る入力のフレーム数。
+function PMLResamplerInputFrames(AOutputFrames, ARate, AOffset: Int64): Int64;
+// AInputFrames から出せる出力のフレーム数。AOffset を進める。
+function PMLResamplerOutputFrames(AInputFrames, ARate: Int64; var AOffset: Int64): Int64;
+{ 変換する（SDL_ResampleAudio）。ASrc の前と、ASrc + AInFrames の後ろに
+  PMLResamplerPaddingFrames(ARate) フレームの余白があること。AInFrames は
+  PMLResamplerInputFrames(AOutFrames, ...) 以上。浮動小数のチャンネルを交互に並べたもの。 }
+procedure PMLResampleAudio(AChannels: Integer; ASrc: PSingle; AInFrames: Integer;
+  ADst: PSingle; AOutFrames: Integer; ARate: Int64; var AOffset: Int64);
+
 implementation
 
 uses
   Math;
 
 {$I generated/audio_channel_converters.inc}
+{$I generated/audio_resampler_filter.inc}
 
 { ---- 形式（SDL_audio.h の SDL_AUDIO_xxx） ---- }
 
@@ -641,6 +661,200 @@ function PMLAudioMaxFrameSize(ASrcFormat: TPMLAudioFormat; ASrcChannels: Integer
 begin
   Result := Max(Max(PMLAudioByteSize(ASrcFormat), PMLAudioByteSize(ADstFormat)), SizeOf(Single))
     * Max(ASrcChannels, ADstChannels);
+end;
+
+{ ---- 周波数の変換（SDL_audioresample.c） ----
+
+  帯域を制限した補間（https://ccrma.stanford.edu/~jos/resample/）。係数の表は
+  src/generated/audio_resampler_filter.inc（SDL のコードを C で動かして作った値）。
+
+  PORT-NOTE: SDL は SSE か NEON の組み込み関数を持つ版で零交差を 6、持たない版で 5 にし、
+  x86 では 1 フレームの計算を SSE で行う（足し算の順番がスカラー版と違う）。papimela は零交差 6 の
+  表と、SDL のスカラー版の計算（ResampleFrame_Mono / Stereo / Generic）を使う。SDL の SIMD を
+  切ったときと同じ値になる（docs/TEST-LOG.md の使い捨て検証）。 }
+
+const
+  ResamplerZeroCrossings  = 6;
+  ResamplerSamplesPerFrame = ResamplerZeroCrossings * 2;
+  ResamplerMaxPaddingFrames = ResamplerZeroCrossings + 1;
+  ResamplerBitsPerZeroCrossing = 3;
+  ResamplerFilterInterpBits = 32 - ResamplerBitsPerZeroCrossing;
+  ResamplerFilterInterpRange = LongWord(1) shl ResamplerFilterInterpBits;
+  // 1 / 2^29（2 の冪なので Single で割り切れる）
+  ResamplerFilterInterpScale: Single = 1.0 / 536870912.0;
+
+type
+  TCubic = array[0..3] of Single;
+  PCubic = ^TCubic;
+
+function FilterAt(AIndex: LongWord): PCubic; inline;
+begin
+  Result := PCubic(@ResamplerFilterBits[AIndex, 0, 0]);
+end;
+
+{ ResampleFrame_Generic: 係数を 3 次式で補間し、入力に掛けて足す。 }
+procedure ResampleFrameGeneric(ASrc, ADst: PSingle; AFilter: PCubic; AFrac: Single; AChans: Integer);
+var
+  Frac2, Frac3, OutV: Single;
+  Scales: array[0..ResamplerSamplesPerFrame - 1] of Single;
+  I, Chan: Integer;
+begin
+  Frac2 := AFrac * AFrac;
+  Frac3 := AFrac * Frac2;
+  for I := 0 to ResamplerSamplesPerFrame - 1 do
+  begin
+    Scales[I] := AFilter^[0] + (AFilter^[1] * AFrac) + (AFilter^[2] * Frac2) + (AFilter^[3] * Frac3);
+    Inc(AFilter);
+  end;
+  for Chan := 0 to AChans - 1 do
+  begin
+    OutV := 0;
+    for I := 0 to ResamplerSamplesPerFrame - 1 do
+      OutV := OutV + (ASrc[I * AChans + Chan] * Scales[I]);
+    ADst[Chan] := OutV;
+  end;
+end;
+
+{ ResampleFrame_Mono。 }
+procedure ResampleFrameMono(ASrc, ADst: PSingle; AFilter: PCubic; AFrac: Single);
+var
+  Frac2, Frac3, Scale, OutV: Single;
+  I: Integer;
+begin
+  Frac2 := AFrac * AFrac;
+  Frac3 := AFrac * Frac2;
+  OutV := 0;
+  for I := 0 to ResamplerSamplesPerFrame - 1 do
+  begin
+    Scale := AFilter^[0] + (AFilter^[1] * AFrac) + (AFilter^[2] * Frac2) + (AFilter^[3] * Frac3);
+    OutV := OutV + (ASrc[I] * Scale);
+    Inc(AFilter);
+  end;
+  ADst[0] := OutV;
+end;
+
+{ ResampleFrame_Stereo。 }
+procedure ResampleFrameStereo(ASrc, ADst: PSingle; AFilter: PCubic; AFrac: Single);
+var
+  Frac2, Frac3, Scale, Out0, Out1: Single;
+  I: Integer;
+begin
+  Frac2 := AFrac * AFrac;
+  Frac3 := AFrac * Frac2;
+  Out0 := 0;
+  Out1 := 0;
+  for I := 0 to ResamplerSamplesPerFrame - 1 do
+  begin
+    Scale := AFilter^[0] + (AFilter^[1] * AFrac) + (AFilter^[2] * Frac2) + (AFilter^[3] * Frac3);
+    Out0 := Out0 + (ASrc[I * 2] * Scale);
+    Out1 := Out1 + (ASrc[I * 2 + 1] * Scale);
+    Inc(AFilter);
+  end;
+  ADst[0] := Out0;
+  ADst[1] := Out1;
+end;
+
+{ SDL_GetResampleRate。dst = src * dst_rate / src_rate に合わせるため、速さは切り上げる。 }
+function PMLGetResampleRate(ASrcRate, ADstRate: Integer): Int64;
+var
+  Numerator: Int64;
+begin
+  Numerator := Int64(ASrcRate) shl 32;
+  Result := ((Numerator - 1) div ADstRate) + 1;
+end;
+
+function PMLResamplerHistoryFrames: Integer;
+begin
+  Result := ResamplerMaxPaddingFrames;
+end;
+
+function PMLResamplerPaddingFrames(ARate: Int64): Integer;
+begin
+  if ARate <> 0 then
+    Result := ResamplerMaxPaddingFrames
+  else
+    Result := 0;
+end;
+
+{ ResamplerAdd / ResamplerMul: 溢れるなら False（汎用ではない。SDL と同じ確かめだけ）。 }
+function ResamplerAdd(A, B: Int64; out AResult: Int64): Boolean; inline;
+begin
+  AResult := 0;
+  if (B > 0) and (A > High(Int64) - B) then
+    Exit(False);
+  AResult := A + B;
+  Result := True;
+end;
+
+function ResamplerMul(A, B: Int64; out AResult: Int64): Boolean; inline;
+begin
+  AResult := 0;
+  if (B > 0) and (A > High(Int64) div B) then
+    Exit(False);
+  AResult := A * B;
+  Result := True;
+end;
+
+{ SDL_GetResamplerInputFrames: 最後の入力のフレームの番号 + 1。
+  ((((output_frames - 1) * rate) + offset) >> 32) + 1 }
+function PMLResamplerInputFrames(AOutputFrames, ARate, AOffset: Int64): Int64;
+var
+  OutputOffset: Int64;
+begin
+  if not (ResamplerMul(AOutputFrames, ARate, OutputOffset)
+    and ResamplerAdd(OutputOffset, -ARate + AOffset + $100000000, OutputOffset)) then
+    OutputOffset := High(Int64);
+  // SDL と同じく、上の 32 ビットを符号つきの 32 ビットとして読む。
+  Result := LongInt(SarInt64(OutputOffset, 32));
+  if Result < 0 then
+    Result := 0;
+end;
+
+{ SDL_GetResamplerOutputFrames。 }
+function PMLResamplerOutputFrames(AInputFrames, ARate: Int64; var AOffset: Int64): Int64;
+var
+  InputOffset: Int64;
+begin
+  if not (ResamplerMul(AInputFrames, $100000000, InputOffset)
+    and ResamplerAdd(InputOffset, -AOffset, InputOffset)) then
+    InputOffset := High(Int64);
+  if InputOffset > 0 then
+    Result := ((InputOffset - 1) div ARate) + 1
+  else
+    Result := 0;
+  AOffset := (Result * ARate) - InputOffset;
+end;
+
+{ SDL_ResampleAudio。 }
+procedure PMLResampleAudio(AChannels: Integer; ASrc: PSingle; AInFrames: Integer;
+  ADst: PSingle; AOutFrames: Integer; ARate: Int64; var AOffset: Int64);
+var
+  I, SrcIndex: Integer;
+  SrcPos: Int64;
+  SrcFraction: LongWord;
+  Filter: PCubic;
+  Frac: Single;
+  Frame: PSingle;
+begin
+  SrcPos := AOffset;
+  Dec(ASrc, (ResamplerZeroCrossings - 1) * AChannels);
+  for I := 0 to AOutFrames - 1 do
+  begin
+    SrcIndex := LongInt(SarInt64(SrcPos, 32));
+    SrcFraction := LongWord(SrcPos and $FFFFFFFF);
+    SrcPos := SrcPos + ARate;
+    Filter := FilterAt(SrcFraction shr ResamplerFilterInterpBits);
+    Frac := Single(SrcFraction and (ResamplerFilterInterpRange - 1)) * ResamplerFilterInterpScale;
+    Frame := ASrc + PtrInt(SrcIndex) * AChannels;
+    case AChannels of
+      1: ResampleFrameMono(Frame, ADst, Filter, Frac);
+      2: ResampleFrameStereo(Frame, ADst, Filter, Frac);
+    else
+      ResampleFrameGeneric(Frame, ADst, Filter, Frac, AChannels);
+    end;
+    Inc(ADst, AChannels);
+  end;
+  AOffset := SrcPos - (Int64(AInFrames) shl 32);
 end;
 
 end.

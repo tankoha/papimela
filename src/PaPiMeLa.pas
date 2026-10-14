@@ -64,6 +64,8 @@ uses
   PaPiMeLa.Video.Backend,
   PaPiMeLa.Render,
   PaPiMeLa.Audio.Convert,
+  PaPiMeLa.Audio.Queue,
+  PaPiMeLa.Audio.Stream,
   PaPiMeLa.TextInput,
   PaPiMeLa.TextInput.Backend,
   PaPiMeLa.Time,

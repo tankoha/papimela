@@ -18,6 +18,7 @@
 //   PaPiMeLa.Clipboard
 //   PaPiMeLa.Render
 //   PaPiMeLa.Audio.Convert
+//   PaPiMeLa.Audio.Stream
 //   PaPiMeLa.TextInput
 //   PaPiMeLa.Time
 //   PaPiMeLa.Atomic
@@ -738,6 +739,30 @@ function PMLAudioMaxFrameSize(
   ASrcChannels: Integer;
   ADstFormat: TPMLAudioFormat;
   ADstChannels: Integer): Integer; inline;
+function PMLGetResampleRate(ASrcRate, ADstRate: Integer): Int64; inline;
+function PMLResamplerHistoryFrames: Integer; inline;
+function PMLResamplerPaddingFrames(ARate: Int64): Integer; inline;
+function PMLResamplerInputFrames(AOutputFrames, ARate, AOffset: Int64): Int64; inline;
+function PMLResamplerOutputFrames(AInputFrames, ARate: Int64; var AOffset: Int64): Int64; inline;
+procedure PMLResampleAudio(
+  AChannels: Integer;
+  ASrc: PSingle;
+  AInFrames: Integer;
+  ADst: PSingle;
+  AOutFrames: Integer;
+  ARate: Int64;
+  var AOffset: Int64); inline;
+
+// ---- PaPiMeLa.Audio.Stream
+type
+  TPMLAudioStreamCallback = PaPiMeLa.Audio.Stream.TPMLAudioStreamCallback;
+  TPMLAudioStreamDataComplete = PaPiMeLa.Audio.Stream.TPMLAudioStreamDataComplete;
+  TPMLAudioStream = PaPiMeLa.Audio.Stream.TPMLAudioStream;
+function PMLConvertAudioSamples(
+  const ASrcSpec: TPMLAudioSpec;
+  ASrc: Pointer;
+  ALen: Integer;
+  const ADstSpec: TPMLAudioSpec): TBytes; inline;
 
 // ---- PaPiMeLa.TextInput
 type

@@ -66,3 +66,4 @@ test/test_hints
 test/test_thread_realtime
 test/test_texture_kinds
 test/test_audio_convert
+test/test_audio_stream

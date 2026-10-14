@@ -18,6 +18,7 @@
 //   PaPiMeLa.Clipboard
 //   PaPiMeLa.Render
 //   PaPiMeLa.Audio.Convert
+//   PaPiMeLa.Audio.Stream
 //   PaPiMeLa.TextInput
 //   PaPiMeLa.Time
 //   PaPiMeLa.Atomic
@@ -532,6 +533,53 @@ function PMLAudioMaxFrameSize(
   ADstChannels: Integer): Integer;
 begin
   Result := PaPiMeLa.Audio.Convert.PMLAudioMaxFrameSize(ASrcFormat, ASrcChannels, ADstFormat, ADstChannels);
+end;
+
+function PMLGetResampleRate(ASrcRate, ADstRate: Integer): Int64;
+begin
+  Result := PaPiMeLa.Audio.Convert.PMLGetResampleRate(ASrcRate, ADstRate);
+end;
+
+function PMLResamplerHistoryFrames: Integer;
+begin
+  Result := PaPiMeLa.Audio.Convert.PMLResamplerHistoryFrames;
+end;
+
+function PMLResamplerPaddingFrames(ARate: Int64): Integer;
+begin
+  Result := PaPiMeLa.Audio.Convert.PMLResamplerPaddingFrames(ARate);
+end;
+
+function PMLResamplerInputFrames(AOutputFrames, ARate, AOffset: Int64): Int64;
+begin
+  Result := PaPiMeLa.Audio.Convert.PMLResamplerInputFrames(AOutputFrames, ARate, AOffset);
+end;
+
+function PMLResamplerOutputFrames(AInputFrames, ARate: Int64; var AOffset: Int64): Int64;
+begin
+  Result := PaPiMeLa.Audio.Convert.PMLResamplerOutputFrames(AInputFrames, ARate, AOffset);
+end;
+
+procedure PMLResampleAudio(
+  AChannels: Integer;
+  ASrc: PSingle;
+  AInFrames: Integer;
+  ADst: PSingle;
+  AOutFrames: Integer;
+  ARate: Int64;
+  var AOffset: Int64);
+begin
+  PaPiMeLa.Audio.Convert.PMLResampleAudio(AChannels, ASrc, AInFrames, ADst, AOutFrames, ARate, AOffset);
+end;
+
+// ---- PaPiMeLa.Audio.Stream
+function PMLConvertAudioSamples(
+  const ASrcSpec: TPMLAudioSpec;
+  ASrc: Pointer;
+  ALen: Integer;
+  const ADstSpec: TPMLAudioSpec): TBytes;
+begin
+  Result := PaPiMeLa.Audio.Stream.PMLConvertAudioSamples(ASrcSpec, ASrc, ALen, ADstSpec);
 end;
 
 // ---- PaPiMeLa.Time
