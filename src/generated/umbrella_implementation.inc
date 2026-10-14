@@ -19,6 +19,7 @@
 //   PaPiMeLa.Render
 //   PaPiMeLa.Audio.Convert
 //   PaPiMeLa.Audio.Stream
+//   PaPiMeLa.Audio
 //   PaPiMeLa.TextInput
 //   PaPiMeLa.Time
 //   PaPiMeLa.Atomic
@@ -28,6 +29,7 @@
 //   PaPiMeLa.App
 //   PaPiMeLa.Video.Backend
 //   PaPiMeLa.TextInput.Backend
+//   PaPiMeLa.Audio.Backend
 
 // ---- PaPiMeLa.Events
 function PMLEventDescription(const AEvent: TPMLEvent): String;
@@ -582,6 +584,12 @@ begin
   Result := PaPiMeLa.Audio.Stream.PMLConvertAudioSamples(ASrcSpec, ASrc, ALen, ADstSpec);
 end;
 
+// ---- PaPiMeLa.Audio
+procedure PMLMixFloat32Audio(ADst, ASrc: PSingle; ALen: Integer);
+begin
+  PaPiMeLa.Audio.PMLMixFloat32Audio(ADst, ASrc, ALen);
+end;
+
 // ---- PaPiMeLa.Time
 procedure PMLDelay(AMs: LongWord);
 begin
@@ -679,5 +687,11 @@ end;
 function PMLTextInputBackendNames: TStringArray;
 begin
   Result := PaPiMeLa.TextInput.Backend.PMLTextInputBackendNames;
+end;
+
+// ---- PaPiMeLa.Audio.Backend
+function PMLAudioBackendNames: TStringArray;
+begin
+  Result := PaPiMeLa.Audio.Backend.PMLAudioBackendNames;
 end;
 

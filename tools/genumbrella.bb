@@ -22,7 +22,8 @@
 ;;
 ;; 写さないもの:
 ;;   - PMLRegister* と PMLFind*（バックエンドを書く人向け。アンブレラには並べない）
-;;   - Video.Backend と TextInput.Backend は、登録済みの名前を問い合わせる関数だけ
+;;   - Video.Backend と TextInput.Backend は、登録済みの名前を問い合わせる関数だけ。
+;;     Audio.Backend は、それとアプリが使うデバイスの ID の型と既定の印
 ;;
 ;; 読めない構文に当たったら、間違ったものを出さずに止まる（型付き定数、interface 部の
 ;;   var、ジェネリクス、未知のディレクティブ、コンパイラ指令、二重に出る名前）。
@@ -35,7 +36,7 @@
 (def ^:private interface-file (str out-dir "/umbrella_interface.inc"))
 (def ^:private implementation-file (str out-dir "/umbrella_implementation.inc"))
 
-;; 並べるユニットと順序。:only があれば、その名前の関数だけ（型も定数も無し）。
+;; 並べるユニットと順序。:only があれば、その名前の宣言だけ（関数・型・定数）。
 (def ^:private units
   [{:unit "PaPiMeLa.Types"}
    {:unit "PaPiMeLa.Errors"}
@@ -55,6 +56,7 @@
    {:unit "PaPiMeLa.Render"}
    {:unit "PaPiMeLa.Audio.Convert"}
    {:unit "PaPiMeLa.Audio.Stream"}
+   {:unit "PaPiMeLa.Audio"}
    {:unit "PaPiMeLa.TextInput"}
    {:unit "PaPiMeLa.Time"}
    {:unit "PaPiMeLa.Atomic"}
@@ -63,7 +65,10 @@
    {:unit "PaPiMeLa.Log"}
    {:unit "PaPiMeLa.App"}
    {:unit "PaPiMeLa.Video.Backend" :only #{"PMLVideoBackendNames"}}
-   {:unit "PaPiMeLa.TextInput.Backend" :only #{"PMLTextInputBackendNames"}}])
+   {:unit "PaPiMeLa.TextInput.Backend" :only #{"PMLTextInputBackendNames"}}
+   {:unit "PaPiMeLa.Audio.Backend" :only #{"PMLAudioBackendNames" "TPMLAudioDeviceID" "TPMLAudioDeviceIDs"
+                                           "PML_AUDIO_DEVICE_DEFAULT_PLAYBACK"
+                                           "PML_AUDIO_DEVICE_DEFAULT_RECORDING"}}])
 
 (def ^:private excluded-prefixes ["pmlregister" "pmlfind"])
 
@@ -400,9 +405,9 @@
 (defn- select-decls [{:keys [unit only]} decls]
   (let [decls (remove excluded? decls)]
     (if only
-      (let [picked (filter #(and (= :routine (:kind %)) (contains? only (:name %))) decls)]
+      (let [picked (filter #(contains? only (:name %)) decls)]
         (when (not= (count picked) (count only))
-          (fail unit ": 並べる関数 " (pr-str only) " のうち見つかったのは "
+          (fail unit ": 並べる宣言 " (pr-str only) " のうち見つかったのは "
                 (pr-str (map :name picked))))
         picked)
       decls)))

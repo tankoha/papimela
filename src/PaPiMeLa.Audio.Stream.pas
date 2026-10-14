@@ -26,9 +26,15 @@
       nil で埋め、多ければ無視する）。入力が 1 チャンネルで nil の置き場は、SDL と同じく誤り
     - CheckAudioStreamIsFullySetup は要らない（作るときに両方の形式を持つ）
 
-  NOT RESOLVED:
-    - デバイスへの結び付け（bind）は 2 段目（#51）。BoundDevice と、結び付いた側の形式を
-      変えさせない規則はそのときに足す
+  RESOLVED:
+    - デバイスへの結び付け（SDL の bound_device・next_binding・prev_binding・simplified）は
+      Binding に置き、PaPiMeLa.Audio だけが書く。結び付けと外しは PaPiMeLa.Audio の
+      TPMLLogicalAudioDevice.BindStreams と TPMLAudioSystem.UnbindStreams
+    - 壊すときの外し（SDL_DestroyAudioStream の中の SDL_UnbindAudioStream と、簡易パスの
+      SDL_CloseAudioDevice）は、PaPiMeLa.Audio が PMLRegisterAudioStreamDestroyHook で置く手続きが行う。
+      このユニットはデバイスの層を知らない
+    - SDL_QuitAudio は残っているストリームを全部壊すが、papimela のストリームはアプリのもの
+      なので壊さない（結び付けが外れるだけ）。OpenDeviceStream で作ったものも同じ
 
   Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
   Copyright (C) 2026 papimela contributors
@@ -61,13 +67,22 @@ type
   { PutDataNoCopy の置き場を使い終えた知らせ（SDL_AudioStreamDataCompleteCallback）。 }
   TPMLAudioStreamDataComplete = TPMLReleaseAudioBufferCallback;
 
+  { デバイスへの結び付け（SDL_AudioStream の bound_device・next_binding・prev_binding・simplified）。
+    PaPiMeLa.Audio だけが書く。書くときはデバイスのロックとストリームのロックの両方を持つ。 }
+  TPMLAudioStreamBinding = record
+    Device    : TObject;            // TPMLLogicalAudioDevice。nil なら結び付いていない
+    Recording : Boolean;            // 結び付いたデバイスが録音か（形式を変えさせない側を決める）
+    Next, Prev: TPMLAudioStream;    // 同じ論理デバイスに結び付いたストリームの連なり
+    Simplified: Boolean;            // OpenDeviceStream で作った。壊すとデバイスを閉じる
+  end;
+
   { 音声のストリーム（SDL_AudioStream）。どのメソッドもスレッド安全（内部でロックする）。
     引数の誤り（形式・チャンネル数・周波数・長さ・並び）は EPMLArgument。 }
   TPMLAudioStream = class(TPMLOwnedObject)
   strict private
     FOnGet: TPMLAudioStreamCallback;
     FOnPut: TPMLAudioStreamCallback;
-    // SDL_AudioStream の中身。bound_device・simplified・全ストリームの連なり・props は 2 段目（デバイス）。
+    // SDL_AudioStream の中身。props は無い。全ストリームの連なりは要らない（RESOLVED）。
     FLock: TPMLMutex;
     FSrcSpec: TPMLAudioSpec;
     FDstSpec: TPMLAudioSpec;
@@ -105,6 +120,9 @@ type
     function  GetOnPut: TPMLAudioStreamCallback;
     procedure SetOnPut(AValue: TPMLAudioStreamCallback);
   public
+    // デバイスへの結び付け。PaPiMeLa.Audio だけが書く（型の説明を参照）。アプリは読まない。
+    Binding: TPMLAudioStreamBinding;
+
     { SDL_CreateAudioStream。形式・チャンネル数（1〜8）・周波数（1 以上）を確かめる。 }
     constructor Create(const ASrcSpec, ADstSpec: TPMLAudioSpec);
     destructor Destroy; override;
@@ -166,7 +184,18 @@ type
     // 設定はロックの下で（SDL_SetAudioStreamGetCallback / PutCallback）。
     property OnGet: TPMLAudioStreamCallback read GetOnGet write SetOnGet;
     property OnPut: TPMLAudioStreamCallback read GetOnPut write SetOnPut;
+
+    { デバイスの層向け（UpdateAudioStreamFormatsPhysical の 1 本分）。結び付いた側
+      （録音なら入力、再生なら出力）の形式と並びをデバイスのものにする。並びは確かめない
+      （チャンネル数が合わない、範囲の外の値があるなら既定の並びにする）。 }
+    procedure SetDeviceSideFormat(const ASpec: TPMLAudioSpec; const ADeviceMap: TPMLChannelMap);
   end;
+
+  // ストリームを壊すときに呼ぶ手続き（デバイスから外す）。
+  TPMLAudioStreamDestroyHook = procedure(AStream: TPMLAudioStream);
+
+{ PaPiMeLa.Audio が initialization で置く。アプリは使わない。 }
+procedure PMLRegisterAudioStreamDestroyHook(AHook: TPMLAudioStreamDestroyHook);
 
 { 一度に変換する（SDL_ConvertAudioSamples）。ストリームを作って、入れて、流し切って、
   全部取り出す。引数の誤りは EPMLArgument。 }
@@ -174,6 +203,14 @@ function PMLConvertAudioSamples(const ASrcSpec: TPMLAudioSpec; ASrc: Pointer; AL
   const ADstSpec: TPMLAudioSpec): TBytes;
 
 implementation
+
+var
+  DestroyHook: TPMLAudioStreamDestroyHook = nil;
+
+procedure PMLRegisterAudioStreamDestroyHook(AHook: TPMLAudioStreamDestroyHook);
+begin
+  DestroyHook := AHook;
+end;
 
 const
   // SDL_PutAudioStreamData: これ以上の入力は、ロックの外で写してからトラックとして足す。
@@ -207,15 +244,16 @@ begin
   FGain := 1.0;
   FQueue := TPMLAudioQueue.Create(8192);
   FLock := TPMLMutex.Create;
-  // OnAudioStreamCreated（全ストリームの連なりへの登録）は 2 段目。
   // 途中で EPMLArgument になると、Destroy が作った分だけ片付ける。
   SetFormat(ASrcSpec, ADstSpec);
 end;
 
 destructor TPMLAudioStream.Destroy;
 begin
-  // SDL_DestroyAudioStream: プロパティの破棄・全ストリームの連なりからの削除・
-  // デバイスからの unbind は 2 段目。
+  // SDL_DestroyAudioStream: デバイスから外す（簡易パスならデバイスを閉じる）。
+  // 作る途中で失敗したとき（FLock が無い）は、まだ結び付いていない。
+  if (FLock <> nil) and Assigned(DestroyHook) then
+    DestroyHook(Self);
   // 写さない入力の置き場の解放の知らせは、キューを壊すときに来る。
   FQueue.Free;
   FQueue := nil;
@@ -304,7 +342,14 @@ begin
 
   FLock.Lock;
   try
-    // 2 段目: デバイスに結び付いている側の形式は黙って変えない（bound_device）。
+    // デバイスに結び付いている側の形式は黙って変えない。
+    if Binding.Device <> nil then
+    begin
+      if Binding.Recording then
+        AChangeSrc := False
+      else
+        AChangeDst := False;
+    end;
     if AChangeSrc then
     begin
       // チャンネル数が変わったら、その側の並びは意味を失う。
@@ -400,6 +445,36 @@ begin
       FSrcMap := NewMap
     else
       FDstMap := NewMap;
+  finally
+    FLock.Unlock;
+  end;
+end;
+
+{ UpdateAudioStreamFormatsPhysical の 1 本分。SDL は SetAudioStreamChannelMap を呼んで
+  失敗を捨てる。ここでは確かめに通らない並びは既定にする（SDL で失敗したときは前の並びが残る。
+  デバイスの並びはバックエンドが作るので、通らないことは無い）。 }
+procedure TPMLAudioStream.SetDeviceSideFormat(const ASpec: TPMLAudioSpec;
+  const ADeviceMap: TPMLChannelMap);
+var
+  NewMap: TPMLChannelMap;
+begin
+  NewMap := nil;
+  if (Length(ADeviceMap) = ASpec.Channels)
+    and not PMLChannelMapIsBogus(ADeviceMap, ASpec.Channels)
+    and not PMLChannelMapIsDefault(ADeviceMap, ASpec.Channels) then
+    NewMap := Copy(ADeviceMap, 0, ASpec.Channels);
+  FLock.Lock;
+  try
+    if Binding.Recording then
+    begin
+      FSrcSpec := ASpec;
+      FSrcMap := NewMap;
+    end
+    else
+    begin
+      FDstSpec := ASpec;
+      FDstMap := NewMap;
+    end;
   finally
     FLock.Unlock;
   end;

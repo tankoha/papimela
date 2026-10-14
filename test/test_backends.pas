@@ -37,6 +37,7 @@ uses
   PaPiMeLa.Core.Base,
   PaPiMeLa.Events,
   PaPiMeLa.Video.Backend,
+  PaPiMeLa.Audio.Backend,
   PaPiMeLa.Video,
   PaPiMeLa.Video.Dummy,
   PaPiMeLa.TextInput,
@@ -113,6 +114,11 @@ begin
     '登録された IME は無い: "' + Joined(PMLTextInputBackendNames) + '"');
   Check(Joined(PMLRenderDriverNames) = 'software',
     'レンダラは software だけ: ' + Joined(PMLRenderDriverNames));
+  // Core は公開層の PaPiMeLa.Audio を uses するが、具象のオーディオバックエンドは引き込まない。
+  Check(not ExeContains(ReverseString('dnekcaBoiduAymmuDLMPT')),
+    'ダミーのオーディオはリンクされていない');
+  Check(Joined(PMLAudioBackendNames) = '',
+    '登録されたオーディオは無い: "' + Joined(PMLAudioBackendNames) + '"');
   WriteLn;
 end;
 

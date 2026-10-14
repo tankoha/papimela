@@ -237,8 +237,8 @@ TPMLContext
  │         └─ TPMLRenderer   （ウィンドウが所有。Renderer は TPMLTexture[] を所有）
  ├─ TPMLAudioSystem
  │    ├─ TPMLAudioBackend（PipeWire 等。1 つだけ選択）
- │    ├─ TPMLAudioDevice[]（物理。バックエンドの hotplug で増減）
- │    │    └─ TPMLLogicalAudioDevice[]（アプリが Open。デバイススレッドを 1 つ持つ）
+ │    ├─ TPMLAudioDevice[]（物理。バックエンドの hotplug で増減。開いている間デバイススレッドを 1 つ持つ。アプリには ID で見せる）
+ │    │    └─ TPMLLogicalAudioDevice[]（アプリが Open。既定として開いたものは既定の変更で別の物理デバイスへ移る）
  │    └─ TPMLAudioStream[]（アプリ所有。論理デバイスに bind される「参照」）
  ├─ TPMLJoystickSystem
  │    ├─ TPMLJoystickBackend[]（Linux evdev、Virtual。複数同時）
@@ -251,7 +251,7 @@ TPMLContext
 規約:
 
 1. **親は子への参照を持ち、子は親への参照（`Owner`）を持つ**。循環参照を許すが、破棄は常に親から始める。子の `Destroy` は親の `RemoveChild(Self)` を呼ぶ。
-2. **アプリが `Free` してよいオブジェクト**は、アプリが `Create` したものだけ（`TPMLWindow`、`TPMLRenderer`、`TPMLTexture`、`TPMLAudioStream`、`TPMLLogicalAudioDevice`、`TPMLGLContext`、`TPMLSurface`、`TPMLJoystick.Open` の戻り）。それ以外（`TPMLDisplay`、`TPMLAudioDevice`（物理）、バックエンド）は所有者だけが破棄する。この区別は 4.1 の基底クラス `TPMLOwnedObject` / `TPMLSystemObject` で型として表す。
+2. **アプリが `Free` してよいオブジェクト**は、アプリが `Create` したものだけ（`TPMLWindow`、`TPMLRenderer`、`TPMLTexture`、`TPMLAudioStream`、`TPMLLogicalAudioDevice`、`TPMLGLContext`、`TPMLSurface`、`TPMLJoystick.Open` の戻り）。それ以外（`TPMLDisplay`、`TPMLAudioDevice`（物理。アプリには ID で見せ、オブジェクトは渡さない）、バックエンド）は所有者だけが破棄する。この区別は 4.1 の基底クラス `TPMLOwnedObject` / `TPMLSystemObject` で型として表す。
 3. **複数の `TPMLContext` を同一プロセスに生成することを禁止しない**（Wayland 接続を 2 本張るのは合法）。ただし初回は 1 つのみをテストする。グローバル状態は「プロセスに 1 つしか存在し得ないもの」（`dlopen` したライブラリのハンドル、シグナルハンドラ）に限り、`PaPiMeLa.Platform.*` の `initialization` 節ではなく、参照カウント付きの明示ロード（`TPMLDynLib.Acquire/Release`）で扱う。
 4. **メインスレッド制約**: `TPMLVideoSystem` と `TPMLWindow` の操作は `Context.MainThreadID` のスレッドからのみ行う。デバッグビルド（`{$ifdef PAPIMELA_DEBUG}`）では違反を `EPMLThreadAffinity` で検出する。他スレッドからは `RunOnMainThread` を使う。
 5. **`finalization` 節で何もしない**。破棄順序はアプリの `Context.Free` に委ねる。
@@ -413,6 +413,8 @@ type
 
 `SDL_AudioDriverImpl` の `bool` フラグ群（`ProvidesOwnCallbackThread`、`HasRecordingSupport`、`OnlyHasDefaultPlaybackDevice` 等）は能力集合に、`void *impl_data` は派生クラスのフィールドに置き換える。`TPMLAudioDeviceHandle` はバックエンド固有のデバイス状態を表す抽象クラス（SDL の `struct SDL_PrivateAudioData`）で、PipeWire なら `pw_stream` を、ALSA なら `snd_pcm_t` を派生クラスが持つ。
 
+**実装（2026-10-14、#51）では次のように変えた。** 上のスケッチの `TPMLAudioDeviceHandle` は置かず、SDL と同じく物理デバイス `TPMLAudioDevice`（`PaPiMeLa.Audio.Backend`）を各メソッドに渡し、バックエンドの状態はその `Hidden: TObject` に持たせる（SDL の `device->hidden`）。メソッドは SDL の 14 個（`DetectDevices`・`OpenDevice`・`ThreadInit`・`ThreadDeinit`・`WaitDevice`・`PlayDevice`・`GetDeviceBuf`・`WaitRecordingDevice`・`RecordDevice`・`FlushRecording`・`CloseDevice`・`FreeDeviceHandle`・`DeinitializeStart`・`Deinitialize`）で、どれも SDL の既定（`SDL_AudioXxx_Default`）を既定の実装に持つ。バックエンドが中核を呼ぶ口（`SDL_AddAudioDevice`・`SDL_AudioDeviceDisconnected`・`SDL_DefaultAudioDeviceChanged`・`SDL_AudioDeviceFormatChanged` など）は抽象クラス `TPMLAudioCore` にまとめ、`PaPiMeLa.Audio` の `TPMLAudioSystem` が実装する（バックエンドの単位が公開層を uses すると循環するため）。SDL が切断のときに差し替える関数（Zombie*）は、デバイスの印 `ZombieFunctions` を中核が見て呼び分ける。
+
 ジョイスティック（`joystick/SDL_sysjoystick.h` の 21 関数ポインタ → `TPMLJoystickBackend`）、レンダラ（`render/SDL_sysrender.h` の 35 関数ポインタ → `TPMLRenderDriver` と `TPMLRenderBackendTexture`）も同じ方針。レンダラでは SDL の「コマンドキュー（`SDL_RenderCommand` の連結リスト）を貯めて `RunCommandQueue` で一括実行する」構造をそのまま移植する。これはドライバ間で共通の最適化であり、捨てる理由がない。
 
 ### 3.6 IME 軸の独立
@@ -535,10 +537,10 @@ type
 
 | クラス | 基底 | 生成 | 主な API |
 |---|---|---|---|
-| `TPMLAudioSystem` | `TPMLSystemObject` | `TPMLContext` | `PlaybackDevices` / `RecordingDevices: TArray<TPMLAudioDevice>`、`DefaultPlayback` / `DefaultRecording: TPMLAudioDevice`、`OpenDevice(ADevice; const ASpec): TPMLLogicalAudioDevice`、`OpenDeviceStream(ADevice; const ASpec; ACallback): TPMLAudioStream`（簡易パス）、`Backend`、`DriverName`、`LoadWAV(AStream: TStream): TPMLWaveData` |
-| `TPMLAudioDevice`（物理） | `TPMLSystemObject` | バックエンドの列挙 / hotplug | `ID`、`Name`、`IsRecording`、`Format: TPMLAudioSpec`、`SampleFrames`、`IsDefault`、`LogicalDevices` |
-| `TPMLLogicalAudioDevice` | `TPMLOwnedObject`（所有者 `TPMLAudioDevice`） | `TPMLAudioSystem.OpenDevice` | `Paused`、`Pause/Resume`、`Gain`、`BindStream(s)`、`UnboundStreams`、`Streams`、`PostmixCallback`、`Physical` |
-| `TPMLAudioStream` | `TPMLOwnedObject`（所有者 nil = アプリ。論理デバイスへの bind は参照） | `TPMLAudioStream.Create(const ASrc, ADst: TPMLAudioSpec)` | `PutData(ABuf; ALen)`、`GetData(ABuf; ALen): Integer`、`Available`、`Queued`、`Flush`、`Clear`、`Gain`、`FrequencyRatio`、`InputChannelMap` / `OutputChannelMap`、`SrcSpec` / `DstSpec`、`Lock/Unlock`、`OnGet` / `OnPut`（`of object`。オーディオスレッドから呼ばれる）、`BoundDevice`、`Pause/Resume`（デバイス側の便宜） |
+| `TPMLAudioSystem` | `TPMLAudioCore`（`TPMLSystemObject`） | `TPMLContext` | `PlaybackDevices` / `RecordingDevices: TPMLAudioDeviceIDs`、`DeviceName(ID)`、`DeviceFormat(ID[, out SampleFrames])`、`DeviceChannelMap(ID)`、`DeviceUniqueID(ID)`、`OpenDevice(ID[; const ASpec]): TPMLLogicalAudioDevice`、`OpenDeviceStream(ID[; const ASpec][; ACallback]): TPMLAudioStream`（簡易パス）、`UnbindStream(s)`、`StreamDevice(AStream)`、`Pause/ResumeStreamDevice`、`StreamDevicePaused`、`BackendName`。`LoadWAV` は #54 |
+| `TPMLAudioDevice`（物理） | `TObject`（`PaPiMeLa.Audio.Backend`。中核とバックエンドだけが触る） | バックエンドの列挙 / hotplug（`TPMLAudioCore.AddDevice`） | アプリには見せない。**ID（`TPMLAudioDeviceID`。SDL と同じ値の作り方）で指す**（持ち主の判断、2026-10-14。hotplug で別のスレッドから消えても、アプリの手に宙に浮いた参照が残らない）。既定の印 `PML_AUDIO_DEVICE_DEFAULT_PLAYBACK` / `RECORDING` |
+| `TPMLLogicalAudioDevice` | `TPMLOwnedObject`（所有者 `TPMLAudioSystem`。既定として開いたものは物理デバイスを移るので、物理デバイスは所有しない） | `TPMLAudioSystem.OpenDevice` | `ID`、`Recording`、`Name`、`Format`、`SampleFrames`、`Paused`、`Pause/Resume`、`Gain`、`BindStream(s)`、`SetPostmixCallback`（`of object`）。`Free` が `SDL_CloseAudioDevice` |
+| `TPMLAudioStream` | `TPMLOwnedObject`（所有者 nil = アプリ。論理デバイスへの bind は参照） | `TPMLAudioStream.Create(const ASrc, ADst: TPMLAudioSpec)` | `PutData(ABuf; ALen)`、`GetData(ABuf; ALen): Integer`、`Available`、`Queued`、`Flush`、`Clear`、`Gain`、`FrequencyRatio`、`InputChannelMap` / `OutputChannelMap`、`SrcSpec` / `DstSpec`、`Lock/Unlock`、`OnGet` / `OnPut`（`of object`。オーディオスレッドから呼ばれる）。結び付いたデバイスとその一時停止は `TPMLAudioSystem` の `StreamDevice` など（SDL の `SDL_GetAudioStreamDevice` など）。系が先に壊れてもストリームは壊れない（結び付けが外れるだけ） |
 | `TPMLAudioSpec` | record | 値 | `Format: TPMLAudioFormat`、`Channels`、`Freq`、`FrameSize` |
 | `TPMLWaveData` | `TPMLOwnedObject` | `LoadWAV` | `Spec`、`Data: TBytes`。v1 の `SDL_free` 問題は消える |
 
@@ -1219,7 +1221,7 @@ wayland-scanner の Pascal 版。C の `wayland-scanner` が生成する `*-clie
 9. **`TPMLEvent` のサイズと管理型フィールドのコスト**（6.2）。**サイズは実測で 72 バイト**（x86_64、管理型 3 個を含む。6.2 の予想 64〜96 の範囲内。`test/test_fcitx_textinput.pas` が毎回報告する）。残る検証は、`nil` の管理型に対する `Finalize` のコストがリングバッファ上書きで無視できることの測定。問題があれば管理型フィールドを 1 つの `TPMLEventPayload` クラス参照（nil が普通）にまとめる。
 10. **`cthreads` の要求方法**（2.5）。実行時判定の確実な方法。
 11. **文字列型**: `String`（`{$H+}` の `AnsiString`、UTF-8 前提）で行く。`UTF8String` との相互変換は暗黙。v1 の Windows コードページ問題は初回スコープ外だが、公開 API の型を後で変えられないので、`{$codepage utf8}` を全ユニットに付けるかを決める必要がある。付けない（Lazarus と同じ）を仮採用。
-12. **`TPMLDisplay` をクラスにした**（4.2）ことによる、hotplug で消えたディスプレイの参照をアプリが保持している場合の扱い。`Connected = False` にしてオブジェクトを `TPMLVideoSystem` が次の `Pump` まで生かす（ジョイスティックと同じ）か、即時 `Free` して `DisplayRemoved` イベントには ID だけ載せるか。後者を仮採用（ジョイスティックはアプリが `Open` するので前者、ディスプレイはアプリが生成しないので後者、という区別）。
+12. **`TPMLDisplay` をクラスにした**（4.2）ことによる、hotplug で消えたディスプレイの参照をアプリが保持している場合の扱い。`Connected = False` にしてオブジェクトを `TPMLVideoSystem` が次の `Pump` まで生かす（ジョイスティックと同じ）か、即時 `Free` して `DisplayRemoved` イベントには ID だけ載せるか。後者を仮採用（ジョイスティックはアプリが `Open` するので前者、ディスプレイはアプリが生成しないので後者、という区別）。オーディオの物理デバイスは、オブジェクトを渡さず ID で指すことにした（持ち主の判断、2026-10-14。§4.5）。
 13. **レンダラ軸で初回に GLES2 だけを実装する**判断。Mesa の全ドライバが GLES2 を提供するので Linux では十分だが、`SDL_render_gles2.c` はシェーダを内蔵しており（YUV 変換含む）、シェーダソースも移植対象になる。OpenGL 3 レンダラ（`SDL_render_gl.c`）を P3 に置く。
 14. **HDR / 色管理**（`SDL_waylandcolor.c`、`color-management-v1`）。P3。`TPMLDisplay.HDRProperties` の型だけ用意する。
 15. **libdecor**（クライアントサイド装飾。GNOME は xdg-decoration を提供しない）。SDL は libdecor を動的ロードして使う。初回は「装飾なし（ボーダーレス相当）」で妥協し、libdecor 結合は P2 とする。ウィンドウの移動・リサイズはアプリが `xdg_toplevel.move` 相当の `TPMLWindow.BeginInteractiveMove/Resize` を呼べるようにする。
@@ -1299,11 +1301,11 @@ wayland-scanner の Pascal 版。C の `wayland-scanner` が生成する `*-clie
 | 48 | `PaPiMeLa.TextInput.IBus` | （`core/linux/SDL_ibus.c` (743) は接続手順の参考のみ。バグあり: 115 行目） | 大 | 16, 46, 47 | P1 | クリーンルーム | **High** | Opus | 7.4。アドレス解決と inotify 追従、`IBusText` の完全解析、`TPMLIBusSegmenter`、非同期 `ProcessKeyEvent`、`SetSurroundingText` / `DeleteSurroundingText`、`SetCursorLocationRelative`、埋め込み候補。**未解決 1〜4 の実機検証を伴う**。**実装済み（Opus、2026-10-06）**: ibus 1.5.29 + ibus-mozc を隔離環境（`tools/ibus-sandbox/`）で動かして実測し、規則 3 を直した。通しの検査は CI でも走る（T-31）。inotify の代わりに切断を見て読み直す。埋め込み候補と ForwardKeyEvent は未実装 |
 | 49 | `PaPiMeLa.TextInput.WaylandTI` | （`SDL_waylandevents.c` の `text_input_*` は参考のみ） | 中 | 14, 46, 47, `Video.Wayland.Types` | P1 | クリーンルーム | **High** | Opus | 7.7。`done` での一括適用順序、`set_surrounding_text` の 4000 バイト切り詰め、`enter` / `leave` によるウィンドウ判定。IBus 直結時は `enable` を送らない。**実装済み（Opus、2026-10-06）**: 受信側の状態を `TPMLTextInputV3State` に分けて表示サーバ無しで検査（T-27）、手順は labwc で確認（T-28）。シートとサーフェスは `IPMLWaylandSeatProvider` で借りる。要求は Pump で 1 回の commit にまとめる |
 | 50 | `PaPiMeLa.TextInput.Fcitx` | （`core/linux/SDL_fcitx.c` (441) は参考のみ） | 中 | 16, 46, 47 | P2 | クリーンルーム | Medium | Sonnet | 7.8。#48 を手本に。`UpdateFormattedPreedit` のフラグ → 文節状態 |
-| 51 | `PaPiMeLa.Audio.Backend`、`PaPiMeLa.Audio`（公開 API） | `audio/SDL_audio.c` (2765)、`SDL_sysaudio.h`、`SDL_audiodev.c` | 大 | 2, 8, 22, 53 | P2 | 移植 | **High** | Opus | 物理/論理デバイス、デバイススレッド、bind、ロック順序、破棄とコールバックの競合、hotplug イベント。全オーディオバックエンドの土台 |
+| 51 | `PaPiMeLa.Audio.Backend`、`PaPiMeLa.Audio`（公開 API） | `audio/SDL_audio.c` (2765)、`SDL_sysaudio.h`、`SDL_audiodev.c` | 大 | 2, 8, 22, 53 | P2 | 移植 | **High** | Opus | 物理/論理デバイス、デバイススレッド、bind、ロック順序、破棄とコールバックの競合、hotplug イベント。全オーディオバックエンドの土台。**実装済み（Opus、2026-10-14、オーディオの 2 段目）**: SDL_audio.c の全体を参照版（main）から写した（`TPMLAudioCore` の口、ID の作り方、参照の数え方、切断の二段階（印 → メインスレッドの後始末）、既定の変更での移動、開き直し、デバイスのスレッド、簡易パス）。受け入れ検査は T-52（dummy でデバイスのスレッドまで動かす）。SDL から外れた箇所: 求めた形式で開く（D-66）、並びの入れ替えの形式と録音の向き（D-67）、bind の重複を断る（D-68）、録音のバイト数（D-69）、録音の置き場を必ず作る（D-70、D-71）、簡易パスのストリームを外さない（D-72）、アプリの呼び出しの例外で論理デバイスを止める（§5.5）。`SDL_MixAudio` は F32 の分だけ（デバイスの中で混ぜる分。`PMLMixFloat32Audio`） |
 | 52 | `PaPiMeLa.Audio.Convert`、`.Audio.Stream` | `SDL_audiocvt.c` (1590)、`SDL_audiotypecvt.c` (986)、`SDL_audio_channel_converters.h` (1068)、`SDL_audioresample.c` (706) | 大 | 3 | P2 | 移植 | Low | qwen | スカラー版のみ。リサンプラの係数表はそのまま。**形式・チャンネル数・並び・音量の変換（ConvertAudio）を実装済み（2026-10-14、オーディオの 1 段目の前半）**: interface・受け入れ検査（T-50）・生成器は Opus。56 個のチャンネル数の変換は `tools/genchannelconv.bb` が SDL の生成済みの C から写す（式の順番まで同じにして単精度の結果をビット単位でそろえる）。標本の変換と ConvertAudio は qwen が 2 回に分けて下書きし、Opus がほぼ書き直した（定数の取り違え、挟みの技の欠落、SIGNMASK の引数、FPC の Swap が 16 ビットずつしか入れ替えないこと、並びの -1 の扱い、ConvertAudio の置き場の選び方）。SDL から外れた箇所: F32 → S32 で絶対値のとても大きい値と無限大を飽和させる（D-65）。**周波数の変換も実装済み（Opus、同日）**: 係数の表は `tools/genresampler.bb` が SDL の `GenerateResamplerFilter` を C で動かして作る（FPC の Sin が glibc の sinf とビット単位で同じ保証が無いため）。零交差は x86 の SDL と同じ 6、1 フレームの計算はスカラー版（SDL の SSE 版とは足し算の順番が違う）。**ストリーム（`.Audio.Stream`、SDL_audiocvt.c の後半）は Sonnet（interface・検査・見直しは Opus）** |
-| 53 | `PaPiMeLa.Audio.Queue`、`.Audio.Mixer` | `SDL_audioqueue.c` (652)、`SDL_mixer.c` (290) | 中 | 8 | P2 | 移植 | Medium | Sonnet | 可変長トラックのキュー、`TPMLRingBuffer<T>` の適用判断。**キュー（`PaPiMeLa.Audio.Queue`）とストリーム（`PaPiMeLa.Audio.Stream`。#52 の行）を実装済み（Sonnet、2026-10-14。interface・受け入れ検査 T-51・見直しは Opus）**: SDL のトラックとチャンクの連なりとメモリのプールをそのまま写した（`TPMLRingBuffer<T>` は使わない）。`.Audio.Mixer`（SDL_MixAudio）は未着手 |
+| 53 | `PaPiMeLa.Audio.Queue`、`.Audio.Mixer` | `SDL_audioqueue.c` (652)、`SDL_mixer.c` (290) | 中 | 8 | P2 | 移植 | Medium | Sonnet | 可変長トラックのキュー、`TPMLRingBuffer<T>` の適用判断。**キュー（`PaPiMeLa.Audio.Queue`）とストリーム（`PaPiMeLa.Audio.Stream`。#52 の行）を実装済み（Sonnet、2026-10-14。interface・受け入れ検査 T-51・見直しは Opus）**: SDL のトラックとチャンクの連なりとメモリのプールをそのまま写した（`TPMLRingBuffer<T>` は使わない）。`.Audio.Mixer`（SDL_MixAudio）は F32 の分だけを `PaPiMeLa.Audio` の `PMLMixFloat32Audio` に置いた（デバイスの中で混ぜる分）。他の形式（mix8 の表など）は未着手 |
 | 54 | `PaPiMeLa.Audio.Wave` | `SDL_wave.c` (2163) | 大 | 64 | P2 | 移植 | Low | qwen | ADPCM / IEEE float / 拡張ヘッダの解析。`TStream` 入力 |
-| 55 | `PaPiMeLa.Audio.Dummy` | `audio/dummy/` (166) | 小 | 51 | P2 | 移植 | Low | qwen | テスト用。#51 の最初の実装例 |
+| 55 | `PaPiMeLa.Audio.Dummy` | `audio/dummy/` (166) | 小 | 51 | P2 | 移植 | Low | qwen | テスト用。#51 の最初の実装例。**実装済み（2026-10-14）**: #51 の抽象を確かめる最初の実装なので、抽象と一緒に Opus が書いた（100 行足らずで、qwen に抽象を説明する方が重い）。求められたときだけ使う（`PAPIMELA_AUDIO_DRIVER=dummy`） |
 | 56 | `PaPiMeLa.Audio.PipeWire` | `audio/pipewire/` (1493) | 中 | 51, 21 | P2 | 移植 | **High** | Opus | `pw_thread_loop` とデバイススレッドの関係、hotplug、`spa_pod` 組み立て |
 | 57 | `PaPiMeLa.Audio.Pulse` | `audio/pulseaudio/` (1156) | 中 | 51, 20 | P2 | 移植 | Medium | Sonnet | `pa_threaded_mainloop` のロック規約、hotplug 購読 |
 | 58 | `PaPiMeLa.Audio.Alsa` | `audio/alsa/` (1708) | 中 | 51, 20 | P2 | 移植 | Medium | Sonnet | `snd_pcm_recover`、デバイス名ヒント列挙、hotplug スレッド |

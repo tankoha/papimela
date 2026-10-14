@@ -19,6 +19,7 @@
 //   PaPiMeLa.Render
 //   PaPiMeLa.Audio.Convert
 //   PaPiMeLa.Audio.Stream
+//   PaPiMeLa.Audio
 //   PaPiMeLa.TextInput
 //   PaPiMeLa.Time
 //   PaPiMeLa.Atomic
@@ -28,6 +29,7 @@
 //   PaPiMeLa.App
 //   PaPiMeLa.Video.Backend
 //   PaPiMeLa.TextInput.Backend
+//   PaPiMeLa.Audio.Backend
 
 // ---- PaPiMeLa.Types
 type
@@ -99,6 +101,7 @@ type
   TPMLDragActions = PaPiMeLa.Events.TPMLDragActions;
   TPMLDragEventData = PaPiMeLa.Events.TPMLDragEventData;
   TPMLClipboardEventData = PaPiMeLa.Events.TPMLClipboardEventData;
+  TPMLAudioDeviceEventData = PaPiMeLa.Events.TPMLAudioDeviceEventData;
   TPMLUserEventData = PaPiMeLa.Events.TPMLUserEventData;
   TPMLEvent = PaPiMeLa.Events.TPMLEvent;
   IPMLEventPumpSource = PaPiMeLa.Events.IPMLEventPumpSource;
@@ -757,12 +760,21 @@ procedure PMLResampleAudio(
 type
   TPMLAudioStreamCallback = PaPiMeLa.Audio.Stream.TPMLAudioStreamCallback;
   TPMLAudioStreamDataComplete = PaPiMeLa.Audio.Stream.TPMLAudioStreamDataComplete;
+  TPMLAudioStreamBinding = PaPiMeLa.Audio.Stream.TPMLAudioStreamBinding;
   TPMLAudioStream = PaPiMeLa.Audio.Stream.TPMLAudioStream;
+  TPMLAudioStreamDestroyHook = PaPiMeLa.Audio.Stream.TPMLAudioStreamDestroyHook;
 function PMLConvertAudioSamples(
   const ASrcSpec: TPMLAudioSpec;
   ASrc: Pointer;
   ALen: Integer;
   const ADstSpec: TPMLAudioSpec): TBytes; inline;
+
+// ---- PaPiMeLa.Audio
+type
+  TPMLAudioPostmixCallback = PaPiMeLa.Audio.TPMLAudioPostmixCallback;
+  TPMLLogicalAudioDevice = PaPiMeLa.Audio.TPMLLogicalAudioDevice;
+  TPMLAudioSystem = PaPiMeLa.Audio.TPMLAudioSystem;
+procedure PMLMixFloat32Audio(ADst, ASrc: PSingle; ALen: Integer); inline;
 
 // ---- PaPiMeLa.TextInput
 type
@@ -848,6 +860,12 @@ const
   PML_HINT_LOGGING = PaPiMeLa.Properties.PML_HINT_LOGGING;
   PML_HINT_VIDEO = PaPiMeLa.Properties.PML_HINT_VIDEO;
   PML_HINT_IME = PaPiMeLa.Properties.PML_HINT_IME;
+  PML_HINT_AUDIO_DRIVER = PaPiMeLa.Properties.PML_HINT_AUDIO_DRIVER;
+  PML_HINT_AUDIO_DEVICE_SAMPLE_FRAMES = PaPiMeLa.Properties.PML_HINT_AUDIO_DEVICE_SAMPLE_FRAMES;
+  PML_HINT_AUDIO_FREQUENCY = PaPiMeLa.Properties.PML_HINT_AUDIO_FREQUENCY;
+  PML_HINT_AUDIO_CHANNELS = PaPiMeLa.Properties.PML_HINT_AUDIO_CHANNELS;
+  PML_HINT_AUDIO_FORMAT = PaPiMeLa.Properties.PML_HINT_AUDIO_FORMAT;
+  PML_HINT_AUDIO_DUMMY_TIMESCALE = PaPiMeLa.Properties.PML_HINT_AUDIO_DUMMY_TIMESCALE;
   PML_HINT_APP_ID = PaPiMeLa.Properties.PML_HINT_APP_ID;
   PML_HINT_KEYCODE_OPTIONS = PaPiMeLa.Properties.PML_HINT_KEYCODE_OPTIONS;
   PML_HINT_RENDER_DRIVER = PaPiMeLa.Properties.PML_HINT_RENDER_DRIVER;
@@ -895,4 +913,13 @@ function PMLVideoBackendNames: TStringArray; inline;
 
 // ---- PaPiMeLa.TextInput.Backend
 function PMLTextInputBackendNames: TStringArray; inline;
+
+// ---- PaPiMeLa.Audio.Backend
+type
+  TPMLAudioDeviceID = PaPiMeLa.Audio.Backend.TPMLAudioDeviceID;
+  TPMLAudioDeviceIDs = PaPiMeLa.Audio.Backend.TPMLAudioDeviceIDs;
+const
+  PML_AUDIO_DEVICE_DEFAULT_PLAYBACK = PaPiMeLa.Audio.Backend.PML_AUDIO_DEVICE_DEFAULT_PLAYBACK;
+  PML_AUDIO_DEVICE_DEFAULT_RECORDING = PaPiMeLa.Audio.Backend.PML_AUDIO_DEVICE_DEFAULT_RECORDING;
+function PMLAudioBackendNames: TStringArray; inline;
 

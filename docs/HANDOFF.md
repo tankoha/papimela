@@ -1,23 +1,25 @@
 # 引き継ぎ資料
 
-新しいセッションは、`CLAUDE.md` の次にこれを読む。最終更新: 2026-10-14（オーディオの 1 段目の後半、ストリームのコミットと同時）。
+新しいセッションは、`CLAUDE.md` の次にこれを読む。最終更新: 2026-10-14（オーディオの 2 段目、中核と dummy のコミットと同時）。
 
 > **2026-10-14 の手元のセッションで**: §3 の 3b（パレット、INDEX8）と 3c（YUV。YV12 / IYUV / NV12 / NV21 / YUY2 / UYVY / YVYU）を
 > 済ませ、テクスチャの種類（§3 の 1）は終わった。README の上流の不具合に D-58〜D-61 を載せた（持ち主の判断）。SDL の不具合を
 > 4 つ見つけた（D-60〜D-63）。表示サーバ無しの 28 本（1243 件）と T-22（llvmpipe・radeonsi・窓）は全部通る。
 > 続けてオーディオに入り、**1 段目（音声の変換・周波数の変換・キュー・ストリーム。表示サーバも音の装置も要らない）を済ませた**
 > （SDL の不具合 D-64・D-65）。表示サーバ無しの 30 本（1286 件）が全部通る。**手元の対話の確認は残っていない。**
-> 次は §3 の 1 のオーディオの 2 段目（中核 `SDL_audio.c` と Dummy）から。
+> 続けて **2 段目（中核 `SDL_audio.c` と Dummy。物理・論理デバイス、デバイスのスレッド、混ぜる、bind、簡易パス、切断と
+> 既定の変更）を済ませた**（SDL の不具合 D-66〜D-72。どれも dummy で動かして確かめた）。物理デバイスは ID で指す（持ち主の判断）。
+> 表示サーバ無しの 31 本（1392 件）が全部通る。**次は §3 の 1 のオーディオの 3 段目（PipeWire、#56）から。**
 
 ## 1. 今どこにいるか
 
 | 項目 | 状態 |
 |---|---|
 | リポジトリ | https://github.com/tankoha/papimela（公開、Issues 有効）。手元のセッションは `master` に直接 push、クラウドのセッションは指定のブランチへ push して、手元で早送りマージする |
-| CI | 緑。rawpaco 激辛、checkorigin、アンブレラの古さ（`genumbrella.bb --check`）、図の検査、表示サーバ無しのテスト 30 本、Pong の自己検査、GLES2 と ソフトウェアのドライバの画素比較（llvmpipe）。ジョブ 60 分・GLES2 の手順 5 分の時間制限つき |
-| テスト | 表示サーバ無しの 30 本・1286 件はすべて成功（2026-10-14 に手元で `-B` で作り直して全部流した）。手元専用と対話の検査は `docs/TEST-LOG.md` の各行 |
-| 不具合 | 65 件。うち上流 SDL の 17 件は未報告（D-53 は SDL 自身が FIXME で知っている。他の 16 件は報告するかを検討中。方針は `CLAUDE.md`） |
-| 規模 | 手書き 56 ユニット（`src/*.pas`）+ 生成（Wayland プロトコル 21、キーボードの表 2、EGL / GLES2 の定数 2、DebugText の字形 1、音声のチャンネル数の変換と周波数の変換の係数 2、アンブレラ 2）。約 4.2 万行 |
+| CI | 緑。rawpaco 激辛、checkorigin、アンブレラの古さ（`genumbrella.bb --check`）、図の検査、表示サーバ無しのテスト 31 本、Pong の自己検査、GLES2 と ソフトウェアのドライバの画素比較（llvmpipe）。ジョブ 60 分・GLES2 の手順 5 分の時間制限つき |
+| テスト | 表示サーバ無しの 31 本・1392 件はすべて成功（2026-10-14 に手元で作り直して全部流した）。手元専用と対話の検査は `docs/TEST-LOG.md` の各行 |
+| 不具合 | 72 件。うち上流 SDL の 24 件は未報告（D-53 は SDL 自身が FIXME で知っている。他の 23 件は報告するかを検討中。方針は `CLAUDE.md`。README に載せたのは D-58〜D-61 まで） |
+| 規模 | 手書き 59 ユニット（`src/*.pas`）+ 生成（Wayland プロトコル 21、キーボードの表 2、EGL / GLES2 の定数 2、DebugText の字形 1、音声のチャンネル数の変換と周波数の変換の係数 2、アンブレラ 2）。手書きの `src/*.pas` が約 4.0 万行、生成を含めて約 5.5 万行（2026-10-14 に数え直した） |
 
 ### 動いているもの
 
@@ -30,17 +32,18 @@ IME（fcitx5・IBus・text-input-v3。全文節・周辺テキスト・周辺削
 クリップボードとプライマリ選択、ドラッグ＆ドロップ（受信と、こちらから始めるドラッグ。Flatpak 向けの document-portal も）、
 EGL の GL コンテキスト（スワップ間隔はコンテキストごと）、ヘッドレスのダミーのビデオ、待つ API・タイマー・スレッド・不可分操作、
 **ログ（`Ctx.Log`）・ヒント（`Ctx.Hints`、`PAPIMELA_LOGGING` など）・プロパティの表（`TPMLProperties`、`Ctx.Properties`）**、
-バックエンドの登録（`PaPiMeLa.Backends`）、アンブレラ（`uses PaPiMeLa`）、`TPMLApplication`、サンプルの Pong。
+バックエンドの登録（`PaPiMeLa.Backends`）、アンブレラ（`uses PaPiMeLa`）、`TPMLApplication`、サンプルの Pong、
+**オーディオ（`Ctx.Audio`。変換・周波数の変換・ストリーム・デバイス・混ぜる・簡易パス。バックエンドは今は dummy だけ）**。
 
 ### 設計書第 11 章の進み具合
 
 済み（一部を含む）: #1–10、#12–17（#17 の `.GL` は未）、#22、#24（`Events.Keymap`。押下状態は
 `PaPiMeLa.Events` の `TPMLKeyboardState`）、#25 の一部（マウスとタッチの状態機械は `PaPiMeLa.Events`）、
 #26–29、#31–39、#41–43（#41 の残りはテクスチャの Lock）、
-#45、#46、#47、#48、#49、#50、#64、#68（YUV から ARGB8888 への変換だけ）、#70、#71。
+#45、#46、#47、#48、#49、#50、#51、#52、#53（`.Audio.Mixer` は F32 の分だけ）、#55、#64、#68（YUV から ARGB8888 への変換だけ）、#70、#71。
 
 未着手: #11、#18–21、#23、#30、#40、#44、
-#51–63（オーディオ、ジョイスティック、ゲームパッド、ハプティクス）、#65–67、#69。
+#54、#56–63（WAV、オーディオのバックエンド、ジョイスティック、ゲームパッド、ハプティクス）、#65–67、#69。
 
 ## 2. 前のセッション（2026-10-14、手元）でしたこと
 
@@ -52,6 +55,8 @@ EGL の GL コンテキスト（スワップ間隔はコンテキストごと）
 | 色空間（`TPMLColorspace`、SDL と同じ値）、YUV の共通の層（`UpdateYUV` / `UpdateNV`、`CreateTexture` の色空間、肩代わり） | Opus | T-49 に 3c の節（先に書き、空の実装で落ちた。変異 15 通り） |
 | `PaPiMeLa.Surface.YUV`（#68。YUV から ARGB8888 への変換、YUV の平面の置き場。yuv2rgb の BSD 3 条項を `LICENSE` に足した） | qwen が下書き、Opus が直した（直した箇所は DESIGN #68） | T-49 の 3c。SDL の 105 通りの出力と全バイトを突き合わせた（TEST-LOG の使い捨て検証） |
 | GLES2 のドライバの YUV（平面ごとのテクスチャ、行列は SDL の値、シェーダ 6 つ） | Sonnet（依頼文・検査・見直しは Opus） | T-22 に YUV の場面と GPU だけの確かめ 2 件（変異 5 通り） |
+| オーディオの 1 段目: 変換（`PaPiMeLa.Audio.Convert`、#52）、キューとストリーム（`.Audio.Queue`・`.Audio.Stream`、#53・#52） | 変換は qwen の下書きを Opus が直した、キューとストリームは Sonnet（検査・見直しは Opus） | T-50、T-51 |
+| オーディオの 2 段目: 中核（`PaPiMeLa.Audio.Backend`・`PaPiMeLa.Audio`、#51）、dummy（`PaPiMeLa.Audio.Dummy`、#55）、Context の `Audio`・`PreferredAudio`、ヒント 6 つ（`PAPIMELA_AUDIO_DRIVER` など）、イベントの `AudioDevice` | Opus | T-52（106 件。**実装の後に書いた**ので、空の実装の代わりに変異 11 通り）、T-25 にリンクの 2 件 |
 
 見つけた SDL の不具合: D-60（参照版だけ。カラーキーつきの INDEX8 のサーフェスからテクスチャを作ると、サーフェスのパレットが書き換わる。
 3.4.2 では起きない）、D-61（前のパレットを共有するテクスチャがあると、パレットを替える前に積んだ描画まで新しい色になる）、
@@ -60,6 +65,12 @@ D-62（YUV から RGB のスカラー版が範囲の外の値を回り込ませ�
 期待値と不具合は、参照版の SDL を表示サーバ無しで静的に作って測った（`docs/TEST-LOG.md` の使い捨て検証。手元には X11 の
 開発用ヘッダが無いので `-DSDL_X11=OFF -DSDL_WAYLAND=OFF -DSDL_KMSDRM=OFF -DSDL_OPENGL=OFF -DSDL_OPENGLES=OFF` も要る）。
 3.4.2 と比べるときは `git -C reference/SDL fetch --depth 1 origin tag release-3.4.2` でタグを取る（`SDL_render.c` は 489 行違う）。
+
+見つけた SDL の不具合（オーディオの 2 段目）: D-66（参照版だけ。求めた形式を無視して既定の形式で開く）、D-67（並びの入れ替えで
+F32 の置き場をデバイスの形式として扱い、録音ではストリームの並びを 2 度当てる）、D-68（同じストリームを 2 度 bind すると戻らない）、
+D-69（録音で書き換えたバイト数を次の論理デバイスへ持ち越す）、D-70（録音の音量だけで落ちる）、D-71（F32 の録音デバイスで並びを
+入れ替えると落ちる）、D-72（簡易パスのストリームを外そうとした後に壊すと、デバイスが壊れたストリームを読む）。参照版を dummy の
+オーディオ付きで作り直して測った（`-DSDL_AUDIO=ON -DSDL_DUMMYAUDIO=ON`、他のオーディオのバックエンドは切る。3.4.2 はシステムの共有ライブラリ）。
 
 このセッションで分かったこと・やり方:
 
@@ -79,6 +90,12 @@ D-62（YUV から RGB のスカラー版が範囲の外の値を回り込ませ�
 - 新しい検査のプログラムを足したら、`.gitignore` に実行ファイルの名前も足す（`test/test_audio_convert` を一度誤ってコミットした）
 - アンブレラに新しいユニットを足すときは、`tools/genumbrella.bb` の一覧と **`src/PaPiMeLa.pas` の uses の両方**。`--check` は uses を見ない
   （T-26 が落ちて気づく）
+- **SDL のとおりに写した箇所に SDL の不具合が残っていることがある**（D-72 は、写した後に papimela の検査が落ちて気づいた）。
+  写すときに「この行は本当に意図どおりか」を、SDL の説明（ヘッダのコメント）と突き合わせる。D-67 の録音の向きは説明で決めた
+- **オーディオのデバイスの検査は時間に頼る**（dummy は 1 回分の時間だけ寝る）。値を見るときは、止める → 少し待つ → 変える → 捨てる →
+  動かす、の順にして、変える前の回のデータを拾わない。続けて 10 回と、負荷をかけて 8 本並べて流して確かめた
+- 検査がバックエンドの役をして、閉じている物理デバイスに並び（`ChannelMap`）を置くと、dummy では通らない道（並びの入れ替え）も通せる
+- SDL の不具合で止まる・落ちるかもしれない実測は `timeout -s KILL` で（SDL は SIGTERM を Quit のイベントにするので、ただの `timeout` では止まらない）
 - GLES2 の YUV は、補間なしのとき色差を「輝度のテクセル n の n div 2 番」に寄せる（SDL の GPU の経路は奇数の大きさでソフトウェアと
   違う色差を引く。papimela はドライバ間で同じ絵にする。DESIGN #43）
 
@@ -91,14 +108,17 @@ D-62（YUV から RGB のスカラー版が範囲の外の値を回り込ませ�
      キュー（`PaPiMeLa.Audio.Queue`）、ストリーム（`PaPiMeLa.Audio.Stream`。`TPMLAudioStream`、`PMLConvertAudioSamples`。T-51）。
      期待値は参照版の SDL の出力の FNV-1a の定数表。周波数の変換は SDL の SIMD を切った値に合わせる（x86 の SDL は 1 フレームの計算を
      SSE で行い、足し算の順番が違う）。係数の表は `tools/genresampler.bb` が SDL のコードを C で動かして作る
-   - **2 段目が次**: 中核（`SDL_audio.c`、#51）。ストリームの `bound_device`・`simplified`・作成と破棄の知らせ（全ストリームの一覧）は
-     Sonnet が SDL の場所に日本語の注記で残してある。それを埋める形で、デバイスへの結び付け・混ぜる処理（`SDL_mixer.c` の SDL_MixAudio、
-     #53 の `.Audio.Mixer`）・デバイススレッド・hotplug のイベントを足す
-   - 2 段目の範囲: 中核（`SDL_audio.c`、#51。物理・論理デバイス、デバイススレッド、bind、混ぜる、hotplug のイベント）と Dummy（#55）。
-     Dummy で表示サーバ無しに検査する
-   - **3 段目**: PipeWire（`audio/pipewire/SDL_pipewire.c`、#56）。ヘッダの翻訳は C の sizeof / offsetof を実測して合わせる、
+   - **2 段目は済んだ（2026-10-14）**: 中核（`PaPiMeLa.Audio.Backend` の `TPMLAudioBackend` / `TPMLAudioCore` / `TPMLAudioDevice`、
+     `PaPiMeLa.Audio` の `TPMLAudioSystem` / `TPMLLogicalAudioDevice`）と dummy（`PaPiMeLa.Audio.Dummy`。名前で求めたときだけ）。
+     参照版（main）の SDL_audio.c を写した。物理デバイスは ID で指す。T-52。バックエンドが中核を呼ぶ口は `TPMLAudioCore`
+     （`AddDevice`・`DeviceDisconnected`・`DefaultDeviceChanged`・`DeviceFormatChanged` など）、自分でスレッドを持つバックエンドは
+     `PlaybackThreadIterate` などを自分のスレッドから呼ぶ（能力 `ProvidesOwnCallbackThread`）
+   - **3 段目が次**: PipeWire（`audio/pipewire/SDL_pipewire.c`、#56）。ヘッダの翻訳は C の sizeof / offsetof を実測して合わせる、
      SPA の pod の組み立て（SDL はインラインの関数を使う）を写す、`pw_thread_loop` とデバイススレッド、hotplug。
-     手元の実機（PipeWire 1.6.2）で鳴らす対話の検査を作る
+     手元の実機（PipeWire 1.6.2）で鳴らす対話の検査を作る。SDL の PipeWire は `ProvidesOwnCallbackThread`（`pw_thread_loop` の
+     スレッドから `SDL_PlaybackAudioThreadIterate` を呼ぶ）。デバイスの並び（`ChannelMap`）を置くのもここが最初（D-67・D-71 の道を
+     実機で通る）。浮動小数の例外: PipeWire のスレッドから中核を呼ぶ前に例外を止める（中核のスレッドは `MaskFloatExceptions`）
+   - 残り: `SDL_MixAudio` の F32 以外（`.Audio.Mixer`）、WAV（#54）、PulseAudio（#57）・ALSA（#58）
    - 浮動小数の変換は、範囲の外の値で SDL の SSE2 版とスカラー版の結果が割れる（D-64・D-65）。期待値の入力は範囲の中に置く
 2. 残してあるテクスチャのもの: テクスチャの Lock / Unlock（`SDL_LockTexture`。Streaming のテクスチャ。YUV は SDL_SW_LockYUVTexture）、
    I444 / P010 などの YUV、サーフェスから作るときのカラーキー（INDEX8 のほかは見ていない）、ソフトウェアのレンダラの Linear が
@@ -150,7 +170,7 @@ Pong もすべて書き換え、今は `uses SysUtils, Math, PaPiMeLa` だけで
 表示サーバ無しで通るもの（CI と同じ）:
 
 ```bash
-for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_render_transform test_render_target test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_drop test_drag_source test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds test_audio_convert test_audio_stream; do
+for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_render_transform test_render_target test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_drop test_drag_source test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds test_audio_convert test_audio_stream test_audio_device; do
   fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/$t test/$t.pas && ./test/$t
 done
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -oexamples/pong examples/pong.pas && ./examples/pong --selftest
@@ -176,7 +196,7 @@ env -u WAYLAND_DISPLAY LIBGL_ALWAYS_SOFTWARE=1 ./test/test_render_gles2   # Mesa
 cd papimela && mkdir -p lib
 B='fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib'
 # 0. 表示サーバ無しの分（CI と同じ。手元の新しい Mesa でも通るか）
-for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds test_audio_convert test_audio_stream; do
+for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds test_audio_convert test_audio_stream test_audio_device; do
   $B -otest/$t test/$t.pas && ./test/$t | tail -1
 done
 # 1. 実機の Wayland（自動判定。最後の行が「結論」で終わればよい）

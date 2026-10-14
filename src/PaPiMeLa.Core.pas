@@ -24,7 +24,7 @@
       作るときからログを書ける）
 
   NOT RESOLVED:
-    - Audio / Joysticks は未実装のため常に nil。要求されたら EPMLUnsupported を投げる
+    - Joysticks は未実装のため常に nil。要求されたら EPMLUnsupported を投げる
 
   Copyright (C) 2026 papimela contributors
   （zlib ライセンス本文は papimela.inc を参照）
@@ -45,6 +45,7 @@ uses
   PaPiMeLa.Events,
   PaPiMeLa.Time,
   PaPiMeLa.Video,
+  PaPiMeLa.Audio,
   PaPiMeLa.TextInput;
 
 type
@@ -91,6 +92,9 @@ type
     // 使用するビデオバックエンドを明示指定する（'wayland'）。ヒント PML_HINT_VIDEO を
     // Override で置く近道（環境変数 PAPIMELA_VIDEO より強い）。空ならヒント。
     PreferredVideo    : String;
+    // 使用するオーディオバックエンドを明示指定する（'pipewire'、'dummy' など。カンマで区切って
+    // 並べると順に試す）。ヒント PML_HINT_AUDIO_DRIVER を Override で置く近道。空ならヒント。
+    PreferredAudio    : String;
     // イベントキューの容量（イベント数）。1 以上。
     EventQueueCapacity: Integer;
     // ヒント PAPIMELA_LOGGING で決まらなかったカテゴリの優先度（TPMLLog.Create の
@@ -111,6 +115,7 @@ type
     FEvents    : TPMLEventQueue;
     FTimer     : TPMLTimerService;
     FVideo     : TPMLVideoSystem;
+    FAudio     : TPMLAudioSystem;
     FTextInput : TPMLTextInputSystem;
     FSubsystems: TPMLSubsystems;
     FQuitSignals: Boolean;   // PMLInstallQuitSignals を呼んだ（Destroy で取り消す）
@@ -130,6 +135,7 @@ type
     property Events    : TPMLEventQueue      read FEvents;
     property Timer     : TPMLTimerService    read FTimer;
     property Video     : TPMLVideoSystem     read FVideo;
+    property Audio     : TPMLAudioSystem     read FAudio;
     property TextInput : TPMLTextInputSystem read FTextInput;
     property Subsystems: TPMLSubsystems      read FSubsystems;
   end;
@@ -144,6 +150,7 @@ class procedure TPMLContextOptions.SetDefaults(var AOptions: TPMLContextOptions)
 begin
   AOptions.PreferredTextInput := '';
   AOptions.PreferredVideo := '';
+  AOptions.PreferredAudio := '';
   AOptions.EventQueueCapacity := 256;
   AOptions.MinimumLogLevel := TPMLLogPriority.Info;
 end;
@@ -234,6 +241,8 @@ begin
   FHints.Apply(AOptions.Hints);
   if AOptions.PreferredVideo <> '' then
     FHints.SetHint(PML_HINT_VIDEO, AOptions.PreferredVideo, TPMLHintPriority.Override);
+  if AOptions.PreferredAudio <> '' then
+    FHints.SetHint(PML_HINT_AUDIO_DRIVER, AOptions.PreferredAudio, TPMLHintPriority.Override);
   if AOptions.PreferredTextInput <> '' then
     FHints.SetHint(PML_HINT_IME, AOptions.PreferredTextInput, TPMLHintPriority.Override);
   FProperties := TPMLProperties.Create;
@@ -257,7 +266,10 @@ begin
     FLog.Info(PML_LOG_CATEGORY_VIDEO, 'video backend: ' + FVideo.BackendName);
   end;
   if TPMLSubsystem.Audio in ASubsystems then
-    raise EPMLUnsupported.Create('the Audio subsystem is not implemented yet');
+  begin
+    FAudio := TPMLAudioSystem.Create(Self, Self, FEvents, FHints.GetHint(PML_HINT_AUDIO_DRIVER));
+    FLog.Info(PML_LOG_CATEGORY_AUDIO, 'audio backend: ' + FAudio.BackendName);
+  end;
   if (TPMLSubsystem.Joystick in ASubsystems)
     or (TPMLSubsystem.Gamepad in ASubsystems)
     or (TPMLSubsystem.Haptic in ASubsystems) then
@@ -279,6 +291,7 @@ begin
   if Assigned(FEvents) then
     FEvents.KeyFilter := nil;
   FreeAndNil(FTextInput);
+  FreeAndNil(FAudio);
   FreeAndNil(FVideo);
   FreeAndNil(FTimer);
   FreeAndNil(FEvents);

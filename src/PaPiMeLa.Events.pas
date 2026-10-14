@@ -173,6 +173,13 @@ type
     PrimarySelection: Boolean;   // True = プライマリ選択（中クリックで貼る方）
   end;
 
+  { AudioDeviceAdded / AudioDeviceRemoved / AudioDeviceFormatChanged の付随情報
+    （SDL_AudioDeviceEvent）。Which は物理か論理のデバイスの ID（TPMLAudioDeviceID の値）。 }
+  TPMLAudioDeviceEventData = record
+    Which    : LongWord;
+    Recording: Boolean;        // True = 録音のデバイス
+  end;
+
   TPMLUserEventData = record
     Code        : Int32;
     Data1, Data2: Pointer;
@@ -201,6 +208,7 @@ type
       9: (Clipboard        : TPMLClipboardEventData);
       10: (Drop            : TPMLDropEventData);
       11: (Drag            : TPMLDragEventData);
+      12: (AudioDevice     : TPMLAudioDeviceEventData);
       // Display / JAxis / GAxis / Finger ... は各サブシステム着手時に追加する。
       // 可変部への追加は既存コードに影響しない。
   end;
@@ -1488,6 +1496,13 @@ begin
     begin
       Add('data1', IntToStr(AEvent.Window.Data1));
       Add('data2', IntToStr(AEvent.Window.Data2));
+    end;
+    // SDL_EventLogging の adevice（which と recording）。
+    TPMLEventKind.AudioDeviceAdded, TPMLEventKind.AudioDeviceRemoved,
+    TPMLEventKind.AudioDeviceFormatChanged:
+    begin
+      Add('which', IntToStr(AEvent.AudioDevice.Which));
+      Add('recording', BoolToStr(AEvent.AudioDevice.Recording, True));
     end;
   end;
   Result := GetEnumName(TypeInfo(TPMLEventKind), Ord(AEvent.Kind)) + ' (' + Details + ')';
