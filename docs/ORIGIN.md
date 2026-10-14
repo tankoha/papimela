@@ -34,6 +34,21 @@ git -C reference/SDL checkout 1ce4c5bc2916702e8e0f6df1f612dbd8633011da
 | `tools/wlscan-pas`（Wayland プロトコルの生成） | `wayland-protocols/*.xml` |
 | `tools/checkorigin.bb` | 読まない（設計書第 11 章とソースの見出しだけを突き合わせる） |
 
+## PipeWire のヘッダ（`tools/genpipewire.bb`）
+
+`PaPiMeLa.Platform.PipeWire` は PipeWire 1.6.2 のヘッダ（MIT）のインライン関数を写し、定数と期待値は
+`tools/genpipewire.bb` がヘッダで C を動かして作る（`src/generated/pipewire_consts.inc`、
+`test/pipewire_abi_expected.inc`）。ビルドと CI はヘッダを要らない。作り直すときだけ要る。
+システムに入れずに用意するには、開発用の .deb を落としてスクラッチに展開する:
+
+```bash
+apt-get download libpipewire-0.3-dev libspa-0.2-dev
+dpkg-deb -x libpipewire-0.3-dev_*.deb /tmp/pwroot && dpkg-deb -x libspa-0.2-dev_*.deb /tmp/pwroot
+tools/genpipewire.bb /tmp/pwroot/usr/include
+```
+
+ヘッダの版を上げたら、生成物の差分（構造体の並び・定数）と、写したインライン関数の元の差分を読む。
+
 ## 版を上げるとき
 
 1. `reference/SDL` を新しいコミットへ進め、この表のコミットと日付を書き換える

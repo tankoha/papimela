@@ -64,8 +64,15 @@ const
   PML_HINT_AUDIO_FORMAT    = 'PAPIMELA_AUDIO_FORMAT';
   // dummy の待ち時間に掛ける倍率（SDL_HINT_AUDIO_DUMMY_TIMESCALE）。0 以上の実数。
   PML_HINT_AUDIO_DUMMY_TIMESCALE = 'PAPIMELA_AUDIO_DUMMY_TIMESCALE';
+  // オーディオのストリームのアイコン・名前・役割（SDL_HINT_AUDIO_DEVICE_APP_ICON_NAME / STREAM_NAME /
+  // STREAM_ROLE）。既定は applications-games、アプリの名前、Game。
+  PML_HINT_AUDIO_DEVICE_APP_ICON_NAME = 'PAPIMELA_AUDIO_DEVICE_APP_ICON_NAME';
+  PML_HINT_AUDIO_DEVICE_STREAM_NAME   = 'PAPIMELA_AUDIO_DEVICE_STREAM_NAME';
+  PML_HINT_AUDIO_DEVICE_STREAM_ROLE   = 'PAPIMELA_AUDIO_DEVICE_STREAM_ROLE';
   // アプリの ID（Wayland の app_id など。SDL_HINT_APP_ID）。空なら FLATPAK_ID、無ければ実行ファイルの名前。
   PML_HINT_APP_ID  = 'PAPIMELA_APP_ID';
+  // アプリの名前（SDL_HINT_APP_NAME）。無ければ実行ファイルの名前。PipeWire のストリームの名前などに使う。
+  PML_HINT_APP_NAME = 'PAPIMELA_APP_NAME';
   // キーイベントのキーコードの決め方（SDL_HINT_KEYCODE_OPTIONS）。カンマ区切りで
   // none / hide_numpad / french_numbers / latin_letters。空なら french_numbers,latin_letters。
   PML_HINT_KEYCODE_OPTIONS = 'PAPIMELA_KEYCODE_OPTIONS';

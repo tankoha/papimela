@@ -1,6 +1,6 @@
 # 引き継ぎ資料
 
-新しいセッションは、`CLAUDE.md` の次にこれを読む。最終更新: 2026-10-14（オーディオの 2 段目、中核と dummy のコミットと同時）。
+新しいセッションは、`CLAUDE.md` の次にこれを読む。最終更新: 2026-10-15（オーディオの 3 段目、PipeWire のコミットと同時）。
 
 > **2026-10-14 の手元のセッションで**: §3 の 3b（パレット、INDEX8）と 3c（YUV。YV12 / IYUV / NV12 / NV21 / YUY2 / UYVY / YVYU）を
 > 済ませ、テクスチャの種類（§3 の 1）は終わった。README の上流の不具合に D-58〜D-61 を載せた（持ち主の判断）。SDL の不具合を
@@ -9,17 +9,21 @@
 > （SDL の不具合 D-64・D-65）。表示サーバ無しの 30 本（1286 件）が全部通る。**手元の対話の確認は残っていない。**
 > 続けて **2 段目（中核 `SDL_audio.c` と Dummy。物理・論理デバイス、デバイスのスレッド、混ぜる、bind、簡易パス、切断と
 > 既定の変更）を済ませた**（SDL の不具合 D-66〜D-72。どれも dummy で動かして確かめた）。物理デバイスは ID で指す（持ち主の判断）。
-> 表示サーバ無しの 31 本（1392 件）が全部通る。**次は §3 の 1 のオーディオの 3 段目（PipeWire、#56）から。**
+> 表示サーバ無しの 31 本（1392 件）が全部通る。
+> README の上流の不具合に D-62〜D-72 も載せた（持ち主の判断。これで全件）。
+> 続けて **3 段目（PipeWire。結合 #21 とバックエンド #56）を済ませた**。手元の PipeWire 1.6.2 で T-54（30 件）が通る。
+> 表示サーバ無しの 32 本（1512 件）が全部通る。**残っている対話の確認: `demo_audio_tone` を持ち主に聞いてもらう（T-55）。**
+> 次の候補は §3。
 
 ## 1. 今どこにいるか
 
 | 項目 | 状態 |
 |---|---|
 | リポジトリ | https://github.com/tankoha/papimela（公開、Issues 有効）。手元のセッションは `master` に直接 push、クラウドのセッションは指定のブランチへ push して、手元で早送りマージする |
-| CI | 緑。rawpaco 激辛、checkorigin、アンブレラの古さ（`genumbrella.bb --check`）、図の検査、表示サーバ無しのテスト 31 本、Pong の自己検査、GLES2 と ソフトウェアのドライバの画素比較（llvmpipe）。ジョブ 60 分・GLES2 の手順 5 分の時間制限つき |
-| テスト | 表示サーバ無しの 31 本・1392 件はすべて成功（2026-10-14 に手元で作り直して全部流した）。手元専用と対話の検査は `docs/TEST-LOG.md` の各行 |
+| CI | 緑。rawpaco 激辛、checkorigin、アンブレラの古さ（`genumbrella.bb --check`）、図の検査、表示サーバ無しのテスト 32 本、Pong の自己検査、GLES2 と ソフトウェアのドライバの画素比較（llvmpipe）。ジョブ 60 分・GLES2 の手順 5 分の時間制限つき |
+| テスト | 表示サーバ無しの 32 本・1512 件はすべて成功（2026-10-15 に手元で作り直して全部流した）。PipeWire の T-54 は手元専用（30 件）。手元専用と対話の検査は `docs/TEST-LOG.md` の各行 |
 | 不具合 | 72 件。うち上流 SDL の 24 件は未報告（D-53 は SDL 自身が FIXME で知っている。他の 23 件は報告するかを検討中。方針は `CLAUDE.md`。README の一覧に全件を載せた） |
-| 規模 | 手書き 59 ユニット（`src/*.pas`）+ 生成（Wayland プロトコル 21、キーボードの表 2、EGL / GLES2 の定数 2、DebugText の字形 1、音声のチャンネル数の変換と周波数の変換の係数 2、アンブレラ 2）。手書きの `src/*.pas` が約 4.0 万行、生成を含めて約 5.5 万行（2026-10-14 に数え直した） |
+| 規模 | 手書き 61 ユニット（`src/*.pas`）+ 生成（Wayland プロトコル 21、キーボードの表 2、EGL / GLES2 の定数 2、DebugText の字形 1、音声のチャンネル数の変換と周波数の変換の係数 2、PipeWire の定数 1、アンブレラ 2）。手書きの `src/*.pas` が約 4.0 万行、生成を含めて約 5.5 万行（2026-10-14 に数え直した） |
 
 ### 動いているもの
 
@@ -33,17 +37,17 @@ IME（fcitx5・IBus・text-input-v3。全文節・周辺テキスト・周辺削
 EGL の GL コンテキスト（スワップ間隔はコンテキストごと）、ヘッドレスのダミーのビデオ、待つ API・タイマー・スレッド・不可分操作、
 **ログ（`Ctx.Log`）・ヒント（`Ctx.Hints`、`PAPIMELA_LOGGING` など）・プロパティの表（`TPMLProperties`、`Ctx.Properties`）**、
 バックエンドの登録（`PaPiMeLa.Backends`）、アンブレラ（`uses PaPiMeLa`）、`TPMLApplication`、サンプルの Pong、
-**オーディオ（`Ctx.Audio`。変換・周波数の変換・ストリーム・デバイス・混ぜる・簡易パス。バックエンドは今は dummy だけ）**。
+**オーディオ（`Ctx.Audio`。変換・周波数の変換・ストリーム・デバイス・混ぜる・簡易パス。バックエンドは PipeWire と dummy）**。
 
 ### 設計書第 11 章の進み具合
 
 済み（一部を含む）: #1–10、#12–17（#17 の `.GL` は未）、#22、#24（`Events.Keymap`。押下状態は
 `PaPiMeLa.Events` の `TPMLKeyboardState`）、#25 の一部（マウスとタッチの状態機械は `PaPiMeLa.Events`）、
 #26–29、#31–39、#41–43（#41 の残りはテクスチャの Lock）、
-#45、#46、#47、#48、#49、#50、#51、#52、#53（`.Audio.Mixer` は F32 の分だけ）、#55、#64、#68（YUV から ARGB8888 への変換だけ）、#70、#71。
+#21、#45、#46、#47、#48、#49、#50、#51、#52、#53（`.Audio.Mixer` は F32 の分だけ）、#55、#56、#64、#68（YUV から ARGB8888 への変換だけ）、#70、#71。
 
 未着手: #11、#18–21、#23、#30、#40、#44、
-#54、#56–63（WAV、オーディオのバックエンド、ジョイスティック、ゲームパッド、ハプティクス）、#65–67、#69。
+#54、#57–63（WAV、PulseAudio・ALSA、ジョイスティック、ゲームパッド、ハプティクス）、#65–67、#69。
 
 ## 2. 前のセッション（2026-10-14、手元）でしたこと
 
@@ -56,6 +60,8 @@ EGL の GL コンテキスト（スワップ間隔はコンテキストごと）
 | `PaPiMeLa.Surface.YUV`（#68。YUV から ARGB8888 への変換、YUV の平面の置き場。yuv2rgb の BSD 3 条項を `LICENSE` に足した） | qwen が下書き、Opus が直した（直した箇所は DESIGN #68） | T-49 の 3c。SDL の 105 通りの出力と全バイトを突き合わせた（TEST-LOG の使い捨て検証） |
 | GLES2 のドライバの YUV（平面ごとのテクスチャ、行列は SDL の値、シェーダ 6 つ） | Sonnet（依頼文・検査・見直しは Opus） | T-22 に YUV の場面と GPU だけの確かめ 2 件（変異 5 通り） |
 | オーディオの 1 段目: 変換（`PaPiMeLa.Audio.Convert`、#52）、キューとストリーム（`.Audio.Queue`・`.Audio.Stream`、#53・#52） | 変換は qwen の下書きを Opus が直した、キューとストリームは Sonnet（検査・見直しは Opus） | T-50、T-51 |
+| README の上流の不具合に D-62〜D-72 を載せた | Opus | — |
+| オーディオの 3 段目: PipeWire の結合（`PaPiMeLa.Platform.PipeWire`、#21。関数 34 個、構造体、`tools/genpipewire.bb` が C で作る定数、SPA のインライン関数の写し）とバックエンド（`PaPiMeLa.Audio.PipeWire`、#56。SDL_pipewire.c の全体）、ヒント 4 つ（`PAPIMELA_APP_NAME`、`PAPIMELA_AUDIO_DEVICE_APP_ICON_NAME` / `STREAM_NAME` / `STREAM_ROLE`）、`PaPiMeLa.Backends` に `pipewire`、対話の `demo_audio_tone`、スパイク 4 | Opus | T-53（118 件。先に書き、空の実装で 43 件落ちた。変異 17 通り）、T-54（手元専用 30 件。先に書いた。変異 9 通り）、T-55（未実施） |
 | オーディオの 2 段目: 中核（`PaPiMeLa.Audio.Backend`・`PaPiMeLa.Audio`、#51）、dummy（`PaPiMeLa.Audio.Dummy`、#55）、Context の `Audio`・`PreferredAudio`、ヒント 6 つ（`PAPIMELA_AUDIO_DRIVER` など）、イベントの `AudioDevice` | Opus | T-52（106 件。**実装の後に書いた**ので、空の実装の代わりに変異 11 通り）、T-25 にリンクの 2 件 |
 
 見つけた SDL の不具合: D-60（参照版だけ。カラーキーつきの INDEX8 のサーフェスからテクスチャを作ると、サーフェスのパレットが書き換わる。
@@ -73,6 +79,17 @@ D-69（録音で書き換えたバイト数を次の論理デバイスへ持ち�
 オーディオ付きで作り直して測った（`-DSDL_AUDIO=ON -DSDL_DUMMYAUDIO=ON`、他のオーディオのバックエンドは切る。3.4.2 はシステムの共有ライブラリ）。
 
 このセッションで分かったこと・やり方:
+
+- **C のライブラリが自分のスレッドを作るとき、そのスレッドは作った側の浮動小数点の設定を受け継ぐ**（スパイク 4）。
+  FPC のメインスレッドは例外が有効なので、PipeWire のスレッドも有効なまま走る。PipeWire を呼ぶ間に例外を止める
+  （`PMLPipeWireMaskBegin` / `End`）。最初は「FPC が外のスレッドを初めて使うときに有効にする」と推測して誤った。測って直した
+- PipeWire のヘッダはシステムに入れずに、開発用の .deb を `apt-get download` してスクラッチに展開して使える（`docs/ORIGIN.md`）。
+  参照版の SDL を PipeWire 付きで作るときも同じ（`PKG_CONFIG_PATH` と `PKG_CONFIG_SYSROOT_DIR`、`-DSDL_DBUS=OFF`）
+- ヘッダのインライン関数を写すときは、**SDL の関数ごと C で動かした結果**と比べる（genpipewire）。生成器で場面を足すと、
+  歯の無かった変異（値が入りきるか、鍵の印、裸の逃がし）が落ちるようになった
+- `pw-dump` の出力は、ストリームを鳴らした後に同じ鍵（Tag の "info"）を 2 度含むことがある。fpjson は受け付けない
+- 一時の無音のシンク（`pw-cli create-node adapter '{ factory.name=support.null-audio-sink ... object.linger=true priority.session=0 }'`）
+  で hotplug を試せる。既定は奪わない。消すのは `pw-cli destroy <ID>`。ID は pw-dump の JSON から引く（grep で誤った）
 
 - **SDL 3.4.2 と参照版で振る舞いが違う所がある**（サーフェスからのパレットは 3.4.2 が写し、参照版が共有）。システムの SDL で
   測る前に、該当箇所の `git diff release-3.4.2` を見る
@@ -113,12 +130,13 @@ D-69（録音で書き換えたバイト数を次の論理デバイスへ持ち�
      参照版（main）の SDL_audio.c を写した。物理デバイスは ID で指す。T-52。バックエンドが中核を呼ぶ口は `TPMLAudioCore`
      （`AddDevice`・`DeviceDisconnected`・`DefaultDeviceChanged`・`DeviceFormatChanged` など）、自分でスレッドを持つバックエンドは
      `PlaybackThreadIterate` などを自分のスレッドから呼ぶ（能力 `ProvidesOwnCallbackThread`）
-   - **3 段目が次**: PipeWire（`audio/pipewire/SDL_pipewire.c`、#56）。ヘッダの翻訳は C の sizeof / offsetof を実測して合わせる、
-     SPA の pod の組み立て（SDL はインラインの関数を使う）を写す、`pw_thread_loop` とデバイススレッド、hotplug。
-     手元の実機（PipeWire 1.6.2）で鳴らす対話の検査を作る。SDL の PipeWire は `ProvidesOwnCallbackThread`（`pw_thread_loop` の
-     スレッドから `SDL_PlaybackAudioThreadIterate` を呼ぶ）。デバイスの並び（`ChannelMap`）を置くのもここが最初（D-67・D-71 の道を
-     実機で通る）。浮動小数の例外: PipeWire のスレッドから中核を呼ぶ前に例外を止める（中核のスレッドは `MaskFloatExceptions`）
-   - 残り: `SDL_MixAudio` の F32 以外（`.Audio.Mixer`）、WAV（#54）、PulseAudio（#57）・ALSA（#58）
+   - **3 段目は済んだ（2026-10-15）**: PipeWire の結合（`PaPiMeLa.Platform.PipeWire`、#21）とバックエンド
+     （`PaPiMeLa.Audio.PipeWire`、#56）。T-53（CI）、T-54（手元専用）。SDL の PipeWire のバックエンドはデバイスの並び
+     （`ChannelMap`）を置かないので、D-67・D-71 の道は PipeWire でも通らない（dummy の T-52 で検査役がバックエンドの役をして通している）
+   - 残り: 持ち主に `demo_audio_tone` を聞いてもらう（T-55）。`SDL_MixAudio` の F32 以外（`.Audio.Mixer`）、WAV（#54）、
+     PulseAudio（#57）・ALSA（#58）。その時に SDL の「優先する pipewire」（セッションのサービスに audio が無ければ譲る）も入れる。
+     録音は手元にソースが無いので実機では通していない（T-54 は飛ばす）。PipeWire の既定の変更での移動も実機では見ていない
+     （利用者の既定を変えるので）
    - 浮動小数の変換は、範囲の外の値で SDL の SSE2 版とスカラー版の結果が割れる（D-64・D-65）。期待値の入力は範囲の中に置く
 2. 残してあるテクスチャのもの: テクスチャの Lock / Unlock（`SDL_LockTexture`。Streaming のテクスチャ。YUV は SDL_SW_LockYUVTexture）、
    I444 / P010 などの YUV、サーフェスから作るときのカラーキー（INDEX8 のほかは見ていない）、ソフトウェアのレンダラの Linear が
@@ -170,7 +188,7 @@ Pong もすべて書き換え、今は `uses SysUtils, Math, PaPiMeLa` だけで
 表示サーバ無しで通るもの（CI と同じ）:
 
 ```bash
-for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_render_transform test_render_target test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_drop test_drag_source test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds test_audio_convert test_audio_stream test_audio_device; do
+for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_render_transform test_render_target test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_drop test_drag_source test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds test_audio_convert test_audio_stream test_audio_device test_pipewire_abi; do
   fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/$t test/$t.pas && ./test/$t
 done
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -oexamples/pong examples/pong.pas && ./examples/pong --selftest
@@ -182,6 +200,8 @@ env -u WAYLAND_DISPLAY LIBGL_ALWAYS_SOFTWARE=1 ./test/test_render_gles2   # Mesa
 `test_wayland_protocols`、`test_wayland_window`、`test_pointer_constraints`、`test_touch_cursor`、
 `test_fcitx_textinput`、`test_key_routing`、`test_wayland_textinput`、`test_wayland_clipboard`（**手元のクリップボードを書き換え、終わりに文字列だけ戻す**。必ず `timeout 300` で）、`test_gl_window`、`test_render_gles2` のウィンドウの区間、
 スパイク 2 本、対話のデモ（`demo_japanese_input`、`demo_pointer_constraints`、`demo_render_window`）。
+**PipeWire が要るもの**: `test_audio_pipewire`（pw-dump・pw-cli が要る。一時のシンクを足して消す）、対話の `demo_audio_tone`（音が出る）、
+スパイク 4（`spikes/spike4_foreign_thread.pas`。PipeWire は要らない）。
 
 **IBus の隔離環境**（`tools/ibus-sandbox/setup.sh` を一度。CI でも同じ検査がランナーの上で走る）:
 `tools/ibus-sandbox/run.sh sh -c 'mkdir -p /tmp/lib && fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FU/tmp/lib -o/tmp/t test/test_ibus_textinput.pas && /tmp/t'`
@@ -196,7 +216,7 @@ env -u WAYLAND_DISPLAY LIBGL_ALWAYS_SOFTWARE=1 ./test/test_render_gles2   # Mesa
 cd papimela && mkdir -p lib
 B='fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib'
 # 0. 表示サーバ無しの分（CI と同じ。手元の新しい Mesa でも通るか）
-for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds test_audio_convert test_audio_stream test_audio_device; do
+for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds test_audio_convert test_audio_stream test_audio_device test_pipewire_abi; do
   $B -otest/$t test/$t.pas && ./test/$t | tail -1
 done
 # 1. 実機の Wayland（自動判定。最後の行が「結論」で終わればよい）

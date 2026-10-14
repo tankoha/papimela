@@ -291,7 +291,9 @@ FPC 3.2.2。`docs/DESIGN.md` が設計、`docs/TEST-LOG.md` が実際に何を�
 zlib, the same as SDL. See [LICENSE](LICENSE).
 The YUV-to-RGB conversion in `src/PaPiMeLa.Surface.YUV.pas` is translated from
 yuv2rgb (bundled with SDL) and also carries its BSD 3-Clause license, which is
-included in [LICENSE](LICENSE).
+included in [LICENSE](LICENSE). The inline functions translated from the PipeWire
+headers in `src/PaPiMeLa.Platform.PipeWire.pas` carry PipeWire's MIT license,
+also included there.
 
 ---
 
