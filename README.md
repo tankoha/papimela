@@ -308,9 +308,9 @@ compares that argument with itself, so a validation that *looks* like a
 validation always succeeds. It is in `docs/DEFECTS.md`. It has not been
 reported.
 
-It is not the only one. Eleven more are in `docs/DEFECTS.md`, each confirmed by
-running SDL's own code rather than by reading alone, and none of them reported
-either:
+It is not the only one. Twenty-two more are in `docs/DEFECTS.md`, each confirmed
+by running SDL's own code rather than by reading alone (one only in part, as
+noted), and none of them reported either:
 
 - **D-36**, `imKStoUCS.c:312`: one range check starts six values before its
   table, so keysyms 0x58a–0x58f index in front of the array. Calling the
@@ -357,6 +357,58 @@ either:
   when the old palette's reference count reaches zero. If another texture still
   shares the old palette, draws queued before the change come out in the new
   palette's colors (red became blue).
+- **D-62**, `clampU8` in `yuv2rgb/yuv_rgb_std.c`: the scalar YUV-to-RGB path
+  looks values up in a 512-entry table with `& 511`, so anything outside the
+  table wraps around instead of saturating. BT.709 limited-range Y=235, Cr=240
+  should give full red and gives red 0. On x86 the SSE2 path covers most of an
+  image, but anything narrower than 32 pixels and the right-hand columns take
+  the scalar path.
+- **D-63**, `SDL_SW_UpdateYUVTexture` in `SDL_yuv_sw.c`: updating a whole
+  NV12/NV21 texture copies the buffer in one piece without checking the pitch,
+  so padding bytes are read as pixels and the chroma shifts. A grey 4x2 image
+  with an 8-byte pitch came out magenta and orange (`FFFF81FF`, `FFFFAD00`). YV12/IYUV gained that
+  check on the main branch; NV12/NV21 did not.
+- **D-64**, `SDL_Convert_F32_to_S8_SSE2` / `_U8_SSE2` in
+  `SDL_audiotypecvt.c`: +∞ and very large positive floats become the minimum
+  (-128 / 0) instead of the maximum. The SSE2 version is the default on x86.
+- **D-65**, `SDL_Convert_F32_to_S32_Scalar`, same file: ±∞ and ±1e30 become 0
+  instead of saturating (the exponent trick overflows). Only seen with SIMD
+  off or without SSE2.
+- **D-66**, `OpenPhysicalAudioDevice` in `SDL_audio.c` (main branch only): the
+  line that put the requested format into the device went away with the
+  minimum-format change, so a device always opens in its default format. Asking
+  the dummy driver for F32 2ch 48000 gives S16 2ch 44100; 3.4.2 gives what you
+  asked for. The "reopen at a higher format" logic cannot take effect either.
+- **D-67**, `SDL_RecordingAudioThreadIterate` and the mixing path of
+  `SDL_PlaybackAudioThreadIterate`: when a stream's channel map differs from the
+  device's, the device thread swizzles a float buffer as if it were in the
+  device's format. Recording S16 with a postmix callback that writes 0.25 and
+  -0.5, then setting the input map to {1, 0}, gives 6.85e-41 and 2.24e-41
+  (3.4.2). The recording side also applies the stream's map in the device
+  thread *and* lets the stream apply it again, so a swap cancels out; that part
+  follows from reading the code and the header, as the dummy driver has no
+  channel map to run it with.
+- **D-68**, `SDL_BindAudioStreams`: passing the same stream twice links it to
+  itself, and the next walk of the list never ends. The call does not return
+  (3.4.2 and main).
+- **D-69**, `SDL_RecordingAudioThreadIterate`: the byte count converted to
+  float for one logical device (postmix or gain) is written back into the
+  shared count, so the next logical device on the same recording device gets
+  twice the data, the second half stale. Two S16 logical devices, one with a
+  postmix callback, 150 ms: 12288 frames versus 6144.
+- **D-70**, same function: a recording logical device with a gain other than 1
+  and no postmix callback converts into the postmix buffer, which is only
+  allocated when a postmix callback is set. `SDL_SetAudioDeviceGain(dev, 0.5)`
+  on a recording device crashes (3.4.2 and main).
+- **D-71**, same function: when the channel maps differ it borrows the mix
+  buffer, which is only allocated for devices that are not F32. An F32
+  recording device with a swapped input map crashes (3.4.2; PipeWire often
+  opens in F32).
+- **D-72**, `SDL_UnbindAudioStreams`: streams from `SDL_OpenAudioDeviceStream`
+  are meant to be left alone, and they stay in the device's list, but their
+  `bound_device` is cleared anyway. Destroying such a stream then does not close
+  the device, which keeps reading the freed stream; it crashed shortly after
+  (3.4.2 and main).
 
 One more is different in kind. **D-53**: SDL documents the swap interval as
 belonging to "the current OpenGL context", but keeps a single value for the
@@ -393,8 +445,8 @@ SDL は AI 生成物の貢献を受け付けない方針を明示している。
 比較しているため、**検証の形をしたまま必ず成功する**。`docs/DEFECTS.md` に
 記録してある。報告はしていない。
 
-これだけではない。`docs/DEFECTS.md` にはあと 11 件ある。どれも読んだだけでなく
-SDL のコードを実際に動かして確かめたもので、どれも報告していない。
+これだけではない。`docs/DEFECTS.md` にはあと 22 件ある。どれも読んだだけでなく
+SDL のコードを実際に動かして確かめたもので（1 件は一部だけ。その旨を書いた）、どれも報告していない。
 
 - **D-36**、`imKStoUCS.c` の 312 行目: 範囲の判定が表の先頭より 6 つ手前から
   始まっていて、キーシム 0x58a〜0x58f で配列の手前を読む。0x58a を渡して呼ぶと
@@ -428,6 +480,37 @@ SDL のコードを実際に動かして確かめたもので、どれも報告�
 - **D-61**、`SDL_SetTexturePalette`: 積んだ描画を吐き出すのは、前のパレットの参照が 0 になるとき
   だけ。前のパレットを別のテクスチャが共有していると、パレットを替える前に積んだ描画まで新しい
   パレットの色で描かれる（赤が青になった）
+- **D-62**、`yuv2rgb/yuv_rgb_std.c` の `clampU8`: スカラー版の YUV から RGB への変換が 512 の表を
+  `& 511` で引くので、表の外の値は飽和せず反対側へ回り込む。BT.709 限定範囲の Y=235・Cr=240 は
+  赤が 255 のはずが 0 になる。x86 では SSE2 版が大半を受け持つが、幅 32 未満の画像と右端の列はスカラー版を通る
+- **D-63**、`SDL_yuv_sw.c` の `SDL_SW_UpdateYUVTexture`: NV12 / NV21 のテクスチャを全体で更新するとき、
+  行の幅を見ずに丸ごと写すので、行の余りのバイトを画素として読み、色差もずれる。行の幅 8 の灰色の
+  4x2 が赤紫と橙色（`FFFF81FF`、`FFFFAD00`）になった。main で YV12 / IYUV には確かめが足されたが、NV12 / NV21 には無い
+- **D-64**、`SDL_audiotypecvt.c` の `SDL_Convert_F32_to_S8_SSE2` / `_U8_SSE2`: +∞ ととても大きな正の値が、
+  最大ではなく最小（-128 / 0）になる。x86 ではこの SSE2 版が既定
+- **D-65**、同じファイルの `SDL_Convert_F32_to_S32_Scalar`: ±∞ と ±1e30 が飽和せず 0 になる（指数の技が
+  溢れる）。SIMD を切ったときと SSE2 の無い CPU で起きる
+- **D-66**、`SDL_audio.c` の `OpenPhysicalAudioDevice`（main ブランチだけ）: 最低の形式をやめた変更と一緒に、
+  求めた形式をデバイスに入れる行も消え、デバイスはいつも既定の形式で開く。dummy に F32 2ch 48000 を求めると
+  S16 2ch 44100 で開く（3.4.2 は求めたとおり）。「もっと高い形式で開き直す」仕組みも効かない
+- **D-67**、`SDL_RecordingAudioThreadIterate` と `SDL_PlaybackAudioThreadIterate` の混ぜる道: ストリームの
+  並びがデバイスの並びと違うとき、デバイスのスレッドが F32 の置き場をデバイスの形式として入れ替える。
+  S16 で録音し、後置き処理で 0.25 と -0.5 を書き、入力の並びを {1, 0} にすると 6.85e-41 と 2.24e-41 になった
+  （3.4.2）。録音では、デバイスのスレッドがストリームの並びを当て、ストリームも当てるので、入れ替えなら打ち消し
+  合う。こちらはコードとヘッダの説明を読んでの判断（dummy のデバイスは並びを持たないので動かせない）
+- **D-68**、`SDL_BindAudioStreams`: 同じストリームを 2 度渡すと自分を指す輪ができ、次に連なりを回るところで
+  止まらなくなる。呼び出しが戻らない（3.4.2 と main）
+- **D-69**、`SDL_RecordingAudioThreadIterate`: ある論理デバイスのために F32 にした分のバイト数（後置き処理か
+  音量）を共通の変数に書き戻すので、同じ録音デバイスの次の論理デバイスに 2 倍の量が入り、後ろ半分は古い中身。
+  S16 の論理デバイス 2 つ（片方だけ後置き処理）で 150 ms 録ると、12288 フレームと 6144 フレームになった
+- **D-70**、同じ関数: 音量が 1 でない（後置き処理の無い）録音の論理デバイスは後置き処理の置き場へ変換するが、
+  その置き場は後置き処理を置いたときにしか作らない。録音デバイスで `SDL_SetAudioDeviceGain(dev, 0.5)` にすると
+  落ちる（3.4.2 と main）
+- **D-71**、同じ関数: 並びが違うときに混ぜる置き場を借りるが、その置き場は F32 でないデバイスにしか作らない。
+  F32 の録音デバイスで入力の並びを入れ替えると落ちる（3.4.2。PipeWire はよく F32 で開く）
+- **D-72**、`SDL_UnbindAudioStreams`: `SDL_OpenAudioDeviceStream` のストリームは外さない作りで、デバイスの
+  連なりにも残るのに、`bound_device` だけは消してしまう。そのストリームを壊してもデバイスが閉じず、デバイスが
+  解放したストリームを読み続け、しばらくして落ちた（3.4.2 と main）
 
 もう 1 件は種類が違う。**D-53**: SDL はスワップ間隔を「現在の OpenGL コンテキストの」
 ものとして説明しているが、値はビデオの装置全体で 1 つしか持たず、コンテキストを
