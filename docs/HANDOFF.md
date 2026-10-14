@@ -1,6 +1,6 @@
 # 引き継ぎ資料
 
-新しいセッションは、`CLAUDE.md` の次にこれを読む。最終更新: 2026-10-15（オーディオの 3 段目、PipeWire のコミットと同時）。
+新しいセッションは、`CLAUDE.md` の次にこれを読む。最終更新: 2026-10-15（オーディオの 3 段目の対話の確認の後）。
 
 > **2026-10-14 の手元のセッションで**: §3 の 3b（パレット、INDEX8）と 3c（YUV。YV12 / IYUV / NV12 / NV21 / YUY2 / UYVY / YVYU）を
 > 済ませ、テクスチャの種類（§3 の 1）は終わった。README の上流の不具合に D-58〜D-61 を載せた（持ち主の判断）。SDL の不具合を
@@ -12,7 +12,7 @@
 > 表示サーバ無しの 31 本（1392 件）が全部通る。
 > README の上流の不具合に D-62〜D-72 も載せた（持ち主の判断。これで全件）。
 > 続けて **3 段目（PipeWire。結合 #21 とバックエンド #56）を済ませた**。手元の PipeWire 1.6.2 で T-54（30 件）が通る。
-> 表示サーバ無しの 32 本（1512 件）が全部通る。**残っている対話の確認: `demo_audio_tone` を持ち主に聞いてもらう（T-55）。**
+> 表示サーバ無しの 32 本（1512 件）が全部通る。対話の `demo_audio_tone`（T-55）も持ち主が耳で確かめた。**手元の対話の確認は残っていない。**
 > 次の候補は §3。
 
 ## 1. 今どこにいるか
@@ -61,7 +61,7 @@ EGL の GL コンテキスト（スワップ間隔はコンテキストごと）
 | GLES2 のドライバの YUV（平面ごとのテクスチャ、行列は SDL の値、シェーダ 6 つ） | Sonnet（依頼文・検査・見直しは Opus） | T-22 に YUV の場面と GPU だけの確かめ 2 件（変異 5 通り） |
 | オーディオの 1 段目: 変換（`PaPiMeLa.Audio.Convert`、#52）、キューとストリーム（`.Audio.Queue`・`.Audio.Stream`、#53・#52） | 変換は qwen の下書きを Opus が直した、キューとストリームは Sonnet（検査・見直しは Opus） | T-50、T-51 |
 | README の上流の不具合に D-62〜D-72 を載せた | Opus | — |
-| オーディオの 3 段目: PipeWire の結合（`PaPiMeLa.Platform.PipeWire`、#21。関数 34 個、構造体、`tools/genpipewire.bb` が C で作る定数、SPA のインライン関数の写し）とバックエンド（`PaPiMeLa.Audio.PipeWire`、#56。SDL_pipewire.c の全体）、ヒント 4 つ（`PAPIMELA_APP_NAME`、`PAPIMELA_AUDIO_DEVICE_APP_ICON_NAME` / `STREAM_NAME` / `STREAM_ROLE`）、`PaPiMeLa.Backends` に `pipewire`、対話の `demo_audio_tone`、スパイク 4 | Opus | T-53（118 件。先に書き、空の実装で 43 件落ちた。変異 17 通り）、T-54（手元専用 30 件。先に書いた。変異 9 通り）、T-55（未実施） |
+| オーディオの 3 段目: PipeWire の結合（`PaPiMeLa.Platform.PipeWire`、#21。関数 34 個、構造体、`tools/genpipewire.bb` が C で作る定数、SPA のインライン関数の写し）とバックエンド（`PaPiMeLa.Audio.PipeWire`、#56。SDL_pipewire.c の全体）、ヒント 4 つ（`PAPIMELA_APP_NAME`、`PAPIMELA_AUDIO_DEVICE_APP_ICON_NAME` / `STREAM_NAME` / `STREAM_ROLE`）、`PaPiMeLa.Backends` に `pipewire`、対話の `demo_audio_tone`、スパイク 4 | Opus | T-53（118 件。先に書き、空の実装で 43 件落ちた。変異 17 通り）、T-54（手元専用 30 件。先に書いた。変異 9 通り）、T-55（持ち主が確認） |
 | オーディオの 2 段目: 中核（`PaPiMeLa.Audio.Backend`・`PaPiMeLa.Audio`、#51）、dummy（`PaPiMeLa.Audio.Dummy`、#55）、Context の `Audio`・`PreferredAudio`、ヒント 6 つ（`PAPIMELA_AUDIO_DRIVER` など）、イベントの `AudioDevice` | Opus | T-52（106 件。**実装の後に書いた**ので、空の実装の代わりに変異 11 通り）、T-25 にリンクの 2 件 |
 
 見つけた SDL の不具合: D-60（参照版だけ。カラーキーつきの INDEX8 のサーフェスからテクスチャを作ると、サーフェスのパレットが書き換わる。
@@ -133,7 +133,7 @@ D-69（録音で書き換えたバイト数を次の論理デバイスへ持ち�
    - **3 段目は済んだ（2026-10-15）**: PipeWire の結合（`PaPiMeLa.Platform.PipeWire`、#21）とバックエンド
      （`PaPiMeLa.Audio.PipeWire`、#56）。T-53（CI）、T-54（手元専用）。SDL の PipeWire のバックエンドはデバイスの並び
      （`ChannelMap`）を置かないので、D-67・D-71 の道は PipeWire でも通らない（dummy の T-52 で検査役がバックエンドの役をして通している）
-   - 残り: 持ち主に `demo_audio_tone` を聞いてもらう（T-55）。`SDL_MixAudio` の F32 以外（`.Audio.Mixer`）、WAV（#54）、
+   - 残り: `SDL_MixAudio` の F32 以外（`.Audio.Mixer`）、WAV（#54）、
      PulseAudio（#57）・ALSA（#58）。その時に SDL の「優先する pipewire」（セッションのサービスに audio が無ければ譲る）も入れる。
      録音は手元にソースが無いので実機では通していない（T-54 は飛ばす）。PipeWire の既定の変更での移動も実機では見ていない
      （利用者の既定を変えるので）
