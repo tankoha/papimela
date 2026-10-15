@@ -109,6 +109,12 @@ function PMLIsSupportedChannelCount(AChannels: Integer): Boolean;
 function PMLAudioFormatName(AFormat: TPMLAudioFormat): String;
 // 無音の標本のバイト（SDL_GetSilenceValueForFormat。U8 だけ $80、ほかは 0）。
 function PMLAudioSilenceValue(AFormat: TPMLAudioFormat): Byte;
+type
+  TPMLAudioFormats = array of TPMLAudioFormat;
+{ 求めた形式に近い順の、扱える 8 つの形式（SDL_ClosestAudioFormats）。先頭は求めた形式、次が F32（この
+  機械のバイト順、逆の順）…と続く。知らない形式なら空。バックエンドが、デバイスの対応する形式を
+  順に試すのに使う。 }
+function PMLClosestAudioFormats(AFormat: TPMLAudioFormat): TPMLAudioFormats;
 
 // ---- チャンネルの並び（SDL_ChannelMapIsBogus / IsDefault、SDL_AudioChannelMapsEqual）
 // 並びの値が -1..AChannels-1 の外にあれば True。空の並びは False。
@@ -244,6 +250,36 @@ begin
     Result := $80
   else
     Result := 0;
+end;
+
+const
+  // SDL_audio.c の format_list（NATIVE はこの機械のバイト順の LE、SWAPPED は BE）。
+  // 常に F32 を好む。どうせ処理のために F32 に変えるから（SDL のコメント）。
+  ClosestFormatList: array[0..7, 0..7] of TPMLAudioFormat = (
+    (PML_AUDIO_U8, PML_AUDIO_F32LE, PML_AUDIO_F32BE, PML_AUDIO_S8, PML_AUDIO_S16LE, PML_AUDIO_S16BE, PML_AUDIO_S32LE, PML_AUDIO_S32BE),
+    (PML_AUDIO_S8, PML_AUDIO_F32LE, PML_AUDIO_F32BE, PML_AUDIO_U8, PML_AUDIO_S16LE, PML_AUDIO_S16BE, PML_AUDIO_S32LE, PML_AUDIO_S32BE),
+    (PML_AUDIO_S16LE, PML_AUDIO_F32LE, PML_AUDIO_F32BE, PML_AUDIO_S16BE, PML_AUDIO_S32LE, PML_AUDIO_S32BE, PML_AUDIO_U8, PML_AUDIO_S8),
+    (PML_AUDIO_S16BE, PML_AUDIO_F32LE, PML_AUDIO_F32BE, PML_AUDIO_S16LE, PML_AUDIO_S32BE, PML_AUDIO_S32LE, PML_AUDIO_U8, PML_AUDIO_S8),
+    (PML_AUDIO_S32LE, PML_AUDIO_F32LE, PML_AUDIO_F32BE, PML_AUDIO_S32BE, PML_AUDIO_S16LE, PML_AUDIO_S16BE, PML_AUDIO_U8, PML_AUDIO_S8),
+    (PML_AUDIO_S32BE, PML_AUDIO_F32LE, PML_AUDIO_F32BE, PML_AUDIO_S32LE, PML_AUDIO_S16BE, PML_AUDIO_S16LE, PML_AUDIO_U8, PML_AUDIO_S8),
+    (PML_AUDIO_F32LE, PML_AUDIO_F32BE, PML_AUDIO_S32LE, PML_AUDIO_S32BE, PML_AUDIO_S16LE, PML_AUDIO_S16BE, PML_AUDIO_U8, PML_AUDIO_S8),
+    (PML_AUDIO_F32BE, PML_AUDIO_F32LE, PML_AUDIO_S32BE, PML_AUDIO_S32LE, PML_AUDIO_S16BE, PML_AUDIO_S16LE, PML_AUDIO_U8, PML_AUDIO_S8)
+  );
+
+{ SDL_ClosestAudioFormats。 }
+function PMLClosestAudioFormats(AFormat: TPMLAudioFormat): TPMLAudioFormats;
+var
+  I, J: Integer;
+begin
+  Result := nil;
+  for I := 0 to High(ClosestFormatList) do
+    if ClosestFormatList[I, 0] = AFormat then
+    begin
+      SetLength(Result, Length(ClosestFormatList[I]));
+      for J := 0 to High(ClosestFormatList[I]) do
+        Result[J] := ClosestFormatList[I, J];
+      Exit;
+    end;
 end;
 
 { ---- チャンネルの並び ---- }

@@ -193,6 +193,11 @@ type
     function  RecordDevice(ADevice: TPMLAudioDevice; ABuffer: Pointer; ALen: Integer): Integer; virtual;
     procedure FlushRecording(ADevice: TPMLAudioDevice); virtual;
     procedure CloseDevice(ADevice: TPMLAudioDevice); virtual;
+    { デバイスを閉じる前に、デバイスのスレッドが待っているところから抜けられるように起こす。
+      中核が ShutdownFlag を立てた直後に、スレッドを待つ前に呼ぶ（どのスレッドからでも）。
+      SDL に対応する口は無い（SDL は、待つ側が次の知らせで起きるのに任せる）。PulseAudio のように、
+      ストリームが止まったまま知らせが来ないと待ち続けるバックエンド向け。既定は何もしない。 }
+    procedure InterruptDevice(ADevice: TPMLAudioDevice); virtual;
     // 中核がデバイスを捨てる（FreeDeviceHandle）。Handle の後始末。
     procedure FreeDeviceHandle(ADevice: TPMLAudioDevice); virtual;
     // 終わりの始め（DeinitializeStart。hotplug を止めるのによい）と終わり（Deinitialize）。
@@ -315,6 +320,10 @@ begin
 end;
 
 procedure TPMLAudioBackend.CloseDevice(ADevice: TPMLAudioDevice);
+begin
+end;
+
+procedure TPMLAudioBackend.InterruptDevice(ADevice: TPMLAudioDevice);
 begin
 end;
 

@@ -47,6 +47,14 @@ dpkg-deb -x libpipewire-0.3-dev_*.deb /tmp/pwroot && dpkg-deb -x libspa-0.2-dev_
 tools/genpipewire.bb /tmp/pwroot/usr/include
 ```
 
+PulseAudio と ALSA も同じやり方でヘッダを用意する（`tools/genpulse.bb` はヘッダの根を引数に取る）:
+
+```bash
+apt-get download libpulse-dev libasound2-dev
+dpkg-deb -x libpulse-dev_*.deb /tmp/audioroot && dpkg-deb -x libasound2-dev_*.deb /tmp/audioroot
+tools/genpulse.bb /tmp/audioroot/usr/include
+```
+
 ヘッダの版を上げたら、生成物の差分（構造体の並び・定数）と、写したインライン関数の元の差分を読む。
 
 ## 版を上げるとき

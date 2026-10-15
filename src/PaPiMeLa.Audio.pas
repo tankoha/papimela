@@ -1287,6 +1287,8 @@ begin
   ADevice.ShutdownFlag.Exchange(1);
   // スレッドが終われるようにロックを外す。この間の出入りは SerializeClose で守る。
   ADevice.Lock.Unlock;
+  if ADevice.CurrentlyOpened then
+    FBackend.InterruptDevice(ADevice);   // バックエンドの中で待っているスレッドを起こす
   if ADevice.Thread <> nil then
   begin
     ADevice.Thread.WaitFor;

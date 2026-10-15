@@ -495,7 +495,9 @@ end;
 
 function PMLPipeWireMaskBegin: TFPUExceptionMask;
 begin
-  Result := SetExceptionMask(AllMasked);
+  // FPC 3.2.2 の aarch64 は SetExceptionMask が前の値でなく新しい値を返す。先に読んでおく
+  Result := GetExceptionMask;
+  SetExceptionMask(AllMasked);
 end;
 
 procedure PMLPipeWireMaskEnd(const AOld: TFPUExceptionMask);

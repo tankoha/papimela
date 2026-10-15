@@ -416,6 +416,12 @@ noted), and none of them reported either:
   sub-block holds 8 per channel; `IMA_ADPCM_CalculateSampleFrames` multiplies
   by 8). With `SDL_WAVE_TRUNCATION=dropframe`, a block with a 4-byte header and
   5 data bytes decodes to 3 frames instead of 10 (3.4.2 and main).
+- **D-74**, PulseAudio `HotplugCallback`: a removal is looked up by device index
+  only, but sinks and sources have separate index spaces (a PipeWire-based
+  server gives a sink and its monitor the same index). With
+  `SDL_AUDIO_INCLUDE_MONITORS=1`, removing a sink sends the removal event for the
+  sink but not for its monitor, which stays in the recording device list
+  (3.4.2 and main).
 
 One more is different in kind. **D-53**: SDL documents the swap interval as
 belonging to "the current OpenGL context", but keeps a single value for the
@@ -522,6 +528,9 @@ SDL のコードを実際に動かして確かめたもので（1 件は一部�
   使う（副ブロックは 1 チャンネルあたり 8 標本。`IMA_ADPCM_CalculateSampleFrames` は 8 を掛けている）。
   `SDL_WAVE_TRUNCATION=dropframe` で、ヘッダ 4 バイトとデータ 5 バイトの切れたブロックが 10 標本でなく 3 標本に
   なる（3.4.2 と main）
+- **D-74**、PulseAudio の `HotplugCallback`: 削除の知らせを番号だけで探すが、シンクとソースは番号の空間が別
+  （PipeWire の PulseAudio のサーバは、シンクとそのモニターに同じ番号を付ける）。`SDL_AUDIO_INCLUDE_MONITORS=1` で
+  シンクを消すと、シンクの削除の知らせは来るが、そのモニターには来ず、録音デバイスの一覧に残る（3.4.2 と main）
 
 もう 1 件は種類が違う。**D-53**: SDL はスワップ間隔を「現在の OpenGL コンテキストの」
 ものとして説明しているが、値はビデオの装置全体で 1 つしか持たず、コンテキストを

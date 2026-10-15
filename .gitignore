@@ -69,6 +69,8 @@ test/test_audio_convert
 test/test_audio_stream
 test/test_audio_mixer
 test/test_audio_wave
+test/test_pulse_abi
+test/test_audio_pulse
 test/test_audio_device
 test/test_pipewire_abi
 test/test_audio_pipewire

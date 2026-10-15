@@ -761,9 +761,16 @@ begin
       Inc(Failures);
     end;
   end;
-  // PipeWire のスレッドが、例外を止めた設定を受け継いでいる（入口で有効だったことが無い）。
+  { PipeWire のスレッドが、例外を止めた設定を受け継いでいる（入口で有効だったことが無い）。
+    x86 だけで意味がある: aarch64（Raspberry Pi 5、Linux）では C が作ったスレッドは親の設定を引き継がず、
+    FPC の既定に戻る（実測。T-57 の備考）。 }
+  {$IF defined(CPUX86_64) or defined(CPUI386)}
   Check(PMLPipeWireUnmaskedEntries = 0, Format('PipeWire の呼び出しの入口で、浮動小数点の例外が有効だった回数が 0（%d）',
     [PMLPipeWireUnmaskedEntries]));
+  {$ELSE}
+  WriteLn('  [SKIP] 入口の浮動小数点の例外の検査は x86 だけ（この機械では ', PMLPipeWireUnmaskedEntries,
+    ' 回。C のスレッドは親の設定を引き継がない）');
+  {$ENDIF}
   RemoveTestSink;
   Dog.Terminate;
   Dog.WaitFor;

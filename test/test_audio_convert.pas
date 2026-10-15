@@ -331,6 +331,48 @@ begin
   Check(Ok, 'F32 → S32 は ±∞ と 1e30 も飽和し、NaN は 0（SDL のスカラー版は ±∞・1e30 も 0。D-65）');
 end;
 
+procedure TestClosestFormats;
+const
+  // SDL_audio.c の format_list（tools で SDL のソースから機械的に取り出した。NATIVE は LE、SWAPPED は BE）。
+  Table: array[0..7, 0..7] of TPMLAudioFormat = (
+(PML_AUDIO_U8, PML_AUDIO_F32LE, PML_AUDIO_F32BE, PML_AUDIO_S8, PML_AUDIO_S16LE, PML_AUDIO_S16BE, PML_AUDIO_S32LE, PML_AUDIO_S32BE),
+    (PML_AUDIO_S8, PML_AUDIO_F32LE, PML_AUDIO_F32BE, PML_AUDIO_U8, PML_AUDIO_S16LE, PML_AUDIO_S16BE, PML_AUDIO_S32LE, PML_AUDIO_S32BE),
+    (PML_AUDIO_S16LE, PML_AUDIO_F32LE, PML_AUDIO_F32BE, PML_AUDIO_S16BE, PML_AUDIO_S32LE, PML_AUDIO_S32BE, PML_AUDIO_U8, PML_AUDIO_S8),
+    (PML_AUDIO_S16BE, PML_AUDIO_F32LE, PML_AUDIO_F32BE, PML_AUDIO_S16LE, PML_AUDIO_S32BE, PML_AUDIO_S32LE, PML_AUDIO_U8, PML_AUDIO_S8),
+    (PML_AUDIO_S32LE, PML_AUDIO_F32LE, PML_AUDIO_F32BE, PML_AUDIO_S32BE, PML_AUDIO_S16LE, PML_AUDIO_S16BE, PML_AUDIO_U8, PML_AUDIO_S8),
+    (PML_AUDIO_S32BE, PML_AUDIO_F32LE, PML_AUDIO_F32BE, PML_AUDIO_S32LE, PML_AUDIO_S16BE, PML_AUDIO_S16LE, PML_AUDIO_U8, PML_AUDIO_S8),
+    (PML_AUDIO_F32LE, PML_AUDIO_F32BE, PML_AUDIO_S32LE, PML_AUDIO_S32BE, PML_AUDIO_S16LE, PML_AUDIO_S16BE, PML_AUDIO_U8, PML_AUDIO_S8),
+    (PML_AUDIO_F32BE, PML_AUDIO_F32LE, PML_AUDIO_S32BE, PML_AUDIO_S32LE, PML_AUDIO_S16BE, PML_AUDIO_S16LE, PML_AUDIO_U8, PML_AUDIO_S8)
+  );
+var
+  I, J: Integer;
+  L: TPMLAudioFormats;
+  Ok: Boolean;
+begin
+  for I := 0 to 7 do
+  begin
+    L := PMLClosestAudioFormats(Table[I, 0]);
+    Ok := Length(L) = 8;
+    if Ok then
+      for J := 0 to 7 do
+        if L[J] <> Table[I, J] then
+          Ok := False;
+    Check(Ok, 'PMLClosestAudioFormats(' + PMLAudioFormatName(Table[I, 0]) + ') は SDL の表の行と同じ');
+  end;
+  Check(Length(PMLClosestAudioFormats(PML_AUDIO_UNKNOWN)) = 0, '知らない形式（0）は空');
+  Check(Length(PMLClosestAudioFormats(TPMLAudioFormat($1234))) = 0, '知らない形式（$1234）は空');
+  // 各行は 8 つの形式を 1 度ずつ含む
+  Ok := True;
+  for I := 0 to 7 do
+  begin
+    L := PMLClosestAudioFormats(Table[I, 0]);
+    for J := 0 to 7 do
+      if L[J] <> PML_AUDIO_UNKNOWN then
+        Ok := Ok and PMLIsSupportedAudioFormat(L[J]);
+  end;
+  Check(Ok, '並んでいるのはどれも扱える形式');
+end;
+
 begin
   WriteLn('test_audio_convert — 音声の変換');
   WriteLn;
@@ -339,6 +381,8 @@ begin
   Guard(@TestHashes);
   WriteLn;
   Guard(@TestSpecialValues);
+  WriteLn;
+  Guard(@TestClosestFormats);
   WriteLn;
   if Failures = 0 then
     WriteLn('=== 結論: 音声の変換が SDL と同じ値になる ===')

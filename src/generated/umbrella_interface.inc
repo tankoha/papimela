@@ -686,6 +686,7 @@ type
   TPMLAudioSpec = PaPiMeLa.Audio.Convert.TPMLAudioSpec;
   TPMLChannelMap = PaPiMeLa.Audio.Convert.TPMLChannelMap;
   TPMLChannelConverter = PaPiMeLa.Audio.Convert.TPMLChannelConverter;
+  TPMLAudioFormats = PaPiMeLa.Audio.Convert.TPMLAudioFormats;
 const
   PML_AUDIO_MASK_BITSIZE = PaPiMeLa.Audio.Convert.PML_AUDIO_MASK_BITSIZE;
   PML_AUDIO_MASK_FLOAT = PaPiMeLa.Audio.Convert.PML_AUDIO_MASK_FLOAT;
@@ -713,6 +714,7 @@ function PMLIsSupportedAudioFormat(AFormat: TPMLAudioFormat): Boolean; inline;
 function PMLIsSupportedChannelCount(AChannels: Integer): Boolean; inline;
 function PMLAudioFormatName(AFormat: TPMLAudioFormat): String; inline;
 function PMLAudioSilenceValue(AFormat: TPMLAudioFormat): Byte; inline;
+function PMLClosestAudioFormats(AFormat: TPMLAudioFormat): TPMLAudioFormats; inline;
 function PMLChannelMapIsBogus(const AMap: TPMLChannelMap; AChannels: Integer): Boolean; inline;
 function PMLChannelMapIsDefault(const AMap: TPMLChannelMap; AChannels: Integer): Boolean; inline;
 function PMLChannelMapsEqual(AChannels: Integer; const A, B: TPMLChannelMap): Boolean; inline;
@@ -895,6 +897,7 @@ const
   PML_HINT_WAVE_TRUNCATION = PaPiMeLa.Properties.PML_HINT_WAVE_TRUNCATION;
   PML_HINT_WAVE_FACT_CHUNK = PaPiMeLa.Properties.PML_HINT_WAVE_FACT_CHUNK;
   PML_HINT_WAVE_CHUNK_LIMIT = PaPiMeLa.Properties.PML_HINT_WAVE_CHUNK_LIMIT;
+  PML_HINT_AUDIO_INCLUDE_MONITORS = PaPiMeLa.Properties.PML_HINT_AUDIO_INCLUDE_MONITORS;
   PML_HINT_AUDIO_DUMMY_TIMESCALE = PaPiMeLa.Properties.PML_HINT_AUDIO_DUMMY_TIMESCALE;
   PML_HINT_AUDIO_DEVICE_APP_ICON_NAME = PaPiMeLa.Properties.PML_HINT_AUDIO_DEVICE_APP_ICON_NAME;
   PML_HINT_AUDIO_DEVICE_STREAM_NAME = PaPiMeLa.Properties.PML_HINT_AUDIO_DEVICE_STREAM_NAME;

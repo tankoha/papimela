@@ -476,6 +476,11 @@ begin
   Result := PaPiMeLa.Audio.Convert.PMLAudioSilenceValue(AFormat);
 end;
 
+function PMLClosestAudioFormats(AFormat: TPMLAudioFormat): TPMLAudioFormats;
+begin
+  Result := PaPiMeLa.Audio.Convert.PMLClosestAudioFormats(AFormat);
+end;
+
 function PMLChannelMapIsBogus(const AMap: TPMLChannelMap; AChannels: Integer): Boolean;
 begin
   Result := PaPiMeLa.Audio.Convert.PMLChannelMapIsBogus(AMap, AChannels);
