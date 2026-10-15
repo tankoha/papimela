@@ -422,6 +422,9 @@ noted), and none of them reported either:
   `SDL_AUDIO_INCLUDE_MONITORS=1`, removing a sink sends the removal event for the
   sink but not for its monitor, which stays in the recording device list
   (3.4.2 and main).
+- **D-75**, ALSA `ALSA_pcm_cfg_hw_chans_n_scan`: when no sample format can be set, the
+  error is built from the return value of an earlier, successful call, so it
+  reads "ALSA: Unsupported audio format: Success" (3.4.2 and main).
 
 One more is different in kind. **D-53**: SDL documents the swap interval as
 belonging to "the current OpenGL context", but keeps a single value for the
@@ -531,6 +534,8 @@ SDL のコードを実際に動かして確かめたもので（1 件は一部�
 - **D-74**、PulseAudio の `HotplugCallback`: 削除の知らせを番号だけで探すが、シンクとソースは番号の空間が別
   （PipeWire の PulseAudio のサーバは、シンクとそのモニターに同じ番号を付ける）。`SDL_AUDIO_INCLUDE_MONITORS=1` で
   シンクを消すと、シンクの削除の知らせは来るが、そのモニターには来ず、録音デバイスの一覧に残る（3.4.2 と main）
+- **D-75**、ALSA の `ALSA_pcm_cfg_hw_chans_n_scan`: どの形式も設定できなかったとき、エラーの文面を前の成功した呼び出しの
+  戻り値で作るので、「ALSA: Unsupported audio format: Success」になる（3.4.2 と main）
 
 もう 1 件は種類が違う。**D-53**: SDL はスワップ間隔を「現在の OpenGL コンテキストの」
 ものとして説明しているが、値はビデオの装置全体で 1 つしか持たず、コンテキストを
