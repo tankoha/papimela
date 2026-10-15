@@ -489,6 +489,24 @@ begin
   end;
 end;
 
+{ 名前を指定しない自動選択でも pipewire が選ばれる（オーディオのセッションのサービスがあり、
+  デバイスもある機械。PipeWire は動いているのにオーディオが別の道のときは、次のバックエンドへ譲る）。 }
+procedure TestAutoSelect;
+var
+  Opts: TPMLContextOptions;
+  Ctx: TPMLContext;
+begin
+  WriteLn('-- 自動選択');
+  Opts := TPMLContextOptions.Default;
+  Opts.MinimumLogLevel := TPMLLogPriority.Critical;
+  Ctx := TPMLContext.Create([TPMLSubsystem.Audio], Opts);
+  try
+    Check(Ctx.Audio.BackendName = 'pipewire', '名前を指定しなくても pipewire が選ばれる（' + Ctx.Audio.BackendName + '）');
+  finally
+    Ctx.Free;
+  end;
+end;
+
 procedure TestMain;
 var
   Opts: TPMLContextOptions;
@@ -753,6 +771,7 @@ begin
   Dog.LimitMs := 90000;
   Dog.Start;
   try
+    TestAutoSelect;
     TestMain;
   except
     on E: Exception do

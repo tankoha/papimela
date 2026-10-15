@@ -318,6 +318,7 @@ type
   public
     constructor Create(ACore: TPMLAudioCore); override;
     function  Name: String; override;
+    function  AcceptForAutoSelection: Boolean; override;
     procedure DetectDevices(out ADefaultPlayback, ADefaultRecording: TPMLAudioDevice); override;
     function  OpenDevice(ADevice: TPMLAudioDevice): Boolean; override;
     function  GetDeviceBuf(ADevice: TPMLAudioDevice; var ASize: Integer): PByte; override;
@@ -848,6 +849,30 @@ begin
   end;
   FCapabilities := [TPMLAudioBackendCapability.HasRecordingSupport,
     TPMLAudioBackendCapability.ProvidesOwnCallbackThread];
+end;
+
+{ PIPEWIRE_PREFERRED_Init の後半。デバイスは足さずに、PipeWire が音のデバイスを見ているかだけ調べる。
+  オーディオのセッションのサービスが無い（PipeWire は動いているがオーディオは別の道）か、
+  セッションのサービスが無くデバイスも無い・古い PipeWire（1.0 より前）なら、次のバックエンドへ譲る。 }
+function TPMLPipeWireBackend.AcceptForAutoSelection: Boolean;
+var
+  Old: TFPUExceptionMask;
+  NoDevices, VersionOk: Boolean;
+begin
+  Old := PMLPipeWireMaskBegin;
+  FPW.API.thread_loop_lock(FHotplugLoop);
+  try
+    // 初めのレジストリの一覧ができるまで待つ
+    if not FInitComplete then
+      FPW.API.thread_loop_wait(FHotplugLoop);
+    NoDevices := Length(FIOList) = 0;
+    VersionOk := FVersionMajor >= 1;   // pipewire_core_version_at_least(1, 0, 0)
+  finally
+    FPW.API.thread_loop_unlock(FHotplugLoop);
+    PMLPipeWireMaskEnd(Old);
+  end;
+  Result := not ((FHaveSessionServices and not FHaveAudioService)
+    or (not FHaveSessionServices and (NoDevices or not VersionOk)));
 end;
 
 function TPMLPipeWireBackend.Name: String;

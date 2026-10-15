@@ -177,6 +177,11 @@ type
       （分からなければ nil。中核が最初に足したものを既定にする）。既定は、OnlyHasDefault* の
       バックエンド向けに、既定のデバイスを 1 台ずつ足す（SDL_AudioDetectDevices_Default）。 }
     procedure DetectDevices(out ADefaultPlayback, ADefaultRecording: TPMLAudioDevice); virtual;
+    { 名前を指定しない自動選択のときだけ、バックエンドを作った直後（DetectDevices の前）に中核が聞く。
+      False なら、このバックエンドは使わず（DeinitializeStart と Deinitialize を呼んで壊し）、次のバックエンドを
+      試す。名前で求められたときは聞かない。SDL の「優先する」ブートストラップ（PIPEWIRE_PREFERRED_Init。
+      PipeWire にオーディオのサーバが無ければ次へ譲る）に対応する。既定は True。 }
+    function  AcceptForAutoSelection: Boolean; virtual;
     // デバイスを開く（OpenDevice）。Spec と SampleFrames を変えてよい。失敗したら False。
     function  OpenDevice(ADevice: TPMLAudioDevice): Boolean; virtual;
     // デバイススレッドの始めと終わり（ThreadInit / ThreadDeinit）。既定の Init は優先度を上げる。
@@ -269,6 +274,11 @@ begin
   if TPMLAudioBackendCapability.HasRecordingSupport in FCapabilities then
     ADefaultRecording := FCore.AddDevice(True, PML_DEFAULT_RECORDING_DEVNAME, '',
       TPMLAudioSpec.Make(0, 0, 0), Pointer(PtrUInt(2)));
+end;
+
+function TPMLAudioBackend.AcceptForAutoSelection: Boolean;
+begin
+  Result := True;
 end;
 
 function TPMLAudioBackend.OpenDevice(ADevice: TPMLAudioDevice): Boolean;

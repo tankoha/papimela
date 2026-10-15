@@ -165,7 +165,7 @@ type
     FShuttingDown   : TPMLAtomicInt;
 
     procedure SelectBackend(const APreferred: String);
-    function  TryBackend(const AName: String): Boolean;
+    function  TryBackend(const AName: String; AAutoSelect: Boolean = False): Boolean;
     procedure LogDebug(const AMessage: String);
     procedure ReportCallbackException(E: Exception; ALogical: TPMLLogicalAudioDevice;
       const AWhere: String);
@@ -780,10 +780,11 @@ begin
     FQueue.RegisterPumpSource(Self as IPMLEventPumpSource);
 end;
 
-function TPMLAudioSystem.TryBackend(const AName: String): Boolean;
+function TPMLAudioSystem.TryBackend(const AName: String; AAutoSelect: Boolean): Boolean;
 var
   Factory: TPMLAudioBackendFactory;
   B: TPMLAudioBackend;
+  Accepted: Boolean;
 begin
   Result := False;
   Factory := PMLFindAudioBackend(AName);
@@ -800,6 +801,28 @@ begin
   end;
   if B = nil then
     Exit;
+  // 自動選択のときだけ、バックエンドに使ってよいか聞く（SDL の優先するブートストラップ）
+  if AAutoSelect then
+  begin
+    Accepted := False;
+    try
+      Accepted := B.AcceptForAutoSelection;
+    except
+      on E: Exception do
+        LogDebug(Format('audio backend "%s" could not tell whether to use it: %s', [AName, E.Message]));
+    end;
+    if not Accepted then
+    begin
+      LogDebug(Format('audio backend "%s" stepped aside', [AName]));
+      try
+        B.DeinitializeStart;
+        B.Deinitialize;
+      finally
+        B.Free;
+      end;
+      Exit;
+    end;
+  end;
   FBackend := B;
   FBackendName := B.Name;
   Result := True;
@@ -842,7 +865,7 @@ begin
   if Length(Names) = 0 then
     raise EPMLAudioError.Create('no audio backend is registered; add PaPiMeLa.Backends (or PaPiMeLa) to uses');
   for I := 0 to High(Names) do
-    if not PMLAudioBackendIsDemandOnly(Names[I]) and TryBackend(Names[I]) then
+    if not PMLAudioBackendIsDemandOnly(Names[I]) and TryBackend(Names[I], True) then
       Exit;
   raise EPMLAudioError.CreateFmt('No available audio device (tried: %s)', [String.Join(', ', Names)]);
 end;

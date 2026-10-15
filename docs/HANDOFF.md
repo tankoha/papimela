@@ -16,7 +16,7 @@
 > **2026-10-15 に Raspberry Pi 5（aarch64、Ubuntu 26.04）の新しい端末へ移った。** そこで `SDL_MixAudio` の 8 形式（`PaPiMeLa.Audio.Mixer`、T-56）と
 > WAV の読み込み（`PaPiMeLa.Audio.Wave`、#54、T-57）を済ませた（どちらも Sonnet。ollama が無いので Low の WAV も Sonnet）。SDL の不具合 D-73 を見つけた。
 > さらに PulseAudio（`PaPiMeLa.Audio.Pulse`、#57。`PaPiMeLa.Platform.Pulse`、#20）と ALSA（`PaPiMeLa.Audio.Alsa`、#58。`PaPiMeLa.Platform.Alsa`、#20）を済ませた（T-58・T-60・T-61 は CI、T-59・T-62 は手元専用）。SDL の不具合 D-74・D-75 を見つけた。**これでオーディオは、第 11 章の #51〜#58 とヒントの口まで揃った**（残りは下の「残り」）。
-> 表示サーバ無しの 37 本が全部通る。**手元（Pi 5）の対話の確認は残っていない。** この端末の違いは §2.1。
+> 表示サーバ無しの 38 本が全部通る。**手元（Pi 5）の対話の確認は残っていない。** この端末の違いは §2.1。
 > 次の候補は §3。
 
 ## 1. 今どこにいるか
@@ -25,7 +25,7 @@
 |---|---|
 | リポジトリ | https://github.com/tankoha/papimela（公開、Issues 有効）。手元のセッションは `master` に直接 push、クラウドのセッションは指定のブランチへ push して、手元で早送りマージする |
 | CI | 緑。rawpaco 激辛、checkorigin、アンブレラの古さ（`genumbrella.bb --check`）、図の検査、表示サーバ無しのテスト 32 本、Pong の自己検査、GLES2 と ソフトウェアのドライバの画素比較（llvmpipe）。ジョブ 60 分・GLES2 の手順 5 分の時間制限つき |
-| テスト | 表示サーバ無しの 37 本はすべて成功（2026-10-15 に Pi5 で流した。以前の「件」は数え方が違うので、これからはこの数え方）。PipeWire の T-54 と PulseAudio の T-59 は手元専用で、どちらも Pi5 で通る。PipeWire の T-54 は手元専用（30 件）。手元専用と対話の検査は `docs/TEST-LOG.md` の各行 |
+| テスト | 表示サーバ無しの 38 本はすべて成功（2026-10-15 に Pi5 で流した。以前の「件」は数え方が違うので、これからはこの数え方）。PipeWire の T-54 と PulseAudio の T-59 は手元専用で、どちらも Pi5 で通る。PipeWire の T-54 は手元専用（30 件）。手元専用と対話の検査は `docs/TEST-LOG.md` の各行 |
 | 不具合 | 73 件。うち上流 SDL の 25 件は未報告（D-53 は SDL 自身が FIXME で知っている。他の 24 件は報告するかを検討中。方針は `CLAUDE.md`。README の一覧に全件を載せた） |
 | 規模 | 手書き 63 ユニット（`src/*.pas`）+ 生成（Wayland プロトコル 21、キーボードの表 2、EGL / GLES2 の定数 2、DebugText の字形 1、音声のチャンネル数の変換と周波数の変換の係数 2、PipeWire の定数 1、アンブレラ 2）。手書きの `src/*.pas` が約 4.0 万行、生成を含めて約 5.5 万行（2026-10-14 に数え直した） |
 
@@ -160,7 +160,8 @@ D-69（録音で書き換えたバイト数を次の論理デバイスへ持ち�
    - **WAV（#54）は済んだ（2026-10-15、Pi 5 で。`PaPiMeLa.Audio.Wave`、`Ctx.Audio.LoadWAV`、T-57）**。SDL のヒント 4 つは `PAPIMELA_WAVE_*`
    - **PulseAudio（#57）・#20 の Pulse の結合は済んだ（2026-10-15、Pi 5 で）**。T-58（CI）、T-59（手元専用）
    - **ALSA（#58）・#20 の Alsa の結合は済んだ（2026-10-15、Pi 5 で）**。T-60・T-61（CI）、T-62（手元専用。生きた SDL と突き合わせる）。udev の hotplug は無い（走査のスレッド）
-   - 残り: SDL の「優先する pipewire」（セッションのサービスに audio が無ければ譲る）も入れる。
+   - **「優先する pipewire」も済んだ（2026-10-15）**: `TPMLAudioBackend.AcceptForAutoSelection`。T-63（CI）
+   - 残り（オーディオ）: ALSA の udev による hotplug（SDL の `SDL_udev`。今は 5 秒ごとの走査）、録音の実機での確認（Pulse と ALSA は録音の装置を勝手に開かないので、モニターだけ通した）。
      録音は手元にソースが無いので実機では通していない（T-54 は飛ばす）。PipeWire の既定の変更での移動も実機では見ていない
      （利用者の既定を変えるので）
    - 浮動小数の変換は、範囲の外の値で SDL の SSE2 版とスカラー版の結果が割れる（D-64・D-65）。期待値の入力は範囲の中に置く
@@ -214,7 +215,7 @@ Pong もすべて書き換え、今は `uses SysUtils, Math, PaPiMeLa` だけで
 表示サーバ無しで通るもの（CI と同じ）:
 
 ```bash
-for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_render_transform test_render_target test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_drop test_drag_source test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds test_audio_convert test_audio_stream test_audio_mixer test_audio_wave test_audio_device test_pipewire_abi test_pulse_abi test_alsa_abi test_alsa_chmap; do
+for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_render_transform test_render_target test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_drop test_drag_source test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds test_audio_convert test_audio_stream test_audio_mixer test_audio_wave test_audio_device test_pipewire_abi test_pulse_abi test_alsa_abi test_alsa_chmap test_audio_autoselect; do
   fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/$t test/$t.pas && ./test/$t
 done
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -oexamples/pong examples/pong.pas && ./examples/pong --selftest
@@ -242,7 +243,7 @@ env -u WAYLAND_DISPLAY LIBGL_ALWAYS_SOFTWARE=1 ./test/test_render_gles2   # Mesa
 cd papimela && mkdir -p lib
 B='fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib'
 # 0. 表示サーバ無しの分（CI と同じ。手元の新しい Mesa でも通るか）
-for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds test_audio_convert test_audio_stream test_audio_mixer test_audio_wave test_audio_device test_pipewire_abi test_pulse_abi test_alsa_abi test_alsa_chmap; do
+for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds test_audio_convert test_audio_stream test_audio_mixer test_audio_wave test_audio_device test_pipewire_abi test_pulse_abi test_alsa_abi test_alsa_chmap test_audio_autoselect; do
   $B -otest/$t test/$t.pas && ./test/$t | tail -1
 done
 # 1. 実機の Wayland（自動判定。最後の行が「結論」で終わればよい）
