@@ -411,6 +411,11 @@ noted), and none of them reported either:
   `bound_device` is cleared anyway. Destroying such a stream then does not close
   the device, which keeps reading the freed stream; it crashed shortly after
   (3.4.2 and main).
+- **D-73**, `IMA_ADPCM_DecodeBlockData`: when the last block is cut short, the
+  number of whole sub-blocks is used as the number of sample frames (each
+  sub-block holds 8 per channel; `IMA_ADPCM_CalculateSampleFrames` multiplies
+  by 8). With `SDL_WAVE_TRUNCATION=dropframe`, a block with a 4-byte header and
+  5 data bytes decodes to 3 frames instead of 10 (3.4.2 and main).
 
 One more is different in kind. **D-53**: SDL documents the swap interval as
 belonging to "the current OpenGL context", but keeps a single value for the
@@ -513,6 +518,10 @@ SDL のコードを実際に動かして確かめたもので（1 件は一部�
 - **D-72**、`SDL_UnbindAudioStreams`: `SDL_OpenAudioDeviceStream` のストリームは外さない作りで、デバイスの
   連なりにも残るのに、`bound_device` だけは消してしまう。そのストリームを壊してもデバイスが閉じず、デバイスが
   解放したストリームを読み続け、しばらくして落ちた（3.4.2 と main）
+- **D-73**、`IMA_ADPCM_DecodeBlockData`: 最後のブロックが切れているとき、副ブロックの数をそのまま標本の数に
+  使う（副ブロックは 1 チャンネルあたり 8 標本。`IMA_ADPCM_CalculateSampleFrames` は 8 を掛けている）。
+  `SDL_WAVE_TRUNCATION=dropframe` で、ヘッダ 4 バイトとデータ 5 バイトの切れたブロックが 10 標本でなく 3 標本に
+  なる（3.4.2 と main）
 
 もう 1 件は種類が違う。**D-53**: SDL はスワップ間隔を「現在の OpenGL コンテキストの」
 ものとして説明しているが、値はビデオの装置全体で 1 つしか持たず、コンテキストを

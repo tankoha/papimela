@@ -64,7 +64,7 @@ unit PaPiMeLa.Audio;
 interface
 
 uses
-  SysUtils, Math, StrUtils,
+  Classes, SysUtils, Math, StrUtils,
   PaPiMeLa.Errors,
   PaPiMeLa.Core.Base,
   PaPiMeLa.Atomic,
@@ -75,6 +75,7 @@ uses
   PaPiMeLa.Events,
   PaPiMeLa.Audio.Convert,
   PaPiMeLa.Audio.Stream,
+  PaPiMeLa.Audio.Wave,
   PaPiMeLa.Audio.Backend;
 
 type
@@ -251,6 +252,12 @@ type
       ACallback: TPMLAudioStreamCallback = nil): TPMLAudioStream; overload;
     function  OpenDeviceStream(AID: TPMLAudioDeviceID; const ASpec: TPMLAudioSpec;
       ACallback: TPMLAudioStreamCallback = nil): TPMLAudioStream; overload;
+
+    { WAVE ファイルを読む（SDL_LoadWAV_IO / SDL_LoadWAV）。ヒント PML_HINT_WAVE_* の値で
+      読み方が変わる（PaPiMeLa.Audio.Wave の TPMLWaveOptions）。標本のバイト列を返し、形式を
+      ASpec に置く。読めなければ EPMLAudioError。 }
+    function  LoadWAV(AStream: TStream; out ASpec: TPMLAudioSpec): TBytes;
+    function  LoadWAVFile(const APath: String; out ASpec: TPMLAudioSpec): TBytes;
 
     { ストリームを外す（SDL_UnbindAudioStream(s)）。結び付いていない・nil は何もしない。
       OpenDeviceStream で作ったものは外れない（何もしない）。 }
@@ -886,6 +893,18 @@ begin
     ContextServices.Log.Error(PML_LOG_CATEGORY_AUDIO,
       Format('audio device %d: %s raised %s: %s; the device is paused',
         [ALogical.FID, AWhere, E.ClassName, E.Message]));
+end;
+
+function TPMLAudioSystem.LoadWAV(AStream: TStream; out ASpec: TPMLAudioSpec): TBytes;
+begin
+  Result := PMLLoadWAV(AStream, TPMLWaveOptions.FromHints(Hint(PML_HINT_WAVE_RIFF_CHUNK_SIZE),
+    Hint(PML_HINT_WAVE_TRUNCATION), Hint(PML_HINT_WAVE_FACT_CHUNK), Hint(PML_HINT_WAVE_CHUNK_LIMIT)), ASpec);
+end;
+
+function TPMLAudioSystem.LoadWAVFile(const APath: String; out ASpec: TPMLAudioSpec): TBytes;
+begin
+  Result := PMLLoadWAVFile(APath, TPMLWaveOptions.FromHints(Hint(PML_HINT_WAVE_RIFF_CHUNK_SIZE),
+    Hint(PML_HINT_WAVE_TRUNCATION), Hint(PML_HINT_WAVE_FACT_CHUNK), Hint(PML_HINT_WAVE_CHUNK_LIMIT)), ASpec);
 end;
 
 function TPMLAudioSystem.Hint(const AName: String): String;

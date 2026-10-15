@@ -20,6 +20,7 @@
 //   PaPiMeLa.Audio.Convert
 //   PaPiMeLa.Audio.Stream
 //   PaPiMeLa.Audio.Mixer
+//   PaPiMeLa.Audio.Wave
 //   PaPiMeLa.Audio
 //   PaPiMeLa.TextInput
 //   PaPiMeLa.Time
@@ -777,6 +778,23 @@ procedure PMLMixAudio(
   ALen: Integer;
   AVolume: Single); inline;
 
+// ---- PaPiMeLa.Audio.Wave
+type
+  TPMLWaveRiffSizeHint = PaPiMeLa.Audio.Wave.TPMLWaveRiffSizeHint;
+  TPMLWaveTruncationHint = PaPiMeLa.Audio.Wave.TPMLWaveTruncationHint;
+  TPMLWaveFactHint = PaPiMeLa.Audio.Wave.TPMLWaveFactHint;
+  TPMLWaveOptions = PaPiMeLa.Audio.Wave.TPMLWaveOptions;
+function PMLLoadWAV(
+  AStream: TStream;
+  const AOptions: TPMLWaveOptions;
+  out ASpec: TPMLAudioSpec): TBytes; inline; overload;
+function PMLLoadWAV(AStream: TStream; out ASpec: TPMLAudioSpec): TBytes; inline; overload;
+function PMLLoadWAVFile(
+  const APath: String;
+  const AOptions: TPMLWaveOptions;
+  out ASpec: TPMLAudioSpec): TBytes; inline; overload;
+function PMLLoadWAVFile(const APath: String; out ASpec: TPMLAudioSpec): TBytes; inline; overload;
+
 // ---- PaPiMeLa.Audio
 type
   TPMLAudioPostmixCallback = PaPiMeLa.Audio.TPMLAudioPostmixCallback;
@@ -873,6 +891,10 @@ const
   PML_HINT_AUDIO_FREQUENCY = PaPiMeLa.Properties.PML_HINT_AUDIO_FREQUENCY;
   PML_HINT_AUDIO_CHANNELS = PaPiMeLa.Properties.PML_HINT_AUDIO_CHANNELS;
   PML_HINT_AUDIO_FORMAT = PaPiMeLa.Properties.PML_HINT_AUDIO_FORMAT;
+  PML_HINT_WAVE_RIFF_CHUNK_SIZE = PaPiMeLa.Properties.PML_HINT_WAVE_RIFF_CHUNK_SIZE;
+  PML_HINT_WAVE_TRUNCATION = PaPiMeLa.Properties.PML_HINT_WAVE_TRUNCATION;
+  PML_HINT_WAVE_FACT_CHUNK = PaPiMeLa.Properties.PML_HINT_WAVE_FACT_CHUNK;
+  PML_HINT_WAVE_CHUNK_LIMIT = PaPiMeLa.Properties.PML_HINT_WAVE_CHUNK_LIMIT;
   PML_HINT_AUDIO_DUMMY_TIMESCALE = PaPiMeLa.Properties.PML_HINT_AUDIO_DUMMY_TIMESCALE;
   PML_HINT_AUDIO_DEVICE_APP_ICON_NAME = PaPiMeLa.Properties.PML_HINT_AUDIO_DEVICE_APP_ICON_NAME;
   PML_HINT_AUDIO_DEVICE_STREAM_NAME = PaPiMeLa.Properties.PML_HINT_AUDIO_DEVICE_STREAM_NAME;

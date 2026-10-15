@@ -20,6 +20,7 @@
 //   PaPiMeLa.Audio.Convert
 //   PaPiMeLa.Audio.Stream
 //   PaPiMeLa.Audio.Mixer
+//   PaPiMeLa.Audio.Wave
 //   PaPiMeLa.Audio
 //   PaPiMeLa.TextInput
 //   PaPiMeLa.Time
@@ -593,6 +594,33 @@ procedure PMLMixAudio(
   AVolume: Single);
 begin
   PaPiMeLa.Audio.Mixer.PMLMixAudio(ADst, ASrc, AFormat, ALen, AVolume);
+end;
+
+// ---- PaPiMeLa.Audio.Wave
+function PMLLoadWAV(
+  AStream: TStream;
+  const AOptions: TPMLWaveOptions;
+  out ASpec: TPMLAudioSpec): TBytes;
+begin
+  Result := PaPiMeLa.Audio.Wave.PMLLoadWAV(AStream, AOptions, ASpec);
+end;
+
+function PMLLoadWAV(AStream: TStream; out ASpec: TPMLAudioSpec): TBytes;
+begin
+  Result := PaPiMeLa.Audio.Wave.PMLLoadWAV(AStream, ASpec);
+end;
+
+function PMLLoadWAVFile(
+  const APath: String;
+  const AOptions: TPMLWaveOptions;
+  out ASpec: TPMLAudioSpec): TBytes;
+begin
+  Result := PaPiMeLa.Audio.Wave.PMLLoadWAVFile(APath, AOptions, ASpec);
+end;
+
+function PMLLoadWAVFile(const APath: String; out ASpec: TPMLAudioSpec): TBytes;
+begin
+  Result := PaPiMeLa.Audio.Wave.PMLLoadWAVFile(APath, ASpec);
 end;
 
 // ---- PaPiMeLa.Audio
