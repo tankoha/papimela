@@ -12,7 +12,7 @@
 > 表示サーバ無しの 31 本（1392 件）が全部通る。
 > README の上流の不具合に D-62〜D-72 も載せた（持ち主の判断。これで全件）。
 > 続けて **3 段目（PipeWire。結合 #21 とバックエンド #56）を済ませた**。手元の PipeWire 1.6.2 で T-54（30 件）が通る。
-> 表示サーバ無しの 32 本（1512 件）が全部通る。対話の `demo_audio_tone`（T-55）も持ち主が耳で確かめた。**手元の対話の確認は残っていない。**
+> 表示サーバ無しの 33 本（1589 件）が全部通る。対話の `demo_audio_tone`（T-55）も持ち主が耳で確かめた。**手元の対話の確認は残っていない。**
 > 次の候補は §3。
 
 ## 1. 今どこにいるか
@@ -21,7 +21,7 @@
 |---|---|
 | リポジトリ | https://github.com/tankoha/papimela（公開、Issues 有効）。手元のセッションは `master` に直接 push、クラウドのセッションは指定のブランチへ push して、手元で早送りマージする |
 | CI | 緑。rawpaco 激辛、checkorigin、アンブレラの古さ（`genumbrella.bb --check`）、図の検査、表示サーバ無しのテスト 32 本、Pong の自己検査、GLES2 と ソフトウェアのドライバの画素比較（llvmpipe）。ジョブ 60 分・GLES2 の手順 5 分の時間制限つき |
-| テスト | 表示サーバ無しの 32 本・1512 件はすべて成功（2026-10-15 に手元で作り直して全部流した）。PipeWire の T-54 は手元専用（30 件）。手元専用と対話の検査は `docs/TEST-LOG.md` の各行 |
+| テスト | 表示サーバ無しの 33 本・1589 件はすべて成功（2026-10-15 に Pi5 で mixer の T-56 を足して流した）。PipeWire の T-54 は手元専用（30 件）。手元専用と対話の検査は `docs/TEST-LOG.md` の各行 |
 | 不具合 | 72 件。うち上流 SDL の 24 件は未報告（D-53 は SDL 自身が FIXME で知っている。他の 23 件は報告するかを検討中。方針は `CLAUDE.md`。README の一覧に全件を載せた） |
 | 規模 | 手書き 61 ユニット（`src/*.pas`）+ 生成（Wayland プロトコル 21、キーボードの表 2、EGL / GLES2 の定数 2、DebugText の字形 1、音声のチャンネル数の変換と周波数の変換の係数 2、PipeWire の定数 1、アンブレラ 2）。手書きの `src/*.pas` が約 4.0 万行、生成を含めて約 5.5 万行（2026-10-14 に数え直した） |
 
@@ -133,7 +133,8 @@ D-69（録音で書き換えたバイト数を次の論理デバイスへ持ち�
    - **3 段目は済んだ（2026-10-15）**: PipeWire の結合（`PaPiMeLa.Platform.PipeWire`、#21）とバックエンド
      （`PaPiMeLa.Audio.PipeWire`、#56）。T-53（CI）、T-54（手元専用）。SDL の PipeWire のバックエンドはデバイスの並び
      （`ChannelMap`）を置かないので、D-67・D-71 の道は PipeWire でも通らない（dummy の T-52 で検査役がバックエンドの役をして通している）
-   - 残り: `SDL_MixAudio` の F32 以外（`.Audio.Mixer`）、WAV（#54）、
+   - **`SDL_MixAudio` の 8 形式は済んだ（2026-10-15、aarch64 の Pi5 で。`PaPiMeLa.Audio.Mixer`、T-56）**。F32 は aarch64 の SDL が FMA に融合して値が割れる（TEST-LOG の T-56）
+   - 残り: WAV（#54）、
      PulseAudio（#57）・ALSA（#58）。その時に SDL の「優先する pipewire」（セッションのサービスに audio が無ければ譲る）も入れる。
      録音は手元にソースが無いので実機では通していない（T-54 は飛ばす）。PipeWire の既定の変更での移動も実機では見ていない
      （利用者の既定を変えるので）
@@ -188,7 +189,7 @@ Pong もすべて書き換え、今は `uses SysUtils, Math, PaPiMeLa` だけで
 表示サーバ無しで通るもの（CI と同じ）:
 
 ```bash
-for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_render_transform test_render_target test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_drop test_drag_source test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds test_audio_convert test_audio_stream test_audio_device test_pipewire_abi; do
+for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_render_transform test_render_target test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_drop test_drag_source test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds test_audio_convert test_audio_stream test_audio_mixer test_audio_device test_pipewire_abi; do
   fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/$t test/$t.pas && ./test/$t
 done
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -oexamples/pong examples/pong.pas && ./examples/pong --selftest
@@ -216,7 +217,7 @@ env -u WAYLAND_DISPLAY LIBGL_ALWAYS_SOFTWARE=1 ./test/test_render_gles2   # Mesa
 cd papimela && mkdir -p lib
 B='fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib'
 # 0. 表示サーバ無しの分（CI と同じ。手元の新しい Mesa でも通るか）
-for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds test_audio_convert test_audio_stream test_audio_device test_pipewire_abi; do
+for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds test_audio_convert test_audio_stream test_audio_mixer test_audio_device test_pipewire_abi; do
   $B -otest/$t test/$t.pas && ./test/$t | tail -1
 done
 # 1. 実機の Wayland（自動判定。最後の行が「結論」で終わればよい）

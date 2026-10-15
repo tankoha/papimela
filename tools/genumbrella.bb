@@ -56,6 +56,7 @@
    {:unit "PaPiMeLa.Render"}
    {:unit "PaPiMeLa.Audio.Convert"}
    {:unit "PaPiMeLa.Audio.Stream"}
+   {:unit "PaPiMeLa.Audio.Mixer"}
    {:unit "PaPiMeLa.Audio"}
    {:unit "PaPiMeLa.TextInput"}
    {:unit "PaPiMeLa.Time"}

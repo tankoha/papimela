@@ -67,6 +67,7 @@ test/test_thread_realtime
 test/test_texture_kinds
 test/test_audio_convert
 test/test_audio_stream
+test/test_audio_mixer
 test/test_audio_device
 test/test_pipewire_abi
 test/test_audio_pipewire

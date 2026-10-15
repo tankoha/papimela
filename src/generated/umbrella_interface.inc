@@ -19,6 +19,7 @@
 //   PaPiMeLa.Render
 //   PaPiMeLa.Audio.Convert
 //   PaPiMeLa.Audio.Stream
+//   PaPiMeLa.Audio.Mixer
 //   PaPiMeLa.Audio
 //   PaPiMeLa.TextInput
 //   PaPiMeLa.Time
@@ -768,6 +769,13 @@ function PMLConvertAudioSamples(
   ASrc: Pointer;
   ALen: Integer;
   const ADstSpec: TPMLAudioSpec): TBytes; inline;
+
+// ---- PaPiMeLa.Audio.Mixer
+procedure PMLMixAudio(
+  ADst, ASrc: Pointer;
+  AFormat: TPMLAudioFormat;
+  ALen: Integer;
+  AVolume: Single); inline;
 
 // ---- PaPiMeLa.Audio
 type
