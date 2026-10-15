@@ -32,6 +32,12 @@
     速い経路を持つドライバだけが上書きする。呼び出し箇所の NULL 判定は消える。
 
   RESOLVED:
+    - テクスチャの Lock / Unlock / LockToSurface（SDL_LockTexture 系）は TPMLTexture のメソッド。
+      Streaming のテクスチャだけ。ドライバの口は LockTexture / UnlockTexture（ソフトウェアはテクスチャの
+      画素そのもの、GLES2 は SDL の pixel_data にあたる置き場で、Unlock が全体を GPU へ上げる）。
+      YUV の肩代わり（SDL の texture->yuv）と INDEX8 の肩代わり（palette_surface）は、レンダラの層で扱う。
+      SDL との違い: 矩形がテクスチャの外なら EPMLArgument（SDL は確かめない）、Lock の前に積んだ描画を
+      吐き出す（SDL は YUV と GPU の道だけ）、YUV のテクスチャはサーフェスにできない
     - コマンドは配列に積む。SDL の連結リストは C に伸びる配列が無いため
     - 積み荷は 2 本の配列に分ける。三角形の頂点（Vertices）と、速い経路用の
       矩形（Rects）。SDL は型の無い 1 本のバイト列に詰めるが、型を分ければ
@@ -55,7 +61,6 @@
       SDL のソフトウェアのレンダラは Linear で補間する
     - インデックス形式は INDEX8 だけ（SDL も INDEX1 / 2 / 4 のテクスチャは作れない）。YUV は
       PaPiMeLa.Surface.YUV が変換できる 7 形式だけ（I444・P010 などは無い）
-    - テクスチャの Lock / Unlock（SDL_LockTexture）は無い
     - GPU のドライバは OpenGL ES 2.0（#43）だけ。デスクトップ GL（#44）は未着手
 
   Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
@@ -206,6 +211,13 @@ type
     function  CreateTexture(ATexture: TPMLTexture): Boolean; virtual; abstract;
     function  UpdateTexture(ATexture: TPMLTexture; const ARect: TPMLRect;
       APixels: Pointer; APitch: Integer): Boolean; virtual; abstract;
+    { テクスチャの一部を書き換えられるように、画素の置き場を借りる（SDL の LockTexture / UnlockTexture）。
+      Access = Streaming のテクスチャだけが来る。ARect はテクスチャの中に収まっている。APixels は
+      ARect の左上の画素、APitch は行の幅（バイト）。返した置き場は UnlockTexture まで生きていること。
+      UnlockTexture は借りたものを GPU などへ反映する。既定は持てない（False）と何もしない。 }
+    function  LockTexture(ATexture: TPMLTexture; const ARect: TPMLRect;
+      out APixels: Pointer; out APitch: Integer): Boolean; virtual;
+    procedure UnlockTexture(ATexture: TPMLTexture); virtual;
     procedure DestroyTexture(ATexture: TPMLTexture); virtual; abstract;
     // 描画先にできるテクスチャ（Access = Target）を持てるか。既定は False。
     function  SupportsRenderTargets: Boolean; virtual;
@@ -292,6 +304,7 @@ type
     FIndexPixels  : TPMLSurface;          // 肩代わりのときの添字（INDEX8。SDL の palette_surface）
     FNativeVersion: LongWord;             // 肩代わりへ最後に写したパレットの版。0 = 写し直す
     FYUV          : TPMLYUVPlanes;        // 肩代わりのときの YUV の平面（SDL の texture->yuv）
+    FLockedSurface: TPMLSurface;          // LockToSurface が渡したサーフェス（SDL の texture->locked_surface）
     procedure RefreshNativeFromYUV;
     procedure ReleaseDriverPalette;
     procedure RefreshNative;
@@ -308,6 +321,24 @@ type
 
     // ARect が空ならテクスチャ全体。
     procedure Update(const ARect: TPMLRect; APixels: Pointer; APitch: Integer);
+
+    { 画素を直接書き換えるために借りる（SDL_LockTexture）。Access = Streaming だけ（でなければ
+      EPMLArgument）。ARect が空ならテクスチャ全体。返すのは ARect の左上の画素で、APitch は行の幅
+      （バイト）。Unlock までの間、その置き場に書く。**中身は Lock の前のものとは限らない**
+      （GPU のドライバは、Update した絵を読み戻さない。全部書き直すか、先に全体を書いてから使う）。
+      YV12 / IYUV / NV12 / NV21 は全体の Lock だけ（でなければ EPMLArgument）。この 4 つは
+      Y・U・V（UV）の平面が続けて並ぶ置き場（PMLCalculateYUVSize と同じ）で、行の幅は Y のもの。
+      ARect がテクスチャの外に出るのは EPMLArgument（SDL は確かめず、置き場の外を指す）。
+      Lock の間に描いてもよいが、Lock した置き場に書いた分は Unlock まで描かれる絵に効かない。 }
+    function  Lock(const ARect: TPMLRect; out APitch: Integer): Pointer;
+    { 書き換えを反映する（SDL_UnlockTexture）。Streaming でなければ何もしない。Lock せずに呼んでも
+      壊れない。LockToSurface で渡したサーフェスはここで解放される（使い終えたこと）。 }
+    procedure Unlock;
+    { サーフェスとして借りる（SDL_LockTextureToSurface）。ARect はテクスチャの中に切る
+      （空ならテクスチャ全体）。返すサーフェスは Lock した画素を指す（画素は持たない）。テクスチャが
+      持つので、Free しない。Unlock で解放される。インデックス形式なら、テクスチャのパレットを持つ。
+      何も残らない矩形は EPMLArgument。YUV の形式はサーフェスにできない（EPMLArgument）。 }
+    function  LockToSurface(const ARect: TPMLRect): TPMLSurface;
 
     { パレットを替える（SDL_SetTexturePalette）。インデックス形式（INDEX8）のテクスチャだけ。
       AOwned なら、替えたときかテクスチャを消すときに一緒に解放する。借りたパレットは、
@@ -956,6 +987,18 @@ begin
   Result := False;
 end;
 
+function TPMLRenderDriver.LockTexture(ATexture: TPMLTexture; const ARect: TPMLRect;
+  out APixels: Pointer; out APitch: Integer): Boolean;
+begin
+  APixels := nil;
+  APitch := 0;
+  Result := False;
+end;
+
+procedure TPMLRenderDriver.UnlockTexture(ATexture: TPMLTexture);
+begin
+end;
+
 { TPMLTexture }
 
 { ---- パレット（SDL_render.c の SDL_SetTexturePalette と UpdateTexturePalette） ----
@@ -1201,6 +1244,7 @@ begin
   end;
   FreeAndNil(FNative);
   FreeAndNil(FIndexPixels);
+  FreeAndNil(FLockedSurface);
   FreeAndNil(FYUV);
   if FOwnsPalette then
     FreeAndNil(FPalette);
@@ -1298,6 +1342,107 @@ begin
   Result := (AReal.W > 0) and (AReal.H > 0);
 end;
 
+
+{ ---- Lock / Unlock（SDL_render.c の SDL_LockTexture、SDL_LockTextureToSurface、SDL_UnlockTexture） ---- }
+
+function IsPackedYUV(AFormat: TPMLPixelFormat): Boolean; inline;
+begin
+  Result := (AFormat = PML_PIXELFORMAT_YUY2) or (AFormat = PML_PIXELFORMAT_UYVY)
+    or (AFormat = PML_PIXELFORMAT_YVYU);
+end;
+
+function TPMLTexture.Lock(const ARect: TPMLRect; out APitch: Integer): Pointer;
+var
+  R: TPMLRect;
+  Bpp: PtrUInt;
+begin
+  Result := nil;
+  APitch := 0;
+  if FRenderer = nil then
+    raise EPMLRenderError.Create('texture has no renderer');
+  if FAccess <> TPMLTextureAccess.Streaming then
+    raise EPMLArgument.Create('Lock: texture must be streaming');
+  if ARect.IsEmpty then
+    R := TPMLRect.Make(0, 0, FWidth, FHeight)
+  else
+    R := ARect;
+  // SDL は確かめず、置き場の外を指す。papimela は断る
+  if (R.X < 0) or (R.Y < 0) or (R.X + R.W > FWidth) or (R.Y + R.H > FHeight) then
+    raise EPMLArgument.CreateFmt('Lock: rect (%d, %d, %d x %d) is outside the %d x %d texture',
+      [R.X, R.Y, R.W, R.H, FWidth, FHeight]);
+  // 積んだ描画がこのテクスチャの古い中身を読むかもしれない。先に吐き出す
+  FRenderer.Flush;
+  if FYUV <> nil then
+  begin
+    // 肩代わりの YUV（SDL_SW_LockYUVTexture）。平面の形式は全体だけ
+    if not IsPackedYUV(FFormat) and ((R.X <> 0) or (R.Y <> 0) or (R.W <> FWidth) or (R.H <> FHeight)) then
+      raise EPMLArgument.Create('Lock: YV12, IYUV, NV12, NV21 textures only support full surface locks');
+    if IsPackedYUV(FFormat) then
+      Bpp := 2
+    else
+      Bpp := 0;
+    APitch := FYUV.Pitches[0];
+    Result := FYUV.Planes[0] + PtrUInt(R.Y) * PtrUInt(APitch) + PtrUInt(R.X) * Bpp;
+    Exit;
+  end;
+  if FIndexPixels <> nil then
+  begin
+    // 肩代わりの添字（SDL の palette_surface）。書いた分は Unlock で次に描くときに色へ直す
+    APitch := FIndexPixels.Pitch;
+    Result := PByte(FIndexPixels.Pixels) + PtrUInt(R.Y) * PtrUInt(APitch) + PtrUInt(R.X);
+    Exit;
+  end;
+  if not FRenderer.Driver.LockTexture(Self, R, Result, APitch) then
+    raise EPMLRenderError.Create('texture lock failed');
+end;
+
+procedure TPMLTexture.Unlock;
+begin
+  if FRenderer = nil then
+    Exit;
+  if FAccess <> TPMLTextureAccess.Streaming then
+    Exit;
+  FRenderer.Flush;
+  if FYUV <> nil then
+    // 全体を色に直して肩代わりへ写す（SDL_UnlockTextureYUV）
+    RefreshNativeFromYUV
+  else if FIndexPixels <> nil then
+    // 添字を替えたので、次に描くときに色へ直す（SDL_UnlockTexturePaletteSurface）
+    FNativeVersion := 0
+  else
+    FRenderer.Driver.UnlockTexture(Self);
+  FreeAndNil(FLockedSurface);
+end;
+
+function TPMLTexture.LockToSurface(const ARect: TPMLRect): TPMLSurface;
+var
+  R: TPMLRect;
+  Pixels: Pointer;
+  Pitch: Integer;
+begin
+  if FRenderer = nil then
+    raise EPMLRenderError.Create('texture has no renderer');
+  if FAccess <> TPMLTextureAccess.Streaming then
+    raise EPMLArgument.Create('Lock: texture must be streaming');
+  // SDL_GetRectIntersection で切る。何も残らなければ、幅 0 のサーフェスを作れず断られる
+  if not ClipToTexture(Self, ARect, R) then
+    raise EPMLArgument.Create('LockToSurface: the rect does not overlap the texture');
+  if PMLIsPixelFormatFourCC(FFormat) then
+    raise EPMLArgument.CreateFmt('LockToSurface: %s textures can''t be surfaces', [PMLPixelFormatName(FFormat)]);
+  Pixels := Lock(R, Pitch);
+  try
+    // 前の LockToSurface のサーフェスは、Unlock されなかったなら捨てる
+    FreeAndNil(FLockedSurface);
+    FLockedSurface := TPMLSurface.CreateFrom(Pixels, R.W, R.H, Pitch, FFormat);
+    if FPalette <> nil then
+      FLockedSurface.SetPalette(FPalette, False);
+  except
+    FreeAndNil(FLockedSurface);
+    Unlock;
+    raise;
+  end;
+  Result := FLockedSurface;
+end;
 procedure TPMLTexture.UpdateYUV(const ARect: TPMLRect; AY: Pointer; AYPitch: Integer;
   AU: Pointer; AUPitch: Integer; AV: Pointer; AVPitch: Integer);
 var

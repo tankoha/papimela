@@ -835,6 +835,88 @@ begin
   end;
 end;
 
+{ Lock / Unlock / LockToSurface（#41 の残り）。GPU のドライバは Lock の置き場（SDL の pixel_data）に書いた
+  全体を Unlock で上げる。ソフトウェアのドライバはテクスチャの画素そのもの。最初に全体を書いてから使う
+  （GPU の置き場は Update した絵を持たない）ので、どちらも同じ絵になる。 }
+var
+  LockLcg: LongWord;
+
+procedure LockFill(P: PByte; APitch, ARowBytes, ARows: Integer; ASeed: LongWord; AYUV: Boolean);
+var
+  X, Y: Integer;
+begin
+  LockLcg := ASeed;
+  for Y := 0 to ARows - 1 do
+    for X := 0 to ARowBytes - 1 do
+    begin
+      LockLcg := LockLcg * 1103515245 + 12345;
+      if AYUV then
+        P[Y * APitch + X] := 96 + Byte((LockLcg shr 16) and 63)
+      else
+        P[Y * APitch + X] := Byte(LockLcg shr 16);
+    end;
+end;
+
+procedure SceneLock(R: TPMLRenderer);
+var
+  T: TPMLTexture;
+  P: PByte;
+  Pitch: Integer;
+  S: TPMLSurface;
+  Pal: TPMLPalette;
+  Y: Integer;
+begin
+  Background(R);
+  // ARGB8888: 全体、続けて部分
+  T := R.CreateTexture(PML_PIXELFORMAT_ARGB8888, TPMLTextureAccess.Streaming, 8, 6);
+  T.BlendMode := TPMLBlendMode.None;
+  P := T.Lock(TPMLRect.Make(0, 0, 0, 0), Pitch);
+  LockFill(P, Pitch, 8 * 4, 6, 7, False);
+  T.Unlock;
+  P := T.Lock(TPMLRect.Make(2, 1, 3, 3), Pitch);
+  LockFill(P, Pitch, 3 * 4, 3, 99, False);
+  T.Unlock;
+  R.RenderTexture(T, FR(0, 0, 0, 0), FR(2, 2, 24, 18));
+  // INDEX8
+  T := R.CreateTexture(PML_PIXELFORMAT_INDEX8, TPMLTextureAccess.Streaming, 8, 6);
+  Pal := NewTestPalette;
+  T.SetPalette(Pal, True);
+  P := T.Lock(TPMLRect.Make(0, 0, 0, 0), Pitch);
+  LockFill(P, Pitch, 8, 6, 5, False);
+  T.Unlock;
+  R.RenderTexture(T, FR(0, 0, 0, 0), FR(32, 2, 24, 18));
+  // 平面の YUV と NV
+  T := R.CreateTexture(PML_PIXELFORMAT_IYUV, TPMLTextureAccess.Streaming, 8, 6);
+  P := T.Lock(TPMLRect.Make(0, 0, 0, 0), Pitch);
+  LockFill(P, 0, 8 * 6 + 2 * 3 * 4, 1, 21, True);
+  T.Unlock;
+  R.RenderTexture(T, FR(0, 0, 0, 0), FR(2, 22, 24, 18));
+  T := R.CreateTexture(PML_PIXELFORMAT_NV12, TPMLTextureAccess.Streaming, 8, 6);
+  P := T.Lock(TPMLRect.Make(0, 0, 0, 0), Pitch);
+  LockFill(P, 0, 8 * 6 + 2 * 3 * 4, 1, 22, True);
+  T.Unlock;
+  R.RenderTexture(T, FR(0, 0, 0, 0), FR(32, 22, 24, 18));
+  // パックされた YUV の部分の Lock
+  T := R.CreateTexture(PML_PIXELFORMAT_YUY2, TPMLTextureAccess.Streaming, 8, 6);
+  P := T.Lock(TPMLRect.Make(0, 0, 0, 0), Pitch);
+  LockFill(P, Pitch, 8 * 2, 6, 31, True);
+  T.Unlock;
+  P := T.Lock(TPMLRect.Make(2, 1, 4, 3), Pitch);
+  LockFill(P, Pitch, 4 * 2, 3, 32, True);
+  T.Unlock;
+  R.RenderTexture(T, FR(0, 0, 0, 0), FR(2, 42, 24, 18));
+  // LockToSurface: サーフェスに塗る
+  T := R.CreateTexture(PML_PIXELFORMAT_ARGB8888, TPMLTextureAccess.Streaming, 8, 6);
+  T.BlendMode := TPMLBlendMode.None;
+  P := T.Lock(TPMLRect.Make(0, 0, 0, 0), Pitch);
+  LockFill(P, Pitch, 8 * 4, 6, 3, False);
+  T.Unlock;
+  S := T.LockToSurface(TPMLRect.Make(1, 1, 5, 3));
+  for Y := 0 to S.Height - 1 do
+    FillChar((PByte(S.Pixels) + Y * S.Pitch)^, S.Width * 4, $7F);
+  T.Unlock;
+  R.RenderTexture(T, FR(0, 0, 0, 0), FR(32, 42, 24, 18));
+end;
 procedure OffscreenSection;
 var
   G: TPMLRenderer;
@@ -945,6 +1027,7 @@ begin
   CheckPaletteNative;
   Compare('YUV（7 形式・5 つの色空間・奇数・拡大・変調・回転・平面ごとと部分の更新）', @SceneYUV, 3);
   CheckYUVNative;
+  Compare('Lock / Unlock / LockToSurface（ARGB・INDEX8・IYUV・NV12・YUY2・サーフェス。全体と部分）', @SceneLock, 2);
 end;
 
 { ---- ウィンドウ ---- }

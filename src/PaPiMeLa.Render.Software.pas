@@ -83,6 +83,8 @@ type
     function  CreateTexture(ATexture: TPMLTexture): Boolean; override;
     function  UpdateTexture(ATexture: TPMLTexture; const ARect: TPMLRect;
       APixels: Pointer; APitch: Integer): Boolean; override;
+    function  LockTexture(ATexture: TPMLTexture; const ARect: TPMLRect;
+      out APixels: Pointer; out APitch: Integer): Boolean; override;
     procedure DestroyTexture(ATexture: TPMLTexture); override;
     function  SupportsRenderTargets: Boolean; override;
     // FourCC（YUV）のほかはどの形式も持てる（INDEX8 もサーフェスのパレットで描く）。
@@ -225,6 +227,23 @@ begin
     Move(Src^, Dst^, RowBytes);
   end;
   Result := True;
+end;
+
+{ テクスチャの画素そのものを渡す（SDL の SW_LockTexture）。返した後の反映は要らない。 }
+function TPMLSoftwareRenderDriver.LockTexture(ATexture: TPMLTexture; const ARect: TPMLRect;
+  out APixels: Pointer; out APitch: Integer): Boolean;
+var
+  S: TPMLSurface;
+begin
+  APixels := nil;
+  APitch := 0;
+  S := TextureSurface(ATexture);
+  Result := S <> nil;
+  if not Result then
+    Exit;
+  APitch := S.Pitch;
+  APixels := PByte(S.Pixels) + PtrUInt(ARect.Y) * PtrUInt(S.Pitch)
+    + PtrUInt(ARect.X) * PtrUInt(S.Details.BytesPerPixel);
 end;
 
 { 中身を解放する。DriverData を解放するのはここだけ（二重解放を避ける）。 }

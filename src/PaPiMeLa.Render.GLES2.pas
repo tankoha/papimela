@@ -246,6 +246,9 @@ type
       AV: Pointer; AVPitch: Integer): Boolean; override;
     function  UpdateTextureNV(ATexture: TPMLTexture; const ARect: TPMLRect;
       AY: Pointer; AYPitch: Integer; AUV: Pointer; AUVPitch: Integer): Boolean; override;
+    function  LockTexture(ATexture: TPMLTexture; const ARect: TPMLRect;
+      out APixels: Pointer; out APitch: Integer): Boolean; override;
+    procedure UnlockTexture(ATexture: TPMLTexture); override;
     procedure DestroyTexture(ATexture: TPMLTexture); override;
     function  CreatePalette(APalette: TPMLTexturePalette): Boolean; override;
     function  UpdatePalette(APalette: TPMLTexturePalette;
@@ -570,6 +573,11 @@ type
     IdV     : GLuint;
     // 変換の種類（行列の表の添字）。YUV のときだけ意味を持つ
     YCbCr   : TPMLYCbCrType;
+    { Lock の置き場（SDL の pixel_data）。Streaming のテクスチャだけが持ち、0 で始まる。Update は
+      ここへ書かない（SDL と同じ）ので、Lock した置き場の中身は Update した絵とは限らない。
+      Unlock が全体をここから GPU へ上げる。YUV は Y の平面のあとに色差の平面が続く。 }
+    PixelData : TBytes;
+    PixelPitch: Integer;
   end;
 
   { パレットの写し（TPMLTexturePalette.DriverData）。256x1 の RGBA テクスチャ。 }
@@ -1378,6 +1386,7 @@ var
   YCbCr: TPMLYCbCrType;
   CW, CH: Integer;
   GLFormat: GLenum;
+  Size: PtrUInt;
 begin
   Result := False;
   Indexed := ATexture.Format = PML_PIXELFORMAT_INDEX8;
@@ -1457,8 +1466,48 @@ begin
     Data.Free;
     Exit;
   end;
+  if ATexture.Access = TPMLTextureAccess.Streaming then
+  begin
+    // Lock の置き場。SDL と同じ大きさ（YUV は色差の平面の分も）で、0 で埋める
+    Data.PixelPitch := ATexture.Width * Integer(BytesPerTexel(ATexture.Format));
+    Size := PtrUInt(ATexture.Height) * PtrUInt(Data.PixelPitch);
+    if Planar or NV then
+      // Y の平面のあとに色差の平面が続く大きさ（Update が読む並びと同じ。SDL の計算と同じ値）
+      PMLCalculateYUVSize(ATexture.Format, ATexture.Width, ATexture.Height, Size, Data.PixelPitch);
+    SetLength(Data.PixelData, Size);
+    FillChar(Data.PixelData[0], Size, 0);
+  end;
   ATexture.DriverData := Data;
   Result := True;
+end;
+
+{ Lock の置き場を渡す（SDL の GLES2_LockTexture）。 }
+function TPMLGLES2RenderDriver.LockTexture(ATexture: TPMLTexture; const ARect: TPMLRect;
+  out APixels: Pointer; out APitch: Integer): Boolean;
+var
+  Data: TPMLGLES2Texture;
+begin
+  APixels := nil;
+  APitch := 0;
+  Data := TextureData(ATexture);
+  Result := (Data <> nil) and (Length(Data.PixelData) > 0);
+  if not Result then
+    Exit;
+  APitch := Data.PixelPitch;
+  APixels := @Data.PixelData[0] + PtrUInt(ARect.Y) * PtrUInt(Data.PixelPitch)
+    + PtrUInt(ARect.X) * BytesPerTexel(ATexture.Format);
+end;
+
+{ 置き場の全体を GPU へ上げる（SDL の GLES2_UnlockTexture。「全体を更新する。今のところ」）。 }
+procedure TPMLGLES2RenderDriver.UnlockTexture(ATexture: TPMLTexture);
+var
+  Data: TPMLGLES2Texture;
+begin
+  Data := TextureData(ATexture);
+  if (Data = nil) or (Length(Data.PixelData) = 0) then
+    Exit;
+  UpdateTexture(ATexture, TPMLRect.Make(0, 0, ATexture.Width, ATexture.Height),
+    @Data.PixelData[0], Data.PixelPitch);
 end;
 
 { 矩形の部分を更新する。行の幅が詰まっていないときの詰め直しは UploadPlane。

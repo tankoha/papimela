@@ -16,7 +16,7 @@
 > **2026-10-15 に Raspberry Pi 5（aarch64、Ubuntu 26.04）の新しい端末へ移った。** そこで `SDL_MixAudio` の 8 形式（`PaPiMeLa.Audio.Mixer`、T-56）と
 > WAV の読み込み（`PaPiMeLa.Audio.Wave`、#54、T-57）を済ませた（どちらも Sonnet。ollama が無いので Low の WAV も Sonnet）。SDL の不具合 D-73 を見つけた。
 > さらに PulseAudio（`PaPiMeLa.Audio.Pulse`、#57。`PaPiMeLa.Platform.Pulse`、#20）と ALSA（`PaPiMeLa.Audio.Alsa`、#58。`PaPiMeLa.Platform.Alsa`、#20）を済ませた（T-58・T-60・T-61 は CI、T-59・T-62 は手元専用）。SDL の不具合 D-74・D-75 を見つけた。**これでオーディオは、第 11 章の #51〜#58 とヒントの口まで揃った**（残りは下の「残り」）。
-> 表示サーバ無しの 38 本が全部通る。**手元（Pi 5）の対話の確認は残っていない。** この端末の違いは §2.1。
+> 表示サーバ無しの 39 本が全部通る。**手元（Pi 5）の対話の確認は残っていない。** この端末の違いは §2.1。
 > 次の候補は §3。
 
 ## 1. 今どこにいるか
@@ -25,7 +25,7 @@
 |---|---|
 | リポジトリ | https://github.com/tankoha/papimela（公開、Issues 有効）。手元のセッションは `master` に直接 push、クラウドのセッションは指定のブランチへ push して、手元で早送りマージする |
 | CI | 緑。rawpaco 激辛、checkorigin、アンブレラの古さ（`genumbrella.bb --check`）、図の検査、表示サーバ無しのテスト 32 本、Pong の自己検査、GLES2 と ソフトウェアのドライバの画素比較（llvmpipe）。ジョブ 60 分・GLES2 の手順 5 分の時間制限つき |
-| テスト | 表示サーバ無しの 38 本はすべて成功（2026-10-15 に Pi5 で流した。以前の「件」は数え方が違うので、これからはこの数え方）。PipeWire の T-54 と PulseAudio の T-59 は手元専用で、どちらも Pi5 で通る。PipeWire の T-54 は手元専用（30 件）。手元専用と対話の検査は `docs/TEST-LOG.md` の各行 |
+| テスト | 表示サーバ無しの 39 本はすべて成功（2026-10-15 に Pi5 で流した。以前の「件」は数え方が違うので、これからはこの数え方）。PipeWire の T-54 と PulseAudio の T-59 は手元専用で、どちらも Pi5 で通る。PipeWire の T-54 は手元専用（30 件）。手元専用と対話の検査は `docs/TEST-LOG.md` の各行 |
 | 不具合 | 73 件。うち上流 SDL の 25 件は未報告（D-53 は SDL 自身が FIXME で知っている。他の 24 件は報告するかを検討中。方針は `CLAUDE.md`。README の一覧に全件を載せた） |
 | 規模 | 手書き 63 ユニット（`src/*.pas`）+ 生成（Wayland プロトコル 21、キーボードの表 2、EGL / GLES2 の定数 2、DebugText の字形 1、音声のチャンネル数の変換と周波数の変換の係数 2、PipeWire の定数 1、アンブレラ 2）。手書きの `src/*.pas` が約 4.0 万行、生成を含めて約 5.5 万行（2026-10-14 に数え直した） |
 
@@ -135,6 +135,9 @@ D-69（録音で書き換えたバイト数を次の論理デバイスへ持ち�
 - **ネイティブのデバッガ**: gdb はシステムに入れず、`apt-get download gdb libbabeltrace1 libsource-highlight4t64 libdebuginfod1t64` を `dpkg-deb -x` で展開して `LD_LIBRARY_PATH` で動かせた。C が作ったスレッドの中で落ちるとき（FPC の SIGSEGV の知らせも出ない）に、`thread apply all bt` が決め手になった
 - **PulseAudio の落とし穴**: `pa_stream_disconnect` は返事が来るまでストリームを持ち続け、その間に状態の知らせが出る。userdata にデバイスの中身を渡すと、`CloseDevice` で解放した後に呼ばれて落ちる。
   待つスレッドは、ストリームが止まったまま知らせが来ないと戻らない（PipeWire はシンクが消えるとストリームを別の所へ動かして止める）
+- **参照版の SDL（main）を Pi 5 で静的に作れる**（cmake と ninja を入れた後、約 5 分）: `cmake -G Ninja -S reference/SDL -B <場所> -DSDL_UNIX_CONSOLE_BUILD=ON -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TESTS=OFF -DSDL_X11=OFF -DSDL_WAYLAND=OFF -DSDL_KMSDRM=OFF -DSDL_OPENGL=OFF -DSDL_OPENGLES=OFF -DSDL_AUDIO=OFF -DSDL_GPU=OFF -DSDL_VULKAN=OFF -DSDL_CAMERA=OFF -DSDL_JOYSTICK=OFF -DSDL_HAPTIC=OFF -DSDL_SENSOR=OFF -DSDL_DIALOG=OFF -DSDL_TRAY=OFF -DCMAKE_BUILD_TYPE=Release && ninja -C <場所>`。
+  Pascal 側の期待値は、システムの 3.4.2 でなく**これ**（papimela は main を写すので、3.4.2 と違う所がある。例: パックされた YUV の Lock）。テクスチャの Lock の期待値の作り方は `tools/texture-lock-expect/gen.bb`
+- **T-22 の「VSync 1 は画面のリフレッシュに揃う」は、この端末の画面（180 Hz と報告されるが 90 fps）で落ちる**。Lock の変更とは無関係（2026-10-16 に確認）。ほかの 6 つの窓の検査は通る
 - **大きさを偽るストリーム**（`Size` を実際より大きく答える）で、data チャンクが宣言より短い場面を作れる。SDL 側は `SDL_OpenIO` で同じ嘘をつくストリームを作る。
   切り詰めのヒントの本丸の経路は、これでしか通らない
 - **変異の検査は、クラッシュと「落ちた」を区別する**。落ちた件数を grep で数えるだけだと、実行時エラーで途中で終わった変異が「0 件」に見える。結論の行の有無も見る
@@ -165,7 +168,7 @@ D-69（録音で書き換えたバイト数を次の論理デバイスへ持ち�
      録音は手元にソースが無いので実機では通していない（T-54 は飛ばす）。PipeWire の既定の変更での移動も実機では見ていない
      （利用者の既定を変えるので）
    - 浮動小数の変換は、範囲の外の値で SDL の SSE2 版とスカラー版の結果が割れる（D-64・D-65）。期待値の入力は範囲の中に置く
-2. 残してあるテクスチャのもの: テクスチャの Lock / Unlock（`SDL_LockTexture`。Streaming のテクスチャ。YUV は SDL_SW_LockYUVTexture）、
+2. 残してあるテクスチャのもの: ~~テクスチャの Lock / Unlock~~ **済んだ（2026-10-16、Pi 5 で。`TPMLTexture.Lock` / `Unlock` / `LockToSurface`、T-64）**。残りは
    I444 / P010 などの YUV、サーフェスから作るときのカラーキー（INDEX8 のほかは見ていない）、ソフトウェアのレンダラの Linear が
    実は Nearest（`PMLBlitScaled` が方式を使わない。SDL は補間する）
 3. IME の残り: 埋め込み候補（`TextEditingCandidates`）、IBus の ForwardKeyEvent、ibus-anthy など他のエンジンの属性の実測、GNOME / KDE での IBus 直結（§7.5 の要検証）。IBus の検査環境は `tools/ibus-sandbox/`（ibus + ibus-mozc を入れた Ubuntu 24.04 の最小 rootfs を bwrap で隔離。デスクトップの fcitx5 と混ざらない）。実測の結果は `spikes/RESULTS.md` のスパイク 3
@@ -215,7 +218,7 @@ Pong もすべて書き換え、今は `uses SysUtils, Math, PaPiMeLa` だけで
 表示サーバ無しで通るもの（CI と同じ）:
 
 ```bash
-for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_render_transform test_render_target test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_drop test_drag_source test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds test_audio_convert test_audio_stream test_audio_mixer test_audio_wave test_audio_device test_pipewire_abi test_pulse_abi test_alsa_abi test_alsa_chmap test_audio_autoselect; do
+for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_render_transform test_render_target test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_drop test_drag_source test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds test_audio_convert test_audio_stream test_audio_mixer test_audio_wave test_audio_device test_pipewire_abi test_pulse_abi test_alsa_abi test_alsa_chmap test_audio_autoselect test_texture_lock; do
   fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/$t test/$t.pas && ./test/$t
 done
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -oexamples/pong examples/pong.pas && ./examples/pong --selftest
@@ -243,7 +246,7 @@ env -u WAYLAND_DISPLAY LIBGL_ALWAYS_SOFTWARE=1 ./test/test_render_gles2   # Mesa
 cd papimela && mkdir -p lib
 B='fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib'
 # 0. 表示サーバ無しの分（CI と同じ。手元の新しい Mesa でも通るか）
-for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds test_audio_convert test_audio_stream test_audio_mixer test_audio_wave test_audio_device test_pipewire_abi test_pulse_abi test_alsa_abi test_alsa_chmap test_audio_autoselect; do
+for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds test_audio_convert test_audio_stream test_audio_mixer test_audio_wave test_audio_device test_pipewire_abi test_pulse_abi test_alsa_abi test_alsa_chmap test_audio_autoselect test_texture_lock; do
   $B -otest/$t test/$t.pas && ./test/$t | tail -1
 done
 # 1. 実機の Wayland（自動判定。最後の行が「結論」で終わればよい）
@@ -353,6 +356,7 @@ man-db などの設定は所有者の切り替えで失敗するが、`dpkg -r -
 - SDL の X11 の GLX の経路では、作った直後のスワップ間隔が 1 だった（SDL の「既定で VSync 無し」が効いていない。
   D-53 の確認の途中で見た。追っていない。papimela は X11 を持たないので急がない）
 - D-40 の「止まる」側の仕組み（llvmpipe の作業スレッドで例外が起きる）は推測のまま
+- **RGB565 → ARGB8888 の変換が SDL と ±1 違う**（SDL のレンダラ・`SDL_ConvertPixels` は、65536 値のうち 23200 で papimela より 1 大きい: 緑の 6 ビットを bit の複製で広げる（`SDL_blit_N` の表）。papimela は丸めた比（`SDL_expand_byte`）。設計は `SDL_blit_N` を手で写さない（§4.4）ので、不具合ではなく設計の帰結。RGB565 / BGR565 / RGB332 の絵を SDL とそろえたいなら、変換を `SDL_blit_N` の表に合わせる）。T-64 は RGB565 を避けた
 - ALSA で読んだだけで確かめていない SDL の怪しい点（D-75 は文面だけを確かめた）: `alsa_chmap_cfg_ordered_fixed_or_paired` が全部一致した後に配列の外を 1 つ読む
   （外の値が偶然 0 でなければ次の経路が同じ並びを入れるので、見える違いは無い）、成功した道で `snd_pcm_query_chmaps` の結果を解放しない（漏れ）、
   失敗の道で閉じ済みの ctl をもう一度閉じることがある、切断の知らせの直後に ALSA のハンドルを解放する（デバイスはまだ指している）。
