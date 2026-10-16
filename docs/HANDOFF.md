@@ -169,8 +169,8 @@ D-69（録音で書き換えたバイト数を次の論理デバイスへ持ち�
      （利用者の既定を変えるので）
    - 浮動小数の変換は、範囲の外の値で SDL の SSE2 版とスカラー版の結果が割れる（D-64・D-65）。期待値の入力は範囲の中に置く
 2. 残してあるテクスチャのもの: ~~テクスチャの Lock / Unlock~~ **済んだ（2026-10-16、Pi 5 で。`TPMLTexture.Lock` / `Unlock` / `LockToSurface`、T-64）**。残りは
-   I444 / P010 などの YUV、サーフェスから作るときのカラーキー（INDEX8 のほかは見ていない）、ソフトウェアのレンダラの Linear が
-   実は Nearest（`PMLBlitScaled` が方式を使わない。SDL は補間する）
+   I444 / P010 などの YUV、サーフェスから作るときのカラーキー（INDEX8 のほかは見ていない）、~~ソフトウェアのレンダラの Linear が
+   実は Nearest（`PMLBlitScaled` が方式を使わない。SDL は補間する）~~（**2026-10-17 に持ち主が「そのまま」と決めた。直さない**）
 3. IME の残り: 埋め込み候補（`TextEditingCandidates`）、IBus の ForwardKeyEvent、ibus-anthy など他のエンジンの属性の実測、GNOME / KDE での IBus 直結（§7.5 の要検証）。IBus の検査環境は `tools/ibus-sandbox/`（ibus + ibus-mozc を入れた Ubuntu 24.04 の最小 rootfs を bwrap で隔離。デスクトップの fcitx5 と混ざらない）。実測の結果は `spikes/RESULTS.md` のスパイク 3
 
 済んだもの（2026-10-14）: **テクスチャの種類**。3b パレット（INDEX8）と 3c YUV（7 形式、色空間）。§2 の表。
@@ -356,7 +356,7 @@ man-db などの設定は所有者の切り替えで失敗するが、`dpkg -r -
 - SDL の X11 の GLX の経路では、作った直後のスワップ間隔が 1 だった（SDL の「既定で VSync 無し」が効いていない。
   D-53 の確認の途中で見た。追っていない。papimela は X11 を持たないので急がない）
 - D-40 の「止まる」側の仕組み（llvmpipe の作業スレッドで例外が起きる）は推測のまま
-- **RGB565 → ARGB8888 の変換が SDL と ±1 違う**（SDL のレンダラ・`SDL_ConvertPixels` は、65536 値のうち 23200 で papimela より 1 大きい: 緑の 6 ビットを bit の複製で広げる（`SDL_blit_N` の表）。papimela は丸めた比（`SDL_expand_byte`）。設計は `SDL_blit_N` を手で写さない（§4.4）ので、不具合ではなく設計の帰結。RGB565 / BGR565 / RGB332 の絵を SDL とそろえたいなら、変換を `SDL_blit_N` の表に合わせる）。T-64 は RGB565 を避けた
+- **RGB565 → ARGB8888 の変換が SDL と ±1 違う**（**2026-10-17 に持ち主が「±1 ならそのまま」と決めた。直さない**）（SDL のレンダラ・`SDL_ConvertPixels` は、65536 値のうち 23200 で papimela より 1 大きい: 緑の 6 ビットを bit の複製で広げる（`SDL_blit_N` の表）。papimela は丸めた比（`SDL_expand_byte`）。設計は `SDL_blit_N` を手で写さない（§4.4）ので、不具合ではなく設計の帰結。RGB565 / BGR565 / RGB332 の絵を SDL とそろえたいなら、変換を `SDL_blit_N` の表に合わせる）。T-64 は RGB565 を避けた
 - ALSA で読んだだけで確かめていない SDL の怪しい点（D-75 は文面だけを確かめた）: `alsa_chmap_cfg_ordered_fixed_or_paired` が全部一致した後に配列の外を 1 つ読む
   （外の値が偶然 0 でなければ次の経路が同じ並びを入れるので、見える違いは無い）、成功した道で `snd_pcm_query_chmaps` の結果を解放しない（漏れ）、
   失敗の道で閉じ済みの ctl をもう一度閉じることがある、切断の知らせの直後に ALSA のハンドルを解放する（デバイスはまだ指している）。
