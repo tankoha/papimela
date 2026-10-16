@@ -444,6 +444,9 @@ type
     procedure CreateDebugFont;
     function  PrepareTexture(ATexture: TPMLTexture): TPMLTexture;
     function  CreateIndexedFromSurface(ASurface: TPMLSurface): TPMLTexture;
+    function  ColorKeyTextureFormat(ASurface: TPMLSurface): TPMLPixelFormat;
+    function  ConvertWithColorKey(ASurface: TPMLSurface; AFormat: TPMLPixelFormat): TPMLSurface;
+    procedure InheritSurfaceModes(ATexture: TPMLTexture; ASurface: TPMLSurface);
   private
     FPalettes: TPMLTexturePalettes;       // ドライバのパレット（SDL の renderer->palettes）
     procedure RemoveTexture(ATexture: TPMLTexture);
@@ -2522,8 +2525,75 @@ begin
     Result.Free;
     raise;
   end;
+  InheritSurfaceModes(Result, ASurface);
+end;
+
+{ カラーキーがあるサーフェスのテクスチャの形式（SDL_CreateTextureFromSurface の形式選び）。キーの色の画素を
+  透明にするので、アルファのある形式でなければならない。アルファが無い形式は、同じ並びでアルファのある形式に
+  する（XRGB8888 → ARGB8888 など）。そうした形式が無い（24 ビット・565・332 など）、またはドライバが持たない
+  ときは ARGB8888。
+
+  PORT-NOTE: SDL の GetClosestSupportedFormat は、レンダラの対応形式の表の中から選ぶ。SDL のソフトウェアの
+  レンダラは ARGB8888 と XRGB8888 しか持たないので何でも ARGB8888 になるが、papimela のドライバは RGB 系を
+  直接持つので、同じ並びのアルファの形式があればそれを使う。 }
+function TPMLRenderer.ColorKeyTextureFormat(ASurface: TPMLSurface): TPMLPixelFormat;
+begin
+  Result := ASurface.Format;
+  if not ASurface.Details.HasAlpha then
+  begin
+    if Result = PML_PIXELFORMAT_XRGB8888 then Result := PML_PIXELFORMAT_ARGB8888
+    else if Result = PML_PIXELFORMAT_XBGR8888 then Result := PML_PIXELFORMAT_ABGR8888
+    else if Result = PML_PIXELFORMAT_BGRX8888 then Result := PML_PIXELFORMAT_BGRA8888
+    else if Result = PML_PIXELFORMAT_RGBX8888 then Result := PML_PIXELFORMAT_RGBA8888
+    else if Result = PML_PIXELFORMAT_XRGB4444 then Result := PML_PIXELFORMAT_ARGB4444
+    else if Result = PML_PIXELFORMAT_XRGB1555 then Result := PML_PIXELFORMAT_ARGB1555
+    else Result := PML_PIXELFORMAT_ARGB8888;
+  end;
+  if not FDriver.SupportsTextureFormat(Result) or PMLIsPixelFormatIndexed(Result) then
+    Result := PML_PIXELFORMAT_ARGB8888;
+end;
+
+{ カラーキーの色の画素を透明（アルファ 0）にして、別の形式へ写す。キーはアルファのビットを見ずに比べる
+  （SDL のカラーキー付きのブリットと同じ）。透明にした画素の色の成分はそのまま残す。 }
+function TPMLRenderer.ConvertWithColorKey(ASurface: TPMLSurface; AFormat: TPMLPixelFormat): TPMLSurface;
+var
+  X, Y: Integer;
+  C: TPMLColor;
+  Mask: LongWord;
+begin
+  Mask := not ASurface.Details.AMask;
+  Result := TPMLSurface.Create(ASurface.Width, ASurface.Height, AFormat);
+  try
+    for Y := 0 to ASurface.Height - 1 do
+      for X := 0 to ASurface.Width - 1 do
+      begin
+        C := ASurface.ReadPixel(X, Y);
+        if (ASurface.ReadRaw(X, Y) and Mask) = (ASurface.ColorKey and Mask) then
+          C.A := 0;
+        Result.WritePixel(X, Y, C);
+      end;
+  except
+    Result.Free;
+    raise;
+  end;
+end;
+
+{ サーフェスの色の変調・アルファの変調・ブレンドモードをテクスチャへ引き継ぐ。ブレンドモードは、カラーキーが
+  あれば Blend、なければサーフェスのもの。
+
+  PORT-NOTE: SDL のサーフェスは、アルファのある形式なら作った時点でブレンドモードが Blend になっている。
+  papimela のサーフェスの既定は None のまま（ブリットの既定を変えないため）なので、BlendMode を一度も
+  書いていないサーフェスは、アルファの有無で SDL の既定に合わせる。 }
+procedure TPMLRenderer.InheritSurfaceModes(ATexture: TPMLTexture; ASurface: TPMLSurface);
+begin
+  ATexture.ColorMod := ASurface.ColorMod;
+  ATexture.AlphaMod := ASurface.AlphaMod;
   if ASurface.HasColorKey then
-    Result.BlendMode := TPMLBlendMode.Blend;
+    ATexture.BlendMode := TPMLBlendMode.Blend
+  else if ASurface.BlendModeAssigned then
+    ATexture.BlendMode := ASurface.BlendMode
+  else if ASurface.Details.HasAlpha then
+    ATexture.BlendMode := TPMLBlendMode.Blend;
 end;
 
 function TPMLRenderer.CreateTextureFromSurface(ASurface: TPMLSurface): TPMLTexture;
@@ -2538,7 +2608,9 @@ begin
   // ここに来るインデックス形式（パレットの無いもの、INDEX1 / 2 / 4）も変換する。
   // PORT-NOTE: SDL は INDEX1 / 2 / 4 のサーフェスを INDEX8 のテクスチャへ広げるが、papimela の
   // サーフェスは 1 画素 1 バイト未満の形式の画素を読み書きできないので、広げられない。
-  if FDriver.SupportsTextureFormat(ASurface.Format)
+  if ASurface.HasColorKey and not PMLIsPixelFormatIndexed(ASurface.Format) then
+    Src := ConvertWithColorKey(ASurface, ColorKeyTextureFormat(ASurface))
+  else if FDriver.SupportsTextureFormat(ASurface.Format)
   and not PMLIsPixelFormatIndexed(ASurface.Format) then
     Src := ASurface
   else
@@ -2550,9 +2622,7 @@ begin
     if Src <> ASurface then
       Src.Free;
   end;
-  // SDL と同じく、アルファを持つサーフェスから作ったテクスチャは Blend にする。
-  if ASurface.Details.HasAlpha then
-    Result.BlendMode := TPMLBlendMode.Blend;
+  InheritSurfaceModes(Result, ASurface);
 end;
 
 { ---- 拡大率と論理解像度 ----

@@ -1,0 +1,48 @@
+{ test/texture_colorkey_expected.inc — tools/texture-colorkey-expect/gen.bb が作る。手で直さない。
+  SDL（参照版）のソフトウェアのレンダラに、SDL_CreateTextureFromSurface を通した結果。
+  1 行 = 1 場面。'<場面> <テクスチャの形式> blend=.. cmod=.. amod=.. <ハッシュ> <ハッシュ（ブレンド無し）>。 }
+
+const
+  ColorKeyExpected: array[0..40] of String = (
+    'argb8888_plain ARGB8888 blend=1 cmod=255,255,255 amod=255 1A5A06A6 1A5A06A6',
+    'argb8888_key ARGB8888 blend=1 cmod=255,255,255 amod=255 B411BF5D 95188523',
+    'xrgb8888_plain XRGB8888 blend=0 cmod=255,255,255 amod=255 1A5A06A6 1A5A06A6',
+    'xrgb8888_key ARGB8888 blend=1 cmod=255,255,255 amod=255 B411BF5D 95188523',
+    'abgr8888_plain ARGB8888 blend=1 cmod=255,255,255 amod=255 1A5A06A6 1A5A06A6',
+    'abgr8888_key ARGB8888 blend=1 cmod=255,255,255 amod=255 B411BF5D 95188523',
+    'xbgr8888_plain XRGB8888 blend=0 cmod=255,255,255 amod=255 1A5A06A6 1A5A06A6',
+    'xbgr8888_key ARGB8888 blend=1 cmod=255,255,255 amod=255 B411BF5D 95188523',
+    'bgra8888_plain ARGB8888 blend=1 cmod=255,255,255 amod=255 1A5A06A6 1A5A06A6',
+    'bgra8888_key ARGB8888 blend=1 cmod=255,255,255 amod=255 B411BF5D 95188523',
+    'bgrx8888_plain XRGB8888 blend=0 cmod=255,255,255 amod=255 1A5A06A6 1A5A06A6',
+    'bgrx8888_key ARGB8888 blend=1 cmod=255,255,255 amod=255 B411BF5D 95188523',
+    'rgba8888_plain ARGB8888 blend=1 cmod=255,255,255 amod=255 1A5A06A6 1A5A06A6',
+    'rgba8888_key ARGB8888 blend=1 cmod=255,255,255 amod=255 B411BF5D 95188523',
+    'rgbx8888_plain XRGB8888 blend=0 cmod=255,255,255 amod=255 1A5A06A6 1A5A06A6',
+    'rgbx8888_key ARGB8888 blend=1 cmod=255,255,255 amod=255 B411BF5D 95188523',
+    'rgb24_plain ARGB8888 blend=0 cmod=255,255,255 amod=255 1A5A06A6 1A5A06A6',
+    'rgb24_key ARGB8888 blend=1 cmod=255,255,255 amod=255 B411BF5D 95188523',
+    'bgr24_plain ARGB8888 blend=0 cmod=255,255,255 amod=255 1A5A06A6 1A5A06A6',
+    'bgr24_key ARGB8888 blend=1 cmod=255,255,255 amod=255 B411BF5D 95188523',
+    'rgb565_plain ARGB8888 blend=0 cmod=255,255,255 amod=255 1A5A06A6 1A5A06A6',
+    'rgb565_key ARGB8888 blend=1 cmod=255,255,255 amod=255 B411BF5D 95188523',
+    'argb4444_plain ARGB8888 blend=1 cmod=255,255,255 amod=255 1A5A06A6 1A5A06A6',
+    'argb4444_key ARGB8888 blend=1 cmod=255,255,255 amod=255 B411BF5D 95188523',
+    'xrgb4444_plain ARGB8888 blend=0 cmod=255,255,255 amod=255 1A5A06A6 1A5A06A6',
+    'xrgb4444_key ARGB8888 blend=1 cmod=255,255,255 amod=255 B411BF5D 95188523',
+    'argb1555_plain ARGB8888 blend=1 cmod=255,255,255 amod=255 1A5A06A6 1A5A06A6',
+    'argb1555_key ARGB8888 blend=1 cmod=255,255,255 amod=255 B411BF5D 95188523',
+    'xrgb1555_plain ARGB8888 blend=0 cmod=255,255,255 amod=255 1A5A06A6 1A5A06A6',
+    'xrgb1555_key ARGB8888 blend=1 cmod=255,255,255 amod=255 B411BF5D 95188523',
+    'rgb332_plain ARGB8888 blend=0 cmod=255,255,255 amod=255 1A5A06A6 1A5A06A6',
+    'rgb332_key ARGB8888 blend=1 cmod=255,255,255 amod=255 B411BF5D 95188523',
+    'index8_plain INDEX8 blend=0 cmod=255,255,255 amod=255 1A5A06A6 1A5A06A6',
+    'index8_key INDEX8 blend=1 cmod=255,255,255 amod=255 B411BF5D 95188523',
+    'xrgb8888_mods_add XRGB8888 blend=2 cmod=200,150,100 amod=128 2C64A5C7 ACF30AE9',
+    'xrgb8888_mods_add_key ARGB8888 blend=1 cmod=200,150,100 amod=128 4C7F789E 65CCF269',
+    'argb8888_blend_none ARGB8888 blend=0 cmod=255,255,255 amod=255 1A5A06A6 1A5A06A6',
+    'argb8888_blend_mod ARGB8888 blend=4 cmod=90,200,255 amod=255 B8F6EC23 74F4F10E',
+    'rgb24_default ARGB8888 blend=0 cmod=255,255,255 amod=255 1A5A06A6 1A5A06A6',
+    'rgb24_blend ARGB8888 blend=1 cmod=255,255,255 amod=255 1A5A06A6 1A5A06A6',
+    'argb8888_key_alpha_differs ARGB8888 blend=1 cmod=255,255,255 amod=255 84805BC6 AA3516CA'
+  );

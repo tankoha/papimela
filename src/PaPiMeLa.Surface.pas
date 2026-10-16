@@ -81,12 +81,14 @@ type
     FColorMod  : TPMLColor;
     FAlphaMod  : Byte;
     FBlendMode : TPMLBlendMode;
+    FBlendSet  : Boolean;
     FLockCount : Integer;
     // 共有（CreateShared）で生成したときだけ 0 以上になる。-1 = 共有しない。
     FRefCount  : LongInt;
 
     function  GetPixelAddr(AX, AY: Integer): Pointer; inline;
     procedure SetClipRect(const AValue: TPMLRect);
+    procedure SetBlendMode(AValue: TPMLBlendMode);
     function  GetMustLock: Boolean;
   protected
     // IInterface。FRefCount が -1 のもの（既定）は参照カウントしない。
@@ -149,7 +151,10 @@ type
     property ColorKey : LongWord read FColorKey;
     property ColorMod : TPMLColor read FColorMod write FColorMod;
     property AlphaMod : Byte read FAlphaMod write FAlphaMod;
-    property BlendMode: TPMLBlendMode read FBlendMode write FBlendMode;
+    property BlendMode: TPMLBlendMode read FBlendMode write SetBlendMode;
+    // BlendMode を一度でも書いたか。SDL は alpha のある形式の既定をブレンドにするが、papimela の既定は None
+    // （ブリットの既定を変えないため）。テクスチャを作るとき、書かれていなければ alpha の有無で決める。
+    property BlendModeAssigned: Boolean read FBlendSet;
     property MustLock : Boolean read GetMustLock;
   end;
 
@@ -442,6 +447,7 @@ begin
   Result.FColorMod := FColorMod;
   Result.FAlphaMod := FAlphaMod;
   Result.FBlendMode := FBlendMode;
+  Result.FBlendSet := FBlendSet;
   if FPalette <> nil then
     Result.SetPalette(FPalette, False);
 end;
@@ -492,6 +498,12 @@ begin
     FreeAndNil(FPalette);
   FPalette := APalette;
   FOwnsPalette := AOwned;
+end;
+
+procedure TPMLSurface.SetBlendMode(AValue: TPMLBlendMode);
+begin
+  FBlendMode := AValue;
+  FBlendSet := True;
 end;
 
 procedure TPMLSurface.SetColorKey(AEnabled: Boolean; AKey: LongWord);
