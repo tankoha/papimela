@@ -1,7 +1,13 @@
 # 引き継ぎ資料
 
-新しいセッションは、`CLAUDE.md` の次にこれを読む。最終更新: 2026-10-15（オーディオの 3 段目の対話の確認の後）。
+新しいセッションは、`CLAUDE.md` の次にこれを読む。最終更新: 2026-10-20（クラウドのセッション。WAV の読み込み #54 の後）。
 
+> **2026-10-20 のクラウドのセッションで**: **WAV の読み込み（#54、`PaPiMeLa.Audio.Wave`）を済ませた**。実装は **Haiku に 3 段に分けて任せる試み**
+> （クラウドに qwen が無いので、Low の代わり）。どの段も 1 往復で受け入れ検査 T-56（124 場面、127 件）が通り、Opus が直したのは 3 箇所（§2）。
+> SDL の不具合を 8 つ見つけた（D-73〜D-80。どれも参照版の SDL で確かめた。D-74・D-80 は ASan で置き場の外への書き込み）。
+> 表示サーバ無しの 33 本（1639 件）が全部通る。**作業はブランチ `claude/zen-mayer-sjyn3o` にある**（master から早送りで作り直した。master へは持ち主が入れる）。
+> 手元専用の検査に効く変更は無い（WAV は表示サーバも音の装置も使わない）。**持ち主に決めてもらうこと**は §8 の先頭。
+>
 > **2026-10-14 の手元のセッションで**: §3 の 3b（パレット、INDEX8）と 3c（YUV。YV12 / IYUV / NV12 / NV21 / YUY2 / UYVY / YVYU）を
 > 済ませ、テクスチャの種類（§3 の 1）は終わった。README の上流の不具合に D-58〜D-61 を載せた（持ち主の判断）。SDL の不具合を
 > 4 つ見つけた（D-60〜D-63）。表示サーバ無しの 28 本（1243 件）と T-22（llvmpipe・radeonsi・窓）は全部通る。
@@ -20,10 +26,10 @@
 | 項目 | 状態 |
 |---|---|
 | リポジトリ | https://github.com/tankoha/papimela（公開、Issues 有効）。手元のセッションは `master` に直接 push、クラウドのセッションは指定のブランチへ push して、手元で早送りマージする |
-| CI | 緑。rawpaco 激辛、checkorigin、アンブレラの古さ（`genumbrella.bb --check`）、図の検査、表示サーバ無しのテスト 32 本、Pong の自己検査、GLES2 と ソフトウェアのドライバの画素比較（llvmpipe）。ジョブ 60 分・GLES2 の手順 5 分の時間制限つき |
-| テスト | 表示サーバ無しの 32 本・1512 件はすべて成功（2026-10-15 に手元で作り直して全部流した）。PipeWire の T-54 は手元専用（30 件）。手元専用と対話の検査は `docs/TEST-LOG.md` の各行 |
-| 不具合 | 72 件。うち上流 SDL の 24 件は未報告（D-53 は SDL 自身が FIXME で知っている。他の 23 件は報告するかを検討中。方針は `CLAUDE.md`。README の一覧に全件を載せた） |
-| 規模 | 手書き 61 ユニット（`src/*.pas`）+ 生成（Wayland プロトコル 21、キーボードの表 2、EGL / GLES2 の定数 2、DebugText の字形 1、音声のチャンネル数の変換と周波数の変換の係数 2、PipeWire の定数 1、アンブレラ 2）。手書きの `src/*.pas` が約 4.0 万行、生成を含めて約 5.5 万行（2026-10-14 に数え直した） |
+| CI | 緑。rawpaco 激辛、checkorigin、アンブレラの古さ（`genumbrella.bb --check`）、図の検査、表示サーバ無しのテスト 33 本、Pong の自己検査、GLES2 と ソフトウェアのドライバの画素比較（llvmpipe）。ジョブ 60 分・GLES2 の手順 5 分の時間制限つき |
+| テスト | 表示サーバ無しの 33 本・1639 件はすべて成功（2026-10-20 にクラウドで作り直して全部流した。T-56 の 127 件を足した）。PipeWire の T-54 は手元専用（30 件）。手元専用と対話の検査は `docs/TEST-LOG.md` の各行 |
+| 不具合 | 80 件。うち上流 SDL の 32 件は未報告（D-53 は SDL 自身が FIXME で知っている。他の 31 件は報告するかを検討中。方針は `CLAUDE.md`。README の一覧は D-72 まで。D-73〜D-80 を載せるかは §8） |
+| 規模 | 手書き 62 ユニット（`src/*.pas`）+ 生成（Wayland プロトコル 21、キーボードの表 2、EGL / GLES2 の定数 2、DebugText の字形 1、音声のチャンネル数の変換と周波数の変換の係数 2、PipeWire の定数 1、アンブレラ 2）。手書きの `src/*.pas` が約 4.0 万行、生成を含めて約 5.5 万行（2026-10-14 に数え直した） |
 
 ### 動いているもの
 
@@ -37,19 +43,57 @@ IME（fcitx5・IBus・text-input-v3。全文節・周辺テキスト・周辺削
 EGL の GL コンテキスト（スワップ間隔はコンテキストごと）、ヘッドレスのダミーのビデオ、待つ API・タイマー・スレッド・不可分操作、
 **ログ（`Ctx.Log`）・ヒント（`Ctx.Hints`、`PAPIMELA_LOGGING` など）・プロパティの表（`TPMLProperties`、`Ctx.Properties`）**、
 バックエンドの登録（`PaPiMeLa.Backends`）、アンブレラ（`uses PaPiMeLa`）、`TPMLApplication`、サンプルの Pong、
-**オーディオ（`Ctx.Audio`。変換・周波数の変換・ストリーム・デバイス・混ぜる・簡易パス。バックエンドは PipeWire と dummy）**。
+**オーディオ（`Ctx.Audio`。変換・周波数の変換・ストリーム・デバイス・混ぜる・簡易パス。バックエンドは PipeWire と dummy）**、
+**WAV の読み込み（`PMLLoadWAV` / `PMLLoadWAVFile`。PCM・IEEE float・A-law・μ-law・MS-ADPCM・IMA-ADPCM）**。
 
 ### 設計書第 11 章の進み具合
 
 済み（一部を含む）: #1–10、#12–17（#17 の `.GL` は未）、#22、#24（`Events.Keymap`。押下状態は
 `PaPiMeLa.Events` の `TPMLKeyboardState`）、#25 の一部（マウスとタッチの状態機械は `PaPiMeLa.Events`）、
 #26–29、#31–39、#41–43（#41 の残りはテクスチャの Lock）、
-#21、#45、#46、#47、#48、#49、#50、#51、#52、#53（`.Audio.Mixer` は F32 の分だけ）、#55、#56、#64、#68（YUV から ARGB8888 への変換だけ）、#70、#71。
+#21、#45、#46、#47、#48、#49、#50、#51、#52、#53（`.Audio.Mixer` は F32 の分だけ）、#54、#55、#56、#64、#68（YUV から ARGB8888 への変換だけ）、#70、#71。
 
 未着手: #11、#18–21、#23、#30、#40、#44、
-#54、#57–63（WAV、PulseAudio・ALSA、ジョイスティック、ゲームパッド、ハプティクス）、#65–67、#69。
+#57–63（PulseAudio・ALSA、ジョイスティック、ゲームパッド、ハプティクス）、#65–67、#69。
 
-## 2. 前のセッション（2026-10-14、手元）でしたこと
+## 2. 前のセッション（2026-10-20、クラウド）でしたこと
+
+1 つのコミットにまとめず、途中で 1 度チェックポイントを置いた（どちらもブランチ `claude/zen-mayer-sjyn3o`）。
+
+| 内容 | 担当 | 検査 |
+|---|---|---|
+| ブランチを master から早送りで作り直した（前のクラウドのセッションのブランチは master より 39 コミット古く、master に無いコミットは無かった。強制の push は auto mode に断られたので、早送りにした） | Opus | — |
+| `PaPiMeLa.Audio.Wave`（#54）の interface、内部の型（`TWaveFile`・`TADPCMState` など）と関数の境界、段ごとの仕様（関数ごとに 1 行ずつ、演算子は括弧まで） | Opus | — |
+| 受け入れ検査 T-56（`test/test_audio_wave`）。場面の組み立てを検査の側に置き、`--write-cases` で書き出したものを C から参照版の SDL に読ませて表にした（`test/test_audio_wave_expected.inc`） | Opus | 空の実装で場面の数の 1 件のほかは全部落ちた |
+| 1 段目: ヒント 4 つ・チャンクの辿り方・fmt・形式の検査・公開の 2 関数 | Haiku | 1 往復で通った。直したのは `TStream.Read` の LongInt の幅 1 つ（仕様の書き漏れ） |
+| 2 段目: PCM（24 ビットは 32 ビットへ）・IEEE float・A-law・μ-law | Haiku | 1 往復で通った。直したのはコメントの誤り 1 つ |
+| 3 段目: MS-ADPCM・IMA-ADPCM（SDL の不具合 6 つを直す仕様） | Haiku | 1 往復で通った。直したのは MS の予測の積の和を Int64 に（Haiku が「LongInt を越えうる」と指摘した）。`-B -Cr -Co -Ct` でも通る |
+| 歯の確認 22 通り（全部落ちる）。歯の無かった 2 つ（MS の差分の下限、IMA の数え直しの上限）に場面を足した | Opus | T-56 の行 |
+| ヒント `PAPIMELA_WAVE_*` 4 つ（`PaPiMeLa.Properties`）、アンブレラに `PaPiMeLa.Audio.Wave`、CI の一覧に T-56 | Opus | `genumbrella.bb --check`、T-26 |
+
+見つけた SDL の不具合（`SDL_wave.c`。3.4.2 と参照版で同じ。どれも参照版を表示サーバ無しで作って確かめた）:
+D-73（MS の予測の番号の `>`。係数の表の外の初期化していない置き場を読む）、D-74（MS で fact が最後のブロックの 1 フレーム目で終わると置き場の外へ書く。ASan）、
+D-75（IMA の短い最後のブロックを 8 分の 1 に数える）、D-76（IMA の 2 チャンネル以上で、8 フレームに満たない部分ブロックが前のチャンネルのバイトを読む）、
+D-77（RIFF の無い "WAVE" をストリームの途中から読めない）、D-78（IMA で見出しの途中で終わるブロックの、書かない 1 フレームを返す）、
+D-79（24 ビットで nBlockAlign がフレームより小さいと data の後ろを読む）、D-80（IMA で fact が短い最後のブロックの途中で終わると置き場の外へ書く。ASan。Haiku の疑い）。
+
+このセッションで分かったこと・やり方:
+
+- **Haiku は Low の作業に足りた**（この 1 件では）。qwen と違い、ファイルを自分で読み（CODING-STYLE・SDL の C・周りのコード）、検査を流し、
+  rawpaco を通してから返してくる。演算子の優先順位も型の幅も誤らなかった。仕様を 1 行ずつ書いたのは qwen と同じ。
+  qwen と違うのは、**仕様の穴を自分から挙げる**こと（3 段目で「この上限は SDL に無い」「この積は LongInt を越えうる」「`-Cr` の作りでは検査の側が桁あふれで止まる」）。
+  そのうち 1 つは SDL の不具合だった（D-80）。依頼文の最後に「仕様の曖昧な所・誤り」と「SDL の疑い（結論を出さずに）」を報告させる欄を置くと拾える
+- 依頼文に CODING-STYLE を貼り忘れた（置き場の文字列のまま送った）。SendMessage で後から送れた。Haiku はファイルを読めるので、パスを書けば足りる
+- **SDL の不具合で初期化していない置き場を読むかは `MALLOC_PERTURB_`** で分かる（値を変えて出力が変われば読んでいる）。ASan は `malloc` の詰め物や
+  `realloc` で広げた置き場の中を読むのを見逃す（D-73・D-79）。外へ書くのは ASan の版で（SDL の全体を `CMAKE_C_FLAGS=-fsanitize=address` で作る）
+- SDL が誤った値を返す場面の期待値は、**SDL 自身の別の読み方**で求めた: fact を使わずに全部を復号して切る、短いブロックを 0 で埋めて全部を復号して切る、
+  dropblock で読む、正しい nBlockAlign で書いた同じ中身を読む。手で計算するより確か
+- 場面を足すたびに「足す前の場面の値が変わっていない」ことを確かめた（SDL の出力の先頭 N 行の diff）。組み立ての乱数は続けて使うので、場面は末尾にだけ足す
+- 置き場の外へ書く誤りを直す変異は、範囲の検査の無い版では黙って通る。**`-Cr` で作った版で変異を流す**（D-74・D-80・IMA の段の番号）
+- 検査のプログラムの LCG と FNV-1a は桁あふれで回り込ませるので、`-Cr -Co` で作るには検査の側に `{$R-}{$Q-}` が要る（ユニットの側は検査される）
+- `perl -0pi` の置換で `\|\|` は文字の `||` にならなかった（先頭に差し込まれた）。複数行の差し込みは python で行の添字を探して入れる方が確か
+
+## 2.1 その前のセッション（2026-10-14、手元）でしたこと
 
 | 内容 | 担当 | 検査 |
 |---|---|---|
@@ -133,7 +177,8 @@ D-69（録音で書き換えたバイト数を次の論理デバイスへ持ち�
    - **3 段目は済んだ（2026-10-15）**: PipeWire の結合（`PaPiMeLa.Platform.PipeWire`、#21）とバックエンド
      （`PaPiMeLa.Audio.PipeWire`、#56）。T-53（CI）、T-54（手元専用）。SDL の PipeWire のバックエンドはデバイスの並び
      （`ChannelMap`）を置かないので、D-67・D-71 の道は PipeWire でも通らない（dummy の T-52 で検査役がバックエンドの役をして通している）
-   - 残り: `SDL_MixAudio` の F32 以外（`.Audio.Mixer`）、WAV（#54）、
+   - **WAV（#54）は済んだ（2026-10-20）**: `PaPiMeLa.Audio.Wave`。T-56
+   - 残り: `SDL_MixAudio` の F32 以外（`.Audio.Mixer`）、
      PulseAudio（#57）・ALSA（#58）。その時に SDL の「優先する pipewire」（セッションのサービスに audio が無ければ譲る）も入れる。
      録音は手元にソースが無いので実機では通していない（T-54 は飛ばす）。PipeWire の既定の変更での移動も実機では見ていない
      （利用者の既定を変えるので）
@@ -169,7 +214,8 @@ Pong もすべて書き換え、今は `uses SysUtils, Math, PaPiMeLa` だけで
 ## 4. 定着した進め方
 
 - **担当**: 第 11 章の難易度列のとおり。Low は qwen2.5-coder:14b（手元の ollama）、Medium は
-  Sonnet のサブエージェント、High は Opus。詳しい手順は `CLAUDE.md`
+  Sonnet のサブエージェント、High は Opus。詳しい手順は `CLAUDE.md`。クラウドで Low をするときは、
+  Haiku のサブエージェント（`model: haiku`）に段に分けて渡した（#54。§2。割り振りに加えるかは §8）
 - **検査を先に書く**: 公開 API・interface 部・受け入れ検査をこちらで書き、空の実装で失敗する
   ことを確かめてから実装に渡す（qwen にも Sonnet にも）
 - **検査の歯を確かめる**: 誤りをわざと戻して落ちることを `fpc -B` で確かめる。縮む向きの
@@ -188,7 +234,7 @@ Pong もすべて書き換え、今は `uses SysUtils, Math, PaPiMeLa` だけで
 表示サーバ無しで通るもの（CI と同じ）:
 
 ```bash
-for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_render_transform test_render_target test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_drop test_drag_source test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds test_audio_convert test_audio_stream test_audio_device test_pipewire_abi; do
+for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_render_transform test_render_target test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_drop test_drag_source test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds test_audio_convert test_audio_stream test_audio_device test_audio_wave test_pipewire_abi; do
   fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/$t test/$t.pas && ./test/$t
 done
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -oexamples/pong examples/pong.pas && ./examples/pong --selftest
@@ -216,7 +262,7 @@ env -u WAYLAND_DISPLAY LIBGL_ALWAYS_SOFTWARE=1 ./test/test_render_gles2   # Mesa
 cd papimela && mkdir -p lib
 B='fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib'
 # 0. 表示サーバ無しの分（CI と同じ。手元の新しい Mesa でも通るか）
-for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds test_audio_convert test_audio_stream test_audio_device test_pipewire_abi; do
+for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds test_audio_convert test_audio_stream test_audio_device test_audio_wave test_pipewire_abi; do
   $B -otest/$t test/$t.pas && ./test/$t | tail -1
 done
 # 1. 実機の Wayland（自動判定。最後の行が「結論」で終わればよい）
@@ -319,6 +365,12 @@ man-db などの設定は所有者の切り替えで失敗するが、`dpkg -r -
 - ヒントの呼び出しはヒントの排他を持ったまま来る。呼び出しの中で別の排他を取る部品は、自分からヒントを読むときに逆の順にならないようにする（`TPMLLog.ResetPriorities` の PORT-NOTE）
 
 ## 8. 保留中の判断（利用者に聞く）
+
+- **ブランチ `claude/zen-mayer-sjyn3o` を master へ入れるか**（2026-10-20 の作業。CI は緑）
+- **Haiku を割り振りに加えるか**（`CLAUDE.md` の「実装担当の割り振り」と `docs/DESIGN.md` 第 11 章）。#54 の結果（§2）: 3 段とも 1 往復で受け入れ検査が通り、
+  直したのは 3 箇所（どれも仕様の書き漏れか、Haiku 自身が挙げたもの）。qwen は #27・#34・#68 で中核の関数の書き直しや取り違えがあった。
+  案: クラウドの Low は Haiku、手元の Low は今までどおり qwen（ollama は手元にしか無い）。1 件だけなので、次の Low でもう一度比べてから決めてもよい
+- **README の「上流 SDL の不具合」に D-73〜D-80 を載せるか**（今は D-72 まで全件。これまでは持ち主の判断で載せてきた）
 
 
 - 読んだだけで確かめていない SDL の怪しい点（確かめるまで不具合一覧に載せない。D-57 の補足）: 知らせの中で次の知らせを

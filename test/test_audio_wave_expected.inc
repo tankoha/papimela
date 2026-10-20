@@ -2,7 +2,7 @@
   同じバイト列を SDL_LoadWAV_IO で読ませて取った（docs/TEST-LOG.md の使い捨て検証）。
   SDL の値を使わない行は注に D 番号と、papimela の期待値の出所を書いた。 }
 const
-  WaveExpected: array[0..119] of TWaveExpect = (
+  WaveExpected: array[0..123] of TWaveExpect = (
     (InHash: $12832299; Ok: True; Format: $0008; Channels: 1; Freq: 8000; Len: 101; Hash: $312FF0C2; EndPos: 146),
     (InHash: $B7F5CAA2; Ok: True; Format: $8010; Channels: 2; Freq: 44100; Len: 400; Hash: $DD1C9941; EndPos: 444),
     (InHash: $85AA7237; Ok: True; Format: $8020; Channels: 2; Freq: 48000; Len: 480; Hash: $75F5756F; EndPos: 404),
@@ -122,5 +122,9 @@ const
     (InHash: $35FEDD1C; Ok: True; Format: $0008; Channels: 1; Freq: 8000; Len: 20; Hash: $349ECE8F; EndPos: 65),  // D-77: SDL は Missing fmt chunk（位置 4 から探す）。32 と同じ値で、位置だけ 9 進む
     (InHash: $CE590902; Ok: True; Format: $8020; Channels: 2; Freq: 48000; Len: 80; Hash: $66D57F64; EndPos: 104),  // D-79: SDL は data の後ろ（初期化していない置き場）まで読む。119（同じ中身の正しい nBlockAlign）を SDL で読んだ値
     (InHash: $0E1440B1; Ok: True; Format: $8020; Channels: 2; Freq: 48000; Len: 80; Hash: $66D57F64; EndPos: 104),  // D-79: SDL は data の後ろ（初期化していない置き場）まで読む。119（同じ中身の正しい nBlockAlign）を SDL で読んだ値
-    (InHash: $B17D1784; Ok: True; Format: $8020; Channels: 2; Freq: 48000; Len: 80; Hash: $66D57F64; EndPos: 104)
+    (InHash: $B17D1784; Ok: True; Format: $8020; Channels: 2; Freq: 48000; Len: 80; Hash: $66D57F64; EndPos: 104),
+    (InHash: $F99CFEFC; Ok: True; Format: $8010; Channels: 2; Freq: 22050; Len: 1008; Hash: $33C1CF4E; EndPos: 340),  // D-75: SDL は 1000 バイト。最後のブロックを埋めて SDL で全部復号し、252 フレームで切った値。数え直しを fact で抑える歯
+    (InHash: $AD05D6C2; Ok: True; Format: $0008; Channels: 1; Freq: 8000; Len: 30; Hash: $A83D0E06; EndPos: 74),
+    (InHash: $8BA1FC75; Ok: True; Format: $8010; Channels: 1; Freq: 22050; Len: 232; Hash: $785F3B8E; EndPos: 142),
+    (InHash: $4E70046B; Ok: True; Format: $8010; Channels: 2; Freq: 22050; Len: 976; Hash: $E0E57247; EndPos: 332)  // D-80: SDL は置き場の外へ書き（ASan）、996 バイトを返す。最後のブロックを埋めて SDL で全部復号し、244 フレームで切った値
   );

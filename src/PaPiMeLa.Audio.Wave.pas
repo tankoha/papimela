@@ -725,59 +725,553 @@ end;
 
 { ---- 3 段目: MS-ADPCM と IMA-ADPCM ---- }
 
-procedure MSCalculateSampleFrames(var AFile: TWaveFile; ADataLength: SizeInt);
+// リトルエンディアンの符号付き 16 ビットを読む。AP[AOff] が下位、AP[AOff + 1] が上位。
+function S16LE(AP: PByte; AOff: SizeInt): LongInt;
 begin
+  Result := LongInt(AP[AOff]) or (LongInt(AP[AOff + 1]) shl 8);
+  if Result >= $8000 then
+    Result := Result - $10000;
+end;
+
+procedure MSCalculateSampleFrames(var AFile: TWaveFile; ADataLength: SizeInt);
+var
+  Ch, HeaderSize, Avail, FrameBits, Trailing: SizeInt;
+  TS: Int64;
+begin
+  Ch := SizeInt(AFile.Format.Channels);
+  HeaderSize := Ch * 7;
+  Avail := ADataLength div SizeInt(AFile.Format.BlockAlign);
+  FrameBits := SizeInt(AFile.Format.BitsPerSample) * Ch;
+  Trailing := ADataLength mod SizeInt(AFile.Format.BlockAlign);
+
+  if (AFile.TruncHint = TTruncationHint.VeryStrict) or (AFile.TruncHint = TTruncationHint.Strict) then
+  begin
+    if (ADataLength < HeaderSize) or (Trailing > 0) then
+      Fail('Truncated MS ADPCM block');
+  end;
+
+  AFile.SampleFrames := Int64(Avail) * AFile.Format.SamplesPerBlock;
+
+  if (Trailing > 0) and (AFile.TruncHint = TTruncationHint.DropFrame) and (Trailing >= HeaderSize) then
+  begin
+    TS := 2 + (((Trailing - HeaderSize) * 8) div FrameBits);
+    if TS > Int64(AFile.Format.SamplesPerBlock) then
+      TS := Int64(AFile.Format.SamplesPerBlock);
+    AFile.SampleFrames := AFile.SampleFrames + TS;
+  end;
+
+  AFile.SampleFrames := AdjustToFactValue(AFile, AFile.SampleFrames);
 end;
 
 procedure MSInit(var AFile: TWaveFile; ADataLength: SizeInt);
+const
+  PRESET: array[0..13] of LongInt = (256, 0, 512, -256, 0, 0, 192, 64, 240, 0, 460, -208, 392, -232);
+var
+  Ch, HeaderSize, CoeffCount, I: SizeInt;
+  V: LongInt;
+  BlockDataSamples: Int64;
+  P: PByte;
 begin
+  if AFile.Format.Channels > 2 then
+    Fail('Invalid number of channels');
+  if AFile.Format.BitsPerSample <> 4 then
+    Fail(Format('Invalid MS ADPCM bits per sample of %u', [AFile.Format.BitsPerSample]));
+
+  Ch := SizeInt(AFile.Format.Channels);
+  HeaderSize := Ch * 7;
+  if SizeInt(AFile.Format.BlockAlign) < HeaderSize then
+    Fail('Invalid MS ADPCM block size (nBlockAlign)');
+
+  if AFile.Format.FormatTag = CODE_EXTENSIBLE then
+    Fail('MS ADPCM with the extensible header is not supported');
+
+  if AFile.Chunk.Size < 22 then
+    Fail('Could not read MS ADPCM format header');
+
+  P := @AFile.Chunk.Data[0];
+  AFile.Format.SamplesPerBlock := LongWord(P[18]) or (LongWord(P[19]) shl 8);
+  CoeffCount := SizeInt(P[20]) or (SizeInt(P[21]) shl 8);
+  if CoeffCount > 256 then
+    CoeffCount := 256;
+
+  if AFile.Chunk.Size < 22 + CoeffCount * 4 then
+    Fail('Could not read custom coefficients in MS ADPCM format header')
+  else if SizeInt(AFile.Format.ExtSize) < 4 + CoeffCount * 4 then
+    Fail('Invalid MS ADPCM format header (too small)')
+  else if CoeffCount < 7 then
+    Fail('Missing required coefficients in MS ADPCM format header');
+
+  SetLength(AFile.Coeffs, CoeffCount * 2);
+  for I := 0 to CoeffCount * 2 - 1 do
+  begin
+    V := S16LE(P, 22 + I * 2);
+    if I < 14 then
+    begin
+      if V <> PRESET[I] then
+        Fail('Wrong preset coefficients in MS ADPCM format header');
+    end;
+    AFile.Coeffs[I] := SmallInt(V);
+  end;
+
+  BlockDataSamples := ((Int64(AFile.Format.BlockAlign) - HeaderSize) * 8) div
+    (Int64(AFile.Format.BitsPerSample) * Ch);
+  if AFile.Format.SamplesPerBlock = 0 then
+    AFile.Format.SamplesPerBlock := LongWord(BlockDataSamples + 2);
+
+  if (AFile.Format.SamplesPerBlock = 1) or
+    (BlockDataSamples < (Int64(AFile.Format.SamplesPerBlock) - 2)) then
+    Fail('Invalid number of samples per MS ADPCM block (wSamplesPerBlock)');
+
+  MSCalculateSampleFrames(AFile, ADataLength);
 end;
 
 function MSProcessNibble(var AState: TMSChannelState; ASample1, ASample2: LongInt;
   ANybble: Byte): SmallInt;
+const
+  ADAPTIVE: array[0..15] of LongWord = (230, 230, 230, 230, 307, 409, 512, 614,
+    768, 614, 512, 409, 307, 230, 230, 230);
+  MAX_AUDIOVAL = 32767;
+  MIN_AUDIOVAL = -32768;
+var
+  NewSample, ErrorDelta: LongInt;
+  DeltaW: LongWord;
 begin
-  Result := 0;
+  // 係数はファイルが決めるので、2 つの積の和は LongInt を越えうる（-32768 * -32768 * 2）
+  NewSample := LongInt(((Int64(ASample1) * AState.Coeff1) + (Int64(ASample2) * AState.Coeff2)) div 256);
+
+  // ニブルは符号付き 4 ビットの誤差
+  if ANybble >= 8 then
+    ErrorDelta := LongInt(ANybble) - 16
+  else
+    ErrorDelta := LongInt(ANybble);
+  NewSample := NewSample + (LongInt(AState.Delta) * ErrorDelta);
+  if NewSample < MIN_AUDIOVAL then
+    NewSample := MIN_AUDIOVAL
+  else if NewSample > MAX_AUDIOVAL then
+    NewSample := MAX_AUDIOVAL;
+
+  DeltaW := (LongWord(AState.Delta) * ADAPTIVE[ANybble]) div 256;
+  if DeltaW < 16 then
+    DeltaW := 16
+  else if DeltaW > 65535 then
+    DeltaW := 65535;
+  AState.Delta := Word(DeltaW);
+
+  Result := SmallInt(NewSample);
 end;
 
 procedure MSDecodeBlockHeader(var AState: TADPCMState; const AFile: TWaveFile);
+var
+  Ch, Chan, Idx: SizeInt;
+  V: LongInt;
 begin
+  Ch := SizeInt(AState.Channels);
+  for Chan := 0 to Ch - 1 do
+  begin
+    Idx := AState.Block[Chan];
+    // PORT-NOTE(bug): SDL は > で比べ、番号が係数の数と等しいと表の外を読む（D-73）
+    if Idx >= (Length(AFile.Coeffs) div 2) then
+      Fail('Invalid MS ADPCM coefficient index in block header');
+    AState.MS[Chan].Coeff1 := AFile.Coeffs[Idx * 2];
+    AState.MS[Chan].Coeff2 := AFile.Coeffs[Idx * 2 + 1];
+
+    AState.MS[Chan].Delta := Word(AState.Block[Ch + Chan * 2]) or
+      (Word(AState.Block[Ch + Chan * 2 + 1]) shl 8);
+
+    // 見出しの標本は、出力の後ろに来るものが先に入っている
+    V := S16LE(AState.Block, Ch * 3 + Chan * 2);
+    AState.Output[AState.OutputPos + Ch] := SmallInt(V);
+    V := S16LE(AState.Block, Ch * 5 + Chan * 2);
+    AState.Output[AState.OutputPos] := SmallInt(V);
+    Inc(AState.OutputPos);
+  end;
+
+  AState.BlockPos := AState.BlockPos + AState.BlockHeaderSize;
+  AState.OutputPos := AState.OutputPos + Ch;
+  AState.FramesLeft := AState.FramesLeft - 2;
 end;
 
 function MSDecodeBlockData(var AState: TADPCMState): Boolean;
+var
+  Ch, BlockPos, OutPos, Chan: SizeInt;
+  Nybble: Word;
+  BlockFramesLeft: Int64;
+  S1, S2: LongInt;
 begin
-  Result := False;
+  Ch := SizeInt(AState.Channels);
+  Nybble := 0;
+  BlockPos := AState.BlockPos;
+  OutPos := AState.OutputPos;
+  BlockFramesLeft := Int64(AState.SamplesPerBlock) - 2;
+  if BlockFramesLeft > AState.FramesLeft then
+    BlockFramesLeft := AState.FramesLeft;
+
+  while BlockFramesLeft > 0 do
+  begin
+    for Chan := 0 to Ch - 1 do
+    begin
+      if (Nybble and $4000) <> 0 then
+        Nybble := Word(Nybble shl 4)
+      else if BlockPos < AState.BlockLen then
+      begin
+        Nybble := Word(AState.Block[BlockPos]) or $4000;
+        Inc(BlockPos);
+      end
+      else
+      begin
+        // 入力が尽きた。中途半端なフレームは捨てて戻る
+        AState.OutputPos := OutPos - Chan;
+        Exit(False);
+      end;
+
+      S1 := AState.Output[OutPos - Ch];
+      S2 := AState.Output[OutPos - Ch * 2];
+      AState.Output[OutPos] := MSProcessNibble(AState.MS[Chan], S1, S2, (Nybble shr 4) and $F);
+      Inc(OutPos);
+    end;
+    AState.FramesLeft := AState.FramesLeft - 1;
+    BlockFramesLeft := BlockFramesLeft - 1;
+  end;
+
+  AState.OutputPos := OutPos;
+  Result := True;
 end;
 
 function MSDecode(var AFile: TWaveFile): TBytes;
+var
+  St: TADPCMState;
+  Ch, BytesLeft: SizeInt;
+  OutBytes: Int64;
 begin
   Result := nil;
+  if AFile.Chunk.Length <> AFile.Chunk.Size then
+    MSCalculateSampleFrames(AFile, AFile.Chunk.Size);
+  if AFile.SampleFrames = 0 then
+    Exit;
+
+  Ch := SizeInt(AFile.Format.Channels);
+  St := Default(TADPCMState);
+  St.Channels := AFile.Format.Channels;
+  St.BlockSize := AFile.Format.BlockAlign;
+  St.BlockHeaderSize := Ch * 7;
+  St.SamplesPerBlock := AFile.Format.SamplesPerBlock;
+  St.FramesTotal := AFile.SampleFrames;
+  St.FramesLeft := St.FramesTotal;
+  St.Input := @AFile.Chunk.Data[0];
+  St.InputSize := AFile.Chunk.Size;
+  St.InputPos := 0;
+
+  OutBytes := St.FramesTotal * Ch * 2;
+  if OutBytes > $FFFFFFFF then
+    Fail('WAVE file too big');
+
+  // PORT-NOTE(bug): 見出しは必ず 2 フレームを書くので、2 フレーム余分に取る。SDL は残りのフレーム数の分しか取らず、fact で切ると置き場の外へ書く（D-74）
+  SetLength(St.Output, SizeInt((St.FramesTotal + 2) * Ch));
+
+  BytesLeft := St.InputSize - St.InputPos;
+  while (St.FramesLeft > 0) and (BytesLeft >= St.BlockHeaderSize) do
+  begin
+    St.Block := PByte(PtrUInt(St.Input) + PtrUInt(St.InputPos));
+    if BytesLeft < St.BlockSize then
+      St.BlockLen := BytesLeft
+    else
+      St.BlockLen := St.BlockSize;
+    St.BlockPos := 0;
+
+    if (Length(St.Output) - St.OutputPos) < (St.FramesLeft * Ch) then
+      Fail('Unexpected overflow in MS ADPCM decoder');
+
+    MSDecodeBlockHeader(St, AFile);
+    if not MSDecodeBlockData(St) then
+    begin
+      if (AFile.TruncHint = TTruncationHint.VeryStrict) or (AFile.TruncHint = TTruncationHint.Strict) then
+        Fail('Truncated data chunk')
+      else if AFile.TruncHint <> TTruncationHint.DropFrame then
+        St.OutputPos := St.OutputPos - (St.OutputPos mod (St.SamplesPerBlock * Ch));
+      OutBytes := St.OutputPos * 2;
+      Break;
+    end;
+
+    St.InputPos := St.InputPos + St.BlockLen;
+    BytesLeft := St.InputSize - St.InputPos;
+  end;
+
+  // 出力の型は、リトルエンディアンの機械の上で S16 のまま渡す
+  SetLength(Result, SizeInt(OutBytes));
+  if OutBytes > 0 then
+    Move(St.Output[0], Result[0], SizeInt(OutBytes));
 end;
 
 procedure IMACalculateSampleFrames(var AFile: TWaveFile; ADataLength: SizeInt);
+var
+  Ch, HeaderSize, SubFrame, Avail, Trailing, TBD, TSD: SizeInt;
+  TS: Int64;
 begin
+  Ch := SizeInt(AFile.Format.Channels);
+  HeaderSize := Ch * 4;
+  SubFrame := Ch * 4;
+  Avail := ADataLength div SizeInt(AFile.Format.BlockAlign);
+  Trailing := ADataLength mod SizeInt(AFile.Format.BlockAlign);
+
+  if (AFile.TruncHint = TTruncationHint.VeryStrict) or (AFile.TruncHint = TTruncationHint.Strict) then
+  begin
+    if (ADataLength < HeaderSize) or (Trailing > 0) then
+      Fail('Truncated IMA ADPCM block');
+  end;
+
+  AFile.SampleFrames := Int64(Avail) * AFile.Format.SamplesPerBlock;
+
+  // PORT-NOTE(bug): SDL は Trailing > HeaderSize - 2 で見出しの 1 フレームを数えるが、見出しが全部無いブロックは復号しないので、書かないフレームを返す（D-78）
+  if (Trailing > 0) and (AFile.TruncHint = TTruncationHint.DropFrame) and (Trailing >= HeaderSize) then
+  begin
+    TS := 1;
+    if Trailing > HeaderSize then
+    begin
+      TBD := Trailing - HeaderSize;
+      TSD := TBD mod SubFrame;
+      TS := TS + ((TBD div SubFrame) * 8);
+      if TSD > (SubFrame - 4) then
+        TS := TS + ((TSD mod 4) * 2);
+    end;
+    if TS > Int64(AFile.Format.SamplesPerBlock) then
+      TS := Int64(AFile.Format.SamplesPerBlock);
+    AFile.SampleFrames := AFile.SampleFrames + TS;
+  end;
+
+  AFile.SampleFrames := AdjustToFactValue(AFile, AFile.SampleFrames);
 end;
 
 procedure IMAInit(var AFile: TWaveFile; ADataLength: SizeInt);
+var
+  Ch, HeaderSize: SizeInt;
+  BlockDataSamples: Int64;
 begin
+  if AFile.Format.BitsPerSample = 3 then
+    Fail('3-bit IMA ADPCM currently not supported')
+  else if AFile.Format.BitsPerSample <> 4 then
+    Fail(Format('Invalid IMA ADPCM bits per sample of %u', [AFile.Format.BitsPerSample]));
+
+  Ch := SizeInt(AFile.Format.Channels);
+  HeaderSize := Ch * 4;
+  if (SizeInt(AFile.Format.BlockAlign) < HeaderSize) or ((AFile.Format.BlockAlign mod 4) <> 0) then
+    Fail('Invalid IMA ADPCM block size (nBlockAlign)');
+
+  // 拡張ヘッダの wValidBitsPerSample は、stage 1 が SamplesPerBlock に入れてある
+  if AFile.Format.FormatTag <> CODE_EXTENSIBLE then
+  begin
+    if (AFile.Chunk.Size >= 20) and (AFile.Format.ExtSize >= 2) then
+      AFile.Format.SamplesPerBlock := LongWord(AFile.Chunk.Data[18]) or
+        (LongWord(AFile.Chunk.Data[19]) shl 8);
+  end;
+
+  BlockDataSamples := ((Int64(AFile.Format.BlockAlign) - HeaderSize) * 8) div
+    (Int64(AFile.Format.BitsPerSample) * Ch);
+  if AFile.Format.SamplesPerBlock = 0 then
+    AFile.Format.SamplesPerBlock := LongWord(BlockDataSamples + 1);
+
+  if BlockDataSamples < (Int64(AFile.Format.SamplesPerBlock) - 1) then
+    Fail('Invalid number of samples per IMA ADPCM block (wSamplesPerBlock)');
+
+  IMACalculateSampleFrames(AFile, ADataLength);
 end;
 
 function IMAProcessNibble(var AIndex: ShortInt; ALastSample: SmallInt; ANybble: Byte): SmallInt;
+const
+  INDEX_TABLE: array[0..15] of ShortInt = (-1, -1, -1, -1, 2, 4, 6, 8, -1, -1, -1, -1, 2, 4, 6, 8);
+  STEP_TABLE: array[0..88] of LongInt = (
+    7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31,
+    34, 37, 41, 45, 50, 55, 60, 66, 73, 80, 88, 97, 107, 118, 130, 143,
+    157, 173, 190, 209, 230, 253, 279, 307, 337, 371, 408, 449, 494, 544, 598, 658,
+    724, 796, 876, 963, 1060, 1166, 1282, 1411, 1552, 1707, 1878, 2066, 2272, 2499, 2749, 3024,
+    3327, 3660, 4026, 4428, 4871, 5358, 5894, 6484, 7132, 7845, 8630, 9493, 10442, 11487, 12635, 13899,
+    15289, 16818, 18500, 20350, 22385, 24623, 27086, 29794, 32767
+  );
+  MAX_AUDIOVAL = 32767;
+  MIN_AUDIOVAL = -32768;
+var
+  Index: Integer;
+  Step, Delta, Sample: LongInt;
 begin
-  Result := 0;
+  Index := AIndex;
+  if Index > 88 then
+    Index := 88
+  else if Index < 0 then
+    Index := 0;
+
+  Step := STEP_TABLE[Index];
+  AIndex := ShortInt(Index + INDEX_TABLE[ANybble]);
+
+  Delta := Step shr 3;
+  if (ANybble and 4) <> 0 then
+    Delta := Delta + Step;
+  if (ANybble and 2) <> 0 then
+    Delta := Delta + (Step shr 1);
+  if (ANybble and 1) <> 0 then
+    Delta := Delta + (Step shr 2);
+  if (ANybble and 8) <> 0 then
+    Delta := -Delta;
+
+  Sample := LongInt(ALastSample) + Delta;
+  if Sample > MAX_AUDIOVAL then
+    Sample := MAX_AUDIOVAL
+  else if Sample < MIN_AUDIOVAL then
+    Sample := MIN_AUDIOVAL;
+  Result := SmallInt(Sample);
 end;
 
 procedure IMADecodeBlockHeader(var AState: TADPCMState);
+var
+  Ch, Chan, O: SizeInt;
+  Idx: LongInt;
 begin
+  Ch := SizeInt(AState.Channels);
+  for Chan := 0 to Ch - 1 do
+  begin
+    O := AState.BlockPos + Chan * 4;
+    AState.Output[AState.OutputPos] := SmallInt(S16LE(AState.Block, O));
+    Inc(AState.OutputPos);
+
+    // 段の番号は符号付き 8 ビット。O + 3 の予約のバイトは読まない
+    Idx := AState.Block[O + 2];
+    if Idx > 127 then
+      Idx := Idx - 256;
+    AState.IMA[Chan] := ShortInt(Idx);
+  end;
+
+  AState.BlockPos := AState.BlockPos + AState.BlockHeaderSize;
+  AState.FramesLeft := AState.FramesLeft - 1;
 end;
 
 function IMADecodeBlockData(var AState: TADPCMState): Boolean;
+var
+  Ch, SubFrame, BlockLeft, OutPos, Remain, Chan, P, Sub, I: SizeInt;
+  Avail, BlockFramesLeft, BytesRequired: Int64;
+  Nyb: Byte;
+  Sample: SmallInt;
 begin
-  Result := False;
+  Ch := SizeInt(AState.Channels);
+  SubFrame := Ch * 4;
+  BlockLeft := AState.BlockLen - AState.BlockPos;
+  OutPos := AState.OutputPos;
+  Result := True;
+
+  BlockFramesLeft := Int64(AState.SamplesPerBlock) - 1;
+  if BlockFramesLeft > AState.FramesLeft then
+    BlockFramesLeft := AState.FramesLeft;
+
+  BytesRequired := ((BlockFramesLeft + 7) div 8) * SubFrame;
+  if BlockLeft < BytesRequired then
+  begin
+    // データが足りない。取り出せるフレームの数を数え直す
+    Avail := (BlockLeft div SubFrame) * 8;
+    // PORT-NOTE(bug): SDL は部分ブロックの数をそのままフレームの数にしている。* 8 が無い（D-75）
+    Remain := BlockLeft mod SubFrame;
+    if Remain > (SubFrame - 4) then
+      Avail := Avail + ((Remain mod 4) * 2);
+    // PORT-NOTE(bug): 頼まれた数を超えて復号しない。SDL はこの上限を置かず、fact で残りが少ないと置き場の外へ書く（D-80）
+    if Avail < BlockFramesLeft then
+      BlockFramesLeft := Avail;
+    Result := False;
+  end;
+
+  while BlockFramesLeft > 0 do
+  begin
+    if BlockFramesLeft < 8 then
+      Sub := SizeInt(BlockFramesLeft)
+    else
+      Sub := 8;
+
+    for Chan := 0 to Ch - 1 do
+    begin
+      // PORT-NOTE(bug): チャンネルごとに自分の 4 バイトから読む。SDL は続けて読むので、8 フレームに満たない部分ブロックで 2 つ目からのチャンネルが前のチャンネルのバイトを読む（D-76）
+      P := AState.BlockPos + Chan * 4;
+      Nyb := 0;
+      // 見出しの標本か、前の副ブロックの最後の標本
+      Sample := AState.Output[OutPos + Chan - Ch];
+      for I := 0 to Sub - 1 do
+      begin
+        if Odd(I) then
+          Nyb := Nyb shr 4
+        else
+        begin
+          Nyb := AState.Block[P];
+          Inc(P);
+        end;
+        Sample := IMAProcessNibble(AState.IMA[Chan], Sample, Nyb and $F);
+        AState.Output[OutPos + Chan + I * Ch] := Sample;
+      end;
+    end;
+
+    AState.BlockPos := AState.BlockPos + SubFrame;
+    OutPos := OutPos + Ch * Sub;
+    AState.FramesLeft := AState.FramesLeft - Sub;
+    BlockFramesLeft := BlockFramesLeft - Sub;
+  end;
+
+  AState.OutputPos := OutPos;
 end;
 
 function IMADecode(var AFile: TWaveFile): TBytes;
+var
+  St: TADPCMState;
+  Ch, BytesLeft: SizeInt;
+  OutBytes: Int64;
 begin
   Result := nil;
+  if AFile.Chunk.Length <> AFile.Chunk.Size then
+    IMACalculateSampleFrames(AFile, AFile.Chunk.Size);
+  if AFile.SampleFrames = 0 then
+    Exit;
+
+  Ch := SizeInt(AFile.Format.Channels);
+  St := Default(TADPCMState);
+  St.Channels := AFile.Format.Channels;
+  St.BlockSize := AFile.Format.BlockAlign;
+  St.BlockHeaderSize := Ch * 4;
+  St.SamplesPerBlock := AFile.Format.SamplesPerBlock;
+  St.FramesTotal := AFile.SampleFrames;
+  St.FramesLeft := St.FramesTotal;
+  St.Input := @AFile.Chunk.Data[0];
+  St.InputSize := AFile.Chunk.Size;
+  St.InputPos := 0;
+  SetLength(St.IMA, Ch);
+
+  OutBytes := St.FramesTotal * Ch * 2;
+  if OutBytes > $FFFFFFFF then
+    Fail('WAVE file too big');
+  SetLength(St.Output, SizeInt(St.FramesTotal * Ch));
+
+  BytesLeft := St.InputSize - St.InputPos;
+  while (St.FramesLeft > 0) and (BytesLeft >= St.BlockHeaderSize) do
+  begin
+    St.Block := PByte(PtrUInt(St.Input) + PtrUInt(St.InputPos));
+    if BytesLeft < St.BlockSize then
+      St.BlockLen := BytesLeft
+    else
+      St.BlockLen := St.BlockSize;
+    St.BlockPos := 0;
+
+    if (Length(St.Output) - St.OutputPos) < (St.FramesLeft * Ch) then
+      Fail('Unexpected overflow in IMA ADPCM decoder');
+
+    IMADecodeBlockHeader(St);
+    if not IMADecodeBlockData(St) then
+    begin
+      if (AFile.TruncHint = TTruncationHint.VeryStrict) or (AFile.TruncHint = TTruncationHint.Strict) then
+        Fail('Truncated data chunk')
+      else if AFile.TruncHint <> TTruncationHint.DropFrame then
+        St.OutputPos := St.OutputPos - (St.OutputPos mod (St.SamplesPerBlock * Ch));
+      OutBytes := St.OutputPos * 2;
+      Break;
+    end;
+
+    St.InputPos := St.InputPos + St.BlockLen;
+    BytesLeft := St.InputSize - St.InputPos;
+  end;
+
+  SetLength(Result, SizeInt(OutBytes));
+  if OutBytes > 0 then
+    Move(St.Output[0], Result[0], SizeInt(OutBytes));
 end;
 
 { ---- 形式ごとへの振り分け（1 段目） ---- }

@@ -23,6 +23,8 @@ program test_audio_wave;
 
 {$mode objfpc}{$H+}
 {$scopedenums on}
+// LCG と FNV-1a は桁あふれで回り込ませる。-Cr -Co で作ってもユニットの側だけを検査する。
+{$R-}{$Q-}
 
 uses
   SysUtils, Classes,
@@ -476,6 +478,23 @@ begin
   Add('117: S24 stereo, block align 3', Wav(Fmt16(1, 2, 48000, 3, 24), D));
   Add('118: S24 stereo, block align 1', Wav(Fmt16(1, 2, 48000, 1, 24), D));
   Add('119: S24 stereo, block align 6 (same data as 117)', Wav(Fmt16(1, 2, 48000, 6, 24), D));
+  // 最後のブロックが短く（見出しと部分ブロック 1 つと 7 バイト。14 フレーム取れる）、fact はそのうち 9 フレームだけ求める。
+  // 数え直した数を求めた数で抑えないと、出力の置き場の外へ書く。
+  Add('120: IMA stereo, short last block and fact inside it, dropframe + truncate',
+    WavFact(FmtExt($11, 2, 22050, 128, 4, B16(121)), 252, ImaBlocks(128, 2, 8 + 8 + 7)), '', 'dropframe', 'truncate');
+  // RIFF の大きさがファイルより 100 バイト大きい。読み終えた位置はファイルの終わりで止まる。
+  Body := Cat([Chunk('fmt ', Fmt16(1, 1, 8000, 1, 8)), Chunk('data', Noise(30))]);
+  Add('121: RIFF size beyond the end of the file', RiffLen(Body, 4 + Length(Body) + 100));
+  // MS-ADPCM の差分の大きさが下限（16）に張り付く: 見出しの差分 16、中身はニブル 1 だけ（係数 230 で縮む）。
+  D := MsBlocks(1, 64, 1, 0, 7);
+  D[1] := 16;
+  D[2] := 0;
+  for I := 7 to 63 do
+    D[I] := $11;
+  Add('122: MS-ADPCM delta held at the floor', Wav(FmtExt(2, 1, 22050, 64, 4, MsPresetExtra(116)), D));
+  // 120 と同じ形で、fact は最後のブロックの見出しの次の 1 フレームだけを求める（見出しの後ろは 7 バイト）。D-80 を見よ。
+  Add('123: IMA stereo, fact wants 1 frame of a short last block, dropframe + truncate',
+    WavFact(FmtExt($11, 2, 22050, 128, 4, B16(121)), 244, ImaBlocks(128, 2, 8 + 7)), '', 'dropframe', 'truncate');
 end;
 
 { ---- 書き出し（期待値を取るため） ---- }
