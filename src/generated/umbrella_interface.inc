@@ -19,6 +19,7 @@
 //   PaPiMeLa.Render
 //   PaPiMeLa.Audio.Convert
 //   PaPiMeLa.Audio.Stream
+//   PaPiMeLa.Audio.Wave
 //   PaPiMeLa.Audio
 //   PaPiMeLa.TextInput
 //   PaPiMeLa.Time
@@ -769,6 +770,16 @@ function PMLConvertAudioSamples(
   ALen: Integer;
   const ADstSpec: TPMLAudioSpec): TBytes; inline;
 
+// ---- PaPiMeLa.Audio.Wave
+function PMLLoadWAV(
+  AStream: TStream;
+  out ASpec: TPMLAudioSpec;
+  AHints: TPMLHints = nil): TBytes; inline;
+function PMLLoadWAVFile(
+  const APath: String;
+  out ASpec: TPMLAudioSpec;
+  AHints: TPMLHints = nil): TBytes; inline;
+
 // ---- PaPiMeLa.Audio
 type
   TPMLAudioPostmixCallback = PaPiMeLa.Audio.TPMLAudioPostmixCallback;
@@ -869,6 +880,10 @@ const
   PML_HINT_AUDIO_DEVICE_APP_ICON_NAME = PaPiMeLa.Properties.PML_HINT_AUDIO_DEVICE_APP_ICON_NAME;
   PML_HINT_AUDIO_DEVICE_STREAM_NAME = PaPiMeLa.Properties.PML_HINT_AUDIO_DEVICE_STREAM_NAME;
   PML_HINT_AUDIO_DEVICE_STREAM_ROLE = PaPiMeLa.Properties.PML_HINT_AUDIO_DEVICE_STREAM_ROLE;
+  PML_HINT_WAVE_RIFF_CHUNK_SIZE = PaPiMeLa.Properties.PML_HINT_WAVE_RIFF_CHUNK_SIZE;
+  PML_HINT_WAVE_TRUNCATION = PaPiMeLa.Properties.PML_HINT_WAVE_TRUNCATION;
+  PML_HINT_WAVE_FACT_CHUNK = PaPiMeLa.Properties.PML_HINT_WAVE_FACT_CHUNK;
+  PML_HINT_WAVE_CHUNK_LIMIT = PaPiMeLa.Properties.PML_HINT_WAVE_CHUNK_LIMIT;
   PML_HINT_APP_ID = PaPiMeLa.Properties.PML_HINT_APP_ID;
   PML_HINT_APP_NAME = PaPiMeLa.Properties.PML_HINT_APP_NAME;
   PML_HINT_KEYCODE_OPTIONS = PaPiMeLa.Properties.PML_HINT_KEYCODE_OPTIONS;

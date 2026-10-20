@@ -66,6 +66,7 @@ uses
   PaPiMeLa.Audio.Convert,
   PaPiMeLa.Audio.Queue,
   PaPiMeLa.Audio.Stream,
+  PaPiMeLa.Audio.Wave,
   PaPiMeLa.Audio.Backend,
   PaPiMeLa.Audio,
   PaPiMeLa.TextInput,

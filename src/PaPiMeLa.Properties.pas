@@ -69,6 +69,14 @@ const
   PML_HINT_AUDIO_DEVICE_APP_ICON_NAME = 'PAPIMELA_AUDIO_DEVICE_APP_ICON_NAME';
   PML_HINT_AUDIO_DEVICE_STREAM_NAME   = 'PAPIMELA_AUDIO_DEVICE_STREAM_NAME';
   PML_HINT_AUDIO_DEVICE_STREAM_ROLE   = 'PAPIMELA_AUDIO_DEVICE_STREAM_ROLE';
+  // WAV の読み込み（PMLLoadWAV）の振る舞い。値は SDL と同じ（SDL_HINT_WAVE_RIFF_CHUNK_SIZE /
+  // TRUNCATION / FACT_CHUNK / CHUNK_LIMIT）。RIFF の大きさは force・ignorezero・ignore・maximum、
+  // 切り詰めは verystrict・strict・dropframe・dropblock、fact は truncate・strict・ignorezero・ignore、
+  // チャンクの数の上限は 10 進の整数（既定 10000）。
+  PML_HINT_WAVE_RIFF_CHUNK_SIZE = 'PAPIMELA_WAVE_RIFF_CHUNK_SIZE';
+  PML_HINT_WAVE_TRUNCATION      = 'PAPIMELA_WAVE_TRUNCATION';
+  PML_HINT_WAVE_FACT_CHUNK      = 'PAPIMELA_WAVE_FACT_CHUNK';
+  PML_HINT_WAVE_CHUNK_LIMIT     = 'PAPIMELA_WAVE_CHUNK_LIMIT';
   // アプリの ID（Wayland の app_id など。SDL_HINT_APP_ID）。空なら FLATPAK_ID、無ければ実行ファイルの名前。
   PML_HINT_APP_ID  = 'PAPIMELA_APP_ID';
   // アプリの名前（SDL_HINT_APP_NAME）。無ければ実行ファイルの名前。PipeWire のストリームの名前などに使う。
