@@ -334,7 +334,8 @@ man-db などの設定は所有者の切り替えで失敗するが、`dpkg -r -
 | Babashka | 生成器と checkorigin と qwen-gen が使う |
 | SDL の実物（手元） | **作らなくても使える**: システムの SDL 3.4.2（`/usr/lib/x86_64-linux-gnu/libSDL3.so.0`）に、`reference/SDL/include` のヘッダで書いた C を直接リンクする（§2）。参照版と中身が違わないかを `git diff` で確かめてから比べる。SDL3 は起動時の環境を写して持つので、環境変数は起動時に渡す（途中の `setenv` は見えない） |
 | SDL の実物（作る） | 移植の結果を SDL と画素で比べるときに作る。表示サーバ無しで静的に作れる: `cmake -G Ninja -S reference/SDL -B <作業用> -DSDL_UNIX_CONSOLE_BUILD=ON -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TESTS=OFF` に、使わないもの（`-DSDL_AUDIO=OFF` など）を足す。`SDL_CreateSoftwareRenderer` でサーフェスへ描けば比べられる（`docs/TEST-LOG.md` の使い捨て検証） |
-| qwen | 手元の ollama の `qwen2.5-coder:14b`。呼び出しは `tools/qwen-gen.bb`。**クラウドには無い**ので、Low の作業は手元に戻るか、Sonnet に回す |
+| qwen | 手元の ollama の `qwen2.5-coder:14b`。呼び出しは `tools/qwen-gen.bb`。**クラウドには ollama が無い** |
+| Bedrock の Qwen（クラウド） | 量子化していない Qwen3-Coder。`PAPIMELA_QWEN_BACKEND=bedrock tools/qwen-gen.bb プロンプト 出力`（同じ依頼文を手元の qwen にも投げられる）。**鍵が要る**: 持ち主が環境の設定（Network secrets か環境変数）に Bedrock の API キーを `AWS_BEARER_TOKEN_BEDROCK` で置く（チャットに貼らない）。2026-10-20 の時点では未設定で、環境にある `AWS_ACCESS_KEY_ID` などは無効（Bedrock が 403「security token invalid」）。地域は `AWS_REGION`（既定 us-west-2）、モデルは `PAPIMELA_QWEN_MODEL`（既定の ID `qwen.qwen3-coder-30b-a3b-v1:0` は**まだ実物で確かめていない**。鍵が入ったら `GET https://bedrock.us-west-2.amazonaws.com/foundation-models?byProvider=Qwen` で確かめて直す）。bb はネイティブなので `JAVA_TOOL_OPTIONS` を読まない。proxy の CA は `/etc/ssl/certs/java/cacerts` を信頼の置き場として渡している（`PAPIMELA_TRUSTSTORE` で変えられる） |
 | クラウドのセッション | 毎回まっさらな Ubuntu 24.04（root）。最初に揃える: `apt-get install -y fpc libegl1 libgles2 libegl-mesa0 libgl1-mesa-dri`、`git clone https://github.com/tankoha/rawpaco.git ../rawpaco && make -C ../rawpaco`、`docs/ORIGIN.md` の手順で `reference/SDL`、Babashka は `curl -sSL https://raw.githubusercontent.com/babashka/babashka/master/install \| bash`。SDL の実物を作るなら `cmake ninja-build` も（入っていた）。GitHub の CI の状態は `https://api.github.com/repos/tankoha/papimela/actions/runs?head_sha=<コミット>` で読める |
 | 手元の機械 | labwc（Wayland）、画面 DP-3 2560x1080 200 Hz、Radeon RX 9070 + 内蔵 Raphael、Mesa 26.0.8、Ubuntu 26.04、fcitx5-mozc |
 
@@ -367,6 +368,7 @@ man-db などの設定は所有者の切り替えで失敗するが、`dpkg -r -
 ## 8. 保留中の判断（利用者に聞く）
 
 - **ブランチ `claude/zen-mayer-sjyn3o` を master へ入れるか**（2026-10-20 の作業。CI は緑）
+- **Bedrock の Qwen3-Coder での比べ（持ち主が 2026-10-20 に決めた。鍵待ち）**: WAV の 3 段目を、Haiku と同じ出発点（`0a1515f`）・同じ検査（最終版の T-56）で量子化していない Qwen3-Coder-30B に投げ直し、上の「Haiku を加えるか」の材料にする。依頼文は `docs/briefs/wave-stage3.md`（組み立ては同じ所の `.sh`。Haiku に渡した依頼文は残っていなかったので作り直した）。手順: 使い捨ての worktree で `0a1515f` を出し、最終版の `test/test_audio_wave.pas` と `_expected.inc` を写し、返ってきた区画を 3 段目の見出しから「形式ごとへの振り分け」の手前まで丸ごと差し替える（手で直さない）→ `fpc -B` と `-B -Cr -Co -Ct` で T-56 → 落ちたら誤りと落ちた検査だけを返して 2 回目まで → 残りを Opus が直した箇所として数える。空の 3 段目では 127 件中 51 件が落ち、最終版の 3 段目を差し込めば全部通る（2026-10-20 に確かめた）。Qwen は 1 回の補完でファイルを読めず検査も流せない（Haiku は流してから返した）ので、その違いも記録に書く。手元の qwen2.5-coder:14b に同じ依頼文を投げれば 3 者を並べられる
 - **Haiku を割り振りに加えるか**（`CLAUDE.md` の「実装担当の割り振り」と `docs/DESIGN.md` 第 11 章）。#54 の結果（§2）: 3 段とも 1 往復で受け入れ検査が通り、
   直したのは 3 箇所（どれも仕様の書き漏れか、Haiku 自身が挙げたもの）。qwen は #27・#34・#68 で中核の関数の書き直しや取り違えがあった。
   案: クラウドの Low は Haiku、手元の Low は今までどおり qwen（ollama は手元にしか無い）。1 件だけなので、次の Low でもう一度比べてから決めてもよい

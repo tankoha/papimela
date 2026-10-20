@@ -59,6 +59,10 @@ qwen に渡すプロンプトには `docs/CODING-STYLE.md` の内容を明示的
 tools/qwen-gen.bb プロンプトファイル 出力ファイル
 ```
 
+クラウドのセッションには ollama が無い。`PAPIMELA_QWEN_BACKEND=bedrock` で Amazon Bedrock の
+量子化していない Qwen3-Coder へ同じ依頼文を投げられる（鍵と環境変数は `docs/HANDOFF.md` §6）。
+割り振りに入れるかは比べてから決める（§8）。
+
 実際の進め方（#34 で確立）:
 
 1. interface 部（設計にあたる部分）はこちらで書く
