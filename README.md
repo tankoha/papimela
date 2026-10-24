@@ -310,7 +310,7 @@ compares that argument with itself, so a validation that *looks* like a
 validation always succeeds. It is in `docs/DEFECTS.md`. It has not been
 reported.
 
-It is not the only one. Twenty-three more are in `docs/DEFECTS.md`, each confirmed
+It is not the only one. Twenty-four more are in `docs/DEFECTS.md`, each confirmed
 by running SDL's own code rather than by reading alone (one only in part, as
 noted), and none of them reported either:
 
@@ -431,6 +431,11 @@ noted), and none of them reported either:
   limited-range colorspace black (Y = 64) converts to R = G = B = 73 rather
   than 0; white still saturates, so it is easy to miss. Full range
   (BT.2020, `y_shift` = 0) is not affected (3.4.2 and main).
+- **D-77**, `yuvi0fl_rgb48_std` / `yuvi4fl_rgb48_std`: the 16-bit version of D-76.
+  `y_shift` (16) is subtracted from the 16-bit sample as is, instead of
+  `16 << 8`, so limited-range black (Y = 16 << 8) converts to 4781 rather than 0
+  in BT.709; white saturates. Main only: 3.4.2 has no I0FL/I4FL to RGB48 path
+  at all (the conversion just fails).
 
 One more is different in kind. **D-53**: SDL documents the swap interval as
 belonging to "the current OpenGL context", but keeps a single value for the
@@ -467,7 +472,7 @@ SDL は AI 生成物の貢献を受け付けない方針を明示している。
 比較しているため、**検証の形をしたまま必ず成功する**。`docs/DEFECTS.md` に
 記録してある。報告はしていない。
 
-これだけではない。`docs/DEFECTS.md` にはあと 23 件ある。どれも読んだだけでなく
+これだけではない。`docs/DEFECTS.md` にはあと 24 件ある。どれも読んだだけでなく
 SDL のコードを実際に動かして確かめたもので（1 件は一部だけ。その旨を書いた）、どれも報告していない。
 
 - **D-36**、`imKStoUCS.c` の 312 行目: 範囲の判定が表の先頭より 6 つ手前から
@@ -546,6 +551,9 @@ SDL のコードを実際に動かして確かめたもので（1 件は一部�
   16 ビットの P010 の標本から、10 ビットへ寄せる前に引いている（寄せたあとに 64 を引くべき）。限定範囲の色空間では、
   黒（Y = 64）が 0 でなく R = G = B = 73 になる。白は飽和するので気づきにくい。全範囲（BT.2020。`y_shift` が 0）は
   影響しない（3.4.2 と main）
+- **D-77**、`yuvi0fl_rgb48_std` / `yuvi4fl_rgb48_std`: D-76 の 16 ビット版。`y_shift`（16）を 16 ビットの標本から
+  そのまま引き（`16 << 8` を引くべき）、BT.709 の限定範囲で黒（Y = 16 << 8）が 0 でなく 4781 になる。白は飽和する。
+  main だけ。3.4.2 には I0FL / I4FL から RGB48 への道が無く、変換が失敗する
 
 もう 1 件は種類が違う。**D-53**: SDL はスワップ間隔を「現在の OpenGL コンテキストの」
 ものとして説明しているが、値はビデオの装置全体で 1 つしか持たず、コンテキストを
