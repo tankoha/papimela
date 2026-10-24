@@ -104,7 +104,8 @@ uses
   PaPiMeLa.Video,
   PaPiMeLa.Render,
   PaPiMeLa.Platform.GLES2,
-  PaPiMeLa.Platform.EGL;
+  PaPiMeLa.Platform.EGL,
+  PaPiMeLa.Platform.EGL.Surfaceless;
 
 type
   { フラグメントシェーダの種類。テクスチャの形式ごとに 1 つ（SDL の
@@ -278,10 +279,6 @@ uses
   Math;
 
 const
-  // Mesa の surfaceless プラットフォーム（EGL_MESA_platform_surfaceless）。
-  // egl.h ではなく eglext.h の定数なので、生成した定数表には無い。
-  EGL_PLATFORM_SURFACELESS_MESA = $31DD;
-
   // 頂点の属性の位置。シェーダのリンク前に glBindAttribLocation で固定する。
   ATTR_POSITION = 0;
   ATTR_COLOR    = 1;
@@ -625,9 +622,6 @@ var
   // PMLLoadGLES2Functions に渡す取得関数は C の関数ポインタ（cdecl）で、
   // 文脈を持てない。読み込みの間だけ、対象のコンテキストをここに置く。
   GLoaderContext: TPMLGLContext = nil;
-  // surfaceless のディスプレイ（全ドライバで 1 つ）と、それを借りている数。
-  GSurfacelessDisplay: EGLDisplay = nil;
-  GSurfacelessRefs: Integer = 0;
 
 function LoaderProc(AName: PAnsiChar): Pointer; cdecl;
 begin
@@ -635,79 +629,6 @@ begin
     Result := nil
   else
     Result := GLoaderContext.GetProcAddress(String(AName));
-end;
-
-// 空白区切りの拡張名の一覧に AExt が語として含まれるか。
-function HasExtension(const AList, AExt: String): Boolean;
-begin
-  Result := Pos(' ' + AExt + ' ', ' ' + AList + ' ') > 0;
-end;
-
-{ surfaceless のディスプレイを 1 つ借りる。最初の 1 人が初期化する。
-
-  Mesa は同じプラットフォームなら、何度 eglGetPlatformDisplay を呼んでも同じ
-  EGLDisplay を返す。eglTerminate は参照を数えないので、ドライバごとに初期化と
-  終了をすると、先に消えたドライバがほかのドライバのコンテキストを巻き添えにする
-  （実測: EGL_BAD_DISPLAY）。このため、借りている数を自分で数え、最後の 1 人が
-  返すときに終了する。足りないものがあれば、何が足りないかを文面にする。 }
-function AcquireSurfacelessDisplay: EGLDisplay;
-var
-  Ext: PAnsiChar;
-  Display: EGLDisplay;
-  Major, Minor, Err: EGLint;
-begin
-  if GSurfacelessRefs > 0 then
-  begin
-    Inc(GSurfacelessRefs);
-    Exit(GSurfacelessDisplay);
-  end;
-
-  Ext := eglQueryString(EGL_NO_DISPLAY, EGL_EXTENSIONS);
-  if (Ext = nil) or not HasExtension(String(Ext), 'EGL_MESA_platform_surfaceless') then
-    raise EPMLUnsupported.Create(
-      'offscreen GLES2: the client extension EGL_MESA_platform_surfaceless is missing');
-
-  Display := EGL_NO_DISPLAY;
-  if Assigned(eglGetPlatformDisplayEXT) then
-    Display := eglGetPlatformDisplayEXT(EGL_PLATFORM_SURFACELESS_MESA, nil, nil);
-  if (Display = EGL_NO_DISPLAY) and Assigned(eglGetPlatformDisplay) then
-    Display := eglGetPlatformDisplay(EGL_PLATFORM_SURFACELESS_MESA, nil, nil);
-  if Display = EGL_NO_DISPLAY then
-    raise EPMLUnsupported.Create(
-      'offscreen GLES2: could not get an EGL display for the surfaceless platform');
-
-  Major := 0;
-  Minor := 0;
-  if eglInitialize(Display, @Major, @Minor) = EGL_FALSE then
-  begin
-    Err := eglGetError();
-    raise EPMLUnsupported.CreateFmt('offscreen GLES2: eglInitialize failed (%s)',
-      [PMLEGLErrorName(Err)]);
-  end;
-
-  Ext := eglQueryString(Display, EGL_EXTENSIONS);
-  if (Ext = nil) or not HasExtension(String(Ext), 'EGL_KHR_surfaceless_context') then
-  begin
-    eglTerminate(Display);
-    raise EPMLUnsupported.Create(
-      'offscreen GLES2: the display extension EGL_KHR_surfaceless_context is missing');
-  end;
-
-  GSurfacelessDisplay := Display;
-  GSurfacelessRefs := 1;
-  Result := Display;
-end;
-
-procedure ReleaseSurfacelessDisplay;
-begin
-  if GSurfacelessRefs = 0 then
-    Exit;
-  Dec(GSurfacelessRefs);
-  if GSurfacelessRefs = 0 then
-  begin
-    eglTerminate(GSurfacelessDisplay);
-    GSurfacelessDisplay := EGL_NO_DISPLAY;
-  end;
 end;
 
 function MakeVertex(AX, AY: Single; const AColor: TPMLFColor): TPMLVertex; inline;
@@ -850,7 +771,7 @@ begin
         eglMakeCurrent(FDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
       if FEGLContext <> EGL_NO_CONTEXT then
         eglDestroyContext(FDisplay, FEGLContext);
-      ReleaseSurfacelessDisplay;
+      PMLReleaseSurfacelessDisplay;
     end;
     PMLEGLUnload;
   end;
@@ -896,7 +817,7 @@ begin
     raise EPMLUnsupported.Create('offscreen GLES2: libEGL could not be loaded');
   FEGLLoaded := True;
 
-  FDisplay := AcquireSurfacelessDisplay;
+  FDisplay := PMLAcquireSurfacelessDisplay('offscreen GLES2');
   FDisplayHeld := True;
 
   if eglBindAPI(EGL_OPENGL_ES_API) = EGL_FALSE then
