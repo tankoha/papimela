@@ -47,6 +47,7 @@ uses
   PaPiMeLa.Events,
   PaPiMeLa.Joystick.GUID,
   PaPiMeLa.Joystick.Tables,
+  PaPiMeLa.Joystick.Names,
   PaPiMeLa.Joystick.Backend,
   PaPiMeLa.Gamepad.Mapping;
 
@@ -170,6 +171,9 @@ type
     function  GamepadTypeFromGUID(const AGUID: TPMLGUID; const AName: String): TPMLGamepadType;
     // 開いている機器の数（ゲームパッドが閉じ終わったかの確認用）。
     function  OpenCount: Integer;
+  strict private
+    function  GamepadTypeForNames(AVendor, AProduct: Word): TPMLGamepadType;
+  public
     property  BackendCount: Integer read GetBackendCount;
     function  BackendName(AIndex: Integer): String;
 
@@ -196,6 +200,7 @@ type
     function  PlayerIndexOf(AID: TPMLJoystickID): Integer; override;
     function  SetPlayerIndexOf(AID: TPMLJoystickID; APlayerIndex: Integer): Boolean; override;
     function  JoystickTypeOf(const AGUID: TPMLGUID): TPMLJoystickType; override;
+    function  CreateJoystickName(AVendor, AProduct: Word; const AVendorName, AProductName: String): String; override;
 
     { IPMLEventPumpSource }
     function  PumpSourceName: String;
@@ -240,16 +245,23 @@ begin
       B := nil;
       try
         B := Factory(Self);
-        if (B <> nil) and B.Init then
+        if B <> nil then
         begin
+          // Init の中で機器を見つけるバックエンドがある。その機器の問い合わせ（名前・自動のマッピング）が
+          // このバックエンドを探せるよう、Init の前に一覧へ入れる（SDL は静的な並びなので初めから探せる）
           SetLength(FBackends, Length(FBackends) + 1);
           FBackends[High(FBackends)] := B;
-        end
-        else
-          B.Free;
+          if not B.Init then
+          begin
+            SetLength(FBackends, Length(FBackends) - 1);
+            FreeAndNil(B);
+          end;
+        end;
       except
         on E: Exception do
         begin
+          if (B <> nil) and (Length(FBackends) > 0) and (FBackends[High(FBackends)] = B) then
+            SetLength(FBackends, Length(FBackends) - 1);
           B.Free;
           if ContextServices <> nil then
             ContextServices.Log.Debug(PML_LOG_CATEGORY_INPUT,
@@ -1195,6 +1207,16 @@ begin
 end;
 
 { ---- ゲームパッドの種類 ---- }
+
+function TPMLJoystickSystem.GamepadTypeForNames(AVendor, AProduct: Word): TPMLGamepadType;
+begin
+  Result := GamepadTypeFromVIDPID(AVendor, AProduct, '', True);
+end;
+
+function TPMLJoystickSystem.CreateJoystickName(AVendor, AProduct: Word; const AVendorName, AProductName: String): String;
+begin
+  Result := PMLCreateJoystickName(AVendor, AProduct, AVendorName, AProductName, @GamepadTypeForNames);
+end;
 
 function TPMLJoystickSystem.GamepadTypeFromVIDPID(AVendor, AProduct: Word; const AName: String;
   AForUI: Boolean): TPMLGamepadType;

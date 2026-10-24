@@ -82,6 +82,9 @@ test/test_colorspace
 test/test_joystick
 test/test_gamepad_mapping
 test/test_gamepad
+test/test_evdev
+test/test_udev
+test/test_joystick_linux
 test/test_audio_device
 test/test_pipewire_abi
 test/test_audio_pipewire

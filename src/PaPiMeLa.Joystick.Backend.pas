@@ -163,6 +163,8 @@ type
     function  SetPlayerIndexOf(AID: TPMLJoystickID; APlayerIndex: Integer): Boolean; virtual; abstract;
     // 種類（SDL_GetJoystickGUIDType）。
     function  JoystickTypeOf(const AGUID: TPMLGUID): TPMLJoystickType; virtual; abstract;
+    // 機器の名前を整える（SDL_CreateJoystickName。コントローラの表の名前が先、無ければ「ベンダー名 製品名」）。
+    function  CreateJoystickName(AVendor, AProduct: Word; const AVendorName, AProductName: String): String; virtual; abstract;
   end;
 
   // 軸 1 本の状態（SDL_JoystickAxisInfo）。
