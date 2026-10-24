@@ -1,0 +1,15 @@
+#!/bin/sh
+# 検査用の偽の zenity（test_messagebox と tools/messagebox-expect が PATH の先頭に置く）。
+#   FAKE_ZENITY_VERSION  --version の出力（既定は 3.44.0。空でも設定されていれば空を出す）
+#   FAKE_ZENITY_LOG      引数を 1 つずつ NUL で区切って書くファイル
+#   FAKE_ZENITY_OUTPUT   標準出力に出すもの（改行は自分で入れる）
+#   FAKE_ZENITY_EXIT     終了コード（既定は 0）
+if [ "$1" = "--version" ]; then
+  printf '%s\n' "${FAKE_ZENITY_VERSION-3.44.0}"
+  exit 0
+fi
+if [ -n "$FAKE_ZENITY_LOG" ]; then
+  printf '%s\0' "$@" > "$FAKE_ZENITY_LOG"
+fi
+printf '%s' "${FAKE_ZENITY_OUTPUT}"
+exit "${FAKE_ZENITY_EXIT:-0}"

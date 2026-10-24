@@ -86,6 +86,7 @@ test/test_evdev
 test/test_udev
 test/test_joystick_linux
 test/test_filesystem
+test/test_messagebox
 test/test_audio_device
 test/test_pipewire_abi
 test/test_audio_pipewire

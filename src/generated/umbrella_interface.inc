@@ -29,6 +29,7 @@
 //   PaPiMeLa.Gamepad.Mapping
 //   PaPiMeLa.Gamepad
 //   PaPiMeLa.FileSystem
+//   PaPiMeLa.MessageBox
 //   PaPiMeLa.TextInput
 //   PaPiMeLa.Time
 //   PaPiMeLa.Atomic
@@ -1028,6 +1029,32 @@ type
 function PMLWildcardMatch(
   const APattern, AText: String;
   out AMatchedToDir: Boolean): Boolean; inline;
+
+// ---- PaPiMeLa.MessageBox
+type
+  TPMLMessageBoxFlag = PaPiMeLa.MessageBox.TPMLMessageBoxFlag;
+  TPMLMessageBoxFlags = PaPiMeLa.MessageBox.TPMLMessageBoxFlags;
+  TPMLMessageBoxButtonFlag = PaPiMeLa.MessageBox.TPMLMessageBoxButtonFlag;
+  TPMLMessageBoxButtonFlags = PaPiMeLa.MessageBox.TPMLMessageBoxButtonFlags;
+  TPMLMessageBoxButton = PaPiMeLa.MessageBox.TPMLMessageBoxButton;
+  TPMLMessageBoxData = PaPiMeLa.MessageBox.TPMLMessageBoxData;
+const
+  PML_MESSAGEBOX_MAX_BUTTONS = PaPiMeLa.MessageBox.PML_MESSAGEBOX_MAX_BUTTONS;
+function PMLShowMessageBox(
+  const AData: TPMLMessageBoxData;
+  out AButtonID: Integer): Boolean; inline;
+function PMLShowSimpleMessageBox(
+  AFlags: TPMLMessageBoxFlags;
+  const ATitle, AMessage: String): Boolean; inline;
+function PMLMessageBoxCount: Integer; inline;
+function PMLZenityMessageBoxArguments(
+  const AData: TPMLMessageBoxData;
+  AMajor, AMinor: Integer): TStringArray; inline;
+function PMLParseZenityVersion(const AText: String; out AMajor, AMinor: Integer): Boolean; inline;
+function PMLZenityPickButton(
+  const AData: TPMLMessageBoxData;
+  const AOutput: String;
+  out AButtonID: Integer): Boolean; inline;
 
 // ---- PaPiMeLa.TextInput
 type

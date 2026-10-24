@@ -77,6 +77,7 @@ uses
   PaPiMeLa.Gamepad.Mapping,
   PaPiMeLa.Gamepad,
   PaPiMeLa.FileSystem,
+  PaPiMeLa.MessageBox,
   PaPiMeLa.TextInput,
   PaPiMeLa.TextInput.Backend,
   PaPiMeLa.Time,

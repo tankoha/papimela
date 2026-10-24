@@ -66,6 +66,7 @@
    {:unit "PaPiMeLa.Gamepad.Mapping"}
    {:unit "PaPiMeLa.Gamepad"}
    {:unit "PaPiMeLa.FileSystem"}
+   {:unit "PaPiMeLa.MessageBox"}
    {:unit "PaPiMeLa.TextInput"}
    {:unit "PaPiMeLa.Time"}
    {:unit "PaPiMeLa.Atomic"}

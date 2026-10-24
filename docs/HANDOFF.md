@@ -55,6 +55,7 @@
 >   実機の軸の範囲・ハットの作り・`EVIOCGKEY` の戻り・ff_effect の受け入れ。SDL から外した所: 旧 js・加速度計とジャイロ・Steam の仮想ゲームパッドの並べ替え。
 >   `/dev/uinput` は root のみ。仮想の入力を作って本物の経路を通す検査は、権限が整ってから足せる。
 > **続けて ファイルシステム（#65）を済ませた**（2026-10-25。`PaPiMeLa.FileSystem`、`.Unicode.CaseFold`。T-74。SDL の不具合 D-82・D-83）。次は MessageBox（#40）。
+> **続けて MessageBox（#40）を済ませた**（同日。`PaPiMeLa.MessageBox`、T-75）。次はおすすめの順に、Haptic（#63。`input` グループの権限が要る）、libdecor（#69）、タブレット/ペン（#66）、Render.GL（#44）。
 > 次の候補は §3。
 
 ## 1. 今どこにいるか
@@ -264,7 +265,7 @@ Pong もすべて書き換え、今は `uses SysUtils, Math, PaPiMeLa` だけで
 表示サーバ無しで通るもの（CI と同じ）:
 
 ```bash
-for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_render_transform test_render_target test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_drop test_drag_source test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds test_audio_convert test_audio_stream test_audio_mixer test_audio_wave test_audio_device test_pipewire_abi test_pulse_abi test_alsa_abi test_alsa_chmap test_audio_autoselect test_texture_lock test_texture_colorkey test_yuv_hd test_colorspace test_joystick test_gamepad_mapping test_gamepad test_evdev test_udev test_joystick_linux test_filesystem; do
+for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_render_transform test_render_target test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_drop test_drag_source test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds test_audio_convert test_audio_stream test_audio_mixer test_audio_wave test_audio_device test_pipewire_abi test_pulse_abi test_alsa_abi test_alsa_chmap test_audio_autoselect test_texture_lock test_texture_colorkey test_yuv_hd test_colorspace test_joystick test_gamepad_mapping test_gamepad test_evdev test_udev test_joystick_linux test_filesystem test_messagebox; do
   fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/$t test/$t.pas && ./test/$t
 done
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -oexamples/pong examples/pong.pas && ./examples/pong --selftest
@@ -292,7 +293,7 @@ env -u WAYLAND_DISPLAY LIBGL_ALWAYS_SOFTWARE=1 ./test/test_render_gles2   # Mesa
 cd papimela && mkdir -p lib
 B='fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib'
 # 0. 表示サーバ無しの分（CI と同じ。手元の新しい Mesa でも通るか）
-for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds test_audio_convert test_audio_stream test_audio_mixer test_audio_wave test_audio_device test_pipewire_abi test_pulse_abi test_alsa_abi test_alsa_chmap test_audio_autoselect test_texture_lock test_texture_colorkey test_yuv_hd test_colorspace test_joystick test_gamepad_mapping test_gamepad test_evdev test_udev test_joystick_linux test_filesystem; do
+for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds test_audio_convert test_audio_stream test_audio_mixer test_audio_wave test_audio_device test_pipewire_abi test_pulse_abi test_alsa_abi test_alsa_chmap test_audio_autoselect test_texture_lock test_texture_colorkey test_yuv_hd test_colorspace test_joystick test_gamepad_mapping test_gamepad test_evdev test_udev test_joystick_linux test_filesystem test_messagebox; do
   $B -otest/$t test/$t.pas && ./test/$t | tail -1
 done
 # 1. 実機の Wayland（自動判定。最後の行が「結論」で終わればよい）
