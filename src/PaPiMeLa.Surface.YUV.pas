@@ -16,7 +16,8 @@
 
   WHAT:
     YV12 / IYUV / I444 / NV12 / NV21 / YUY2 / UYVY / YVYU の画素を ARGB8888 に直す。P010 は
-    XBGR2101010 に直す（PMLConvertP010ToXBGR2101010。テクスチャにはならない）。
+    XBGR2101010 に直す（PMLConvertP010ToXBGR2101010。テクスチャにはならない）。I0FL / I4FL は RGB48 に直す
+    （PMLConvertYUV16ToRGB48。同じくテクスチャにはならない）。
     TPMLYUVPlanes は YUV のテクスチャの中身（SDL の SDL_SW_YUVTexture）で、
     レンダラの肩代わりの層が持ち、更新のたびに全体を ARGB8888 に直して肩代わりへ写す。
 
@@ -40,8 +41,11 @@
     スカラー版（x86 では幅 32 未満の画像と、右端の 32 未満の列）とは回り込む画素だけ違う（D-62）。
 
   NOT RESOLVED:
-    - I0FL / I4FL と、RGB から YUV・YUV から YUV への変換は無い。P010 を ARGB8888 など XBGR2101010
-      以外へ直す道（SDL は XBGR2101010 を経由して色空間を変換する）は無い（EPMLArgument）
+    - RGB から YUV・YUV から YUV への変換は無い
+    - P010 を XBGR2101010 以外へ、I0FL / I4FL を RGB48 以外へ直す道は無い（EPMLArgument）。SDL は XBGR2101010 /
+      RGB48 を経由して色空間を変換する。papimela に色空間の変換（転送関数・原色）の仕組みはまだ無い
+    - I0FL / I4FL のテクスチャは持たない。SDL のソフトウェアのレンダラは RGB48 から ARGB8888 へ色空間の変換を
+      挟む（既定の色空間 HDR10 では更新が「Unsupported YUV colorspace」で失敗する）。上の仕組みが先に要る
     - P010 のテクスチャは持たない。SDL のソフトウェアのレンダラも GLES2 も P010 のテクスチャを作れない
       （Vulkan などの GPU のドライバが持つときは、ドライバが SupportsTextureFormat で答える）
 
@@ -154,6 +158,13 @@ procedure PMLConvertYUVToARGB8888(AWidth, AHeight: Integer; AFormat: TPMLPixelFo
 // （SDL_ConvertPixels_YUV_to_RGB の yuvp010_xbgr2101010_std）。ASrcPitch は Y の行の幅（バイト）。
 procedure PMLConvertP010ToXBGR2101010(AWidth, AHeight: Integer; AColorspace: TPMLColorspace;
   ASrc: Pointer; ASrcPitch: Integer; ADst: Pointer; ADstPitch: Integer);
+
+// I0FL / I4FL（16 ビットの Y・U・V の 3 平面。I0FL は色差が縦横とも半分、I4FL は同じ大きさ）を
+// RGB48（R・G・B の順に 16 ビットずつ）に直す（yuvi0fl_rgb48_std / yuvi4fl_rgb48_std）。
+// ASrcPitch は Y の行の幅（バイト）、ADstPitch は RGB48 の行の幅（バイト）。
+// 形式が I0FL / I4FL でない、または色空間を変換できなければ EPMLArgument。
+procedure PMLConvertYUV16ToRGB48(AWidth, AHeight: Integer; AFormat: TPMLPixelFormat;
+  AColorspace: TPMLColorspace; ASrc: Pointer; ASrcPitch: Integer; ADst: Pointer; ADstPitch: Integer);
 
 implementation
 
@@ -336,6 +347,17 @@ begin
         // 1 標本 2 バイト。色差は U・V を交互に詰めるので、1 区画が 4 バイト
         APitch := 2 * AWidth;
         ASize := PtrUInt(APitch) * PtrUInt(AHeight) + 4 * Chroma;
+      end;
+    PML_PIXELFORMAT_I0FL:
+      begin
+        // 1 標本 2 バイトの 3 平面。U・V は縦横とも半分（切り上げ）
+        APitch := 2 * AWidth;
+        ASize := PtrUInt(APitch) * PtrUInt(AHeight) + 4 * Chroma;
+      end;
+    PML_PIXELFORMAT_I4FL:
+      begin
+        APitch := 2 * AWidth;
+        ASize := 3 * PtrUInt(APitch) * PtrUInt(AHeight);
       end;
   else
     ASize := 0;
@@ -658,6 +680,93 @@ begin
       BT := UT * UB;
       YT := SarLongint(LongInt(YRow[X]) - YShift, 6) * YFactor;
       Dst[X] := $C0000000 or (Clamp10(YT + BT) shl 20) or (Clamp10(YT + GT) shl 10) or Clamp10(YT + RT);
+    end;
+  end;
+end;
+
+{ SDL の clamp16: 固定小数点（下 6 ビット）を 0..65535 に飽和させる。 }
+function Clamp16(V: LongInt): Word;
+var
+  T: LongInt;
+begin
+  T := SarLongint(V, 6);
+  if T < 0 then
+    Result := 0
+  else if T > 65535 then
+    Result := 65535
+  else
+    Result := Word(T);
+end;
+
+{ yuvi0fl_rgb48_std と yuvi4fl_rgb48_std。P010 と同じく、1 画素ずつ同じ式で計算する。
+
+  PORT-NOTE(bug): SDL は 16 ビットの Y から y_shift（8 ビットの 16）をそのまま引く。限定範囲の黒
+  （16 ビットで 16 << 8）は 0 にならず、BT.709 の限定範囲では 4781 になる（D-77。D-76 の 16 ビット版）。
+  papimela は SDL と同じ値にそろえる。 }
+procedure PMLConvertYUV16ToRGB48(AWidth, AHeight: Integer; AFormat: TPMLPixelFormat;
+  AColorspace: TPMLColorspace; ASrc: Pointer; ASrcPitch: Integer; ADst: Pointer; ADstPitch: Integer);
+var
+  Kind: TPMLYCbCrType;
+  Is444: Boolean;
+  UVPitch: PtrInt;
+  X, Y, CX: Integer;
+  YRow, URow, VRow: PWord;
+  UPlane, VPlane: PByte;
+  Dst: PWord;
+  YT, UT, VT, RT, GT, BT, YShift, YFactor, VR, UG, VG, UB: LongInt;
+begin
+  if (AFormat <> PML_PIXELFORMAT_I0FL) and (AFormat <> PML_PIXELFORMAT_I4FL) then
+    raise EPMLArgument.CreateFmt('%s is not an I0FL or I4FL format', [PMLPixelFormatName(AFormat)]);
+  if not PMLYCbCrTypeOf(AColorspace, Kind) then
+    raise EPMLArgument.CreateFmt('colorspace $%.8x has no YUV conversion', [AColorspace]);
+  Is444 := AFormat = PML_PIXELFORMAT_I4FL;
+  YShift := YUV2RGB[Kind][0];
+  YFactor := YUV2RGB[Kind][1];
+  VR := YUV2RGB[Kind][2];
+  UG := YUV2RGB[Kind][3];
+  VG := YUV2RGB[Kind][4];
+  UB := YUV2RGB[Kind][5];
+  UPlane := PByte(ASrc) + PtrInt(ASrcPitch) * AHeight;
+  if Is444 then
+  begin
+    UVPitch := ASrcPitch;
+    VPlane := UPlane + UVPitch * AHeight;
+  end
+  else
+  begin
+    // 色差の行の幅は ((Y の行の幅 / 2 + 1) / 2) 標本（SDL の GetYUVPlanes）
+    UVPitch := (((ASrcPitch div 2) + 1) div 2) * 2;
+    VPlane := UPlane + UVPitch * ((AHeight + 1) div 2);
+  end;
+  for Y := 0 to AHeight - 1 do
+  begin
+    YRow := PWord(PByte(ASrc) + PtrInt(Y) * ASrcPitch);
+    if Is444 then
+    begin
+      URow := PWord(UPlane + PtrInt(Y) * UVPitch);
+      VRow := PWord(VPlane + PtrInt(Y) * UVPitch);
+    end
+    else
+    begin
+      URow := PWord(UPlane + PtrInt(Y div 2) * UVPitch);
+      VRow := PWord(VPlane + PtrInt(Y div 2) * UVPitch);
+    end;
+    Dst := PWord(PByte(ADst) + PtrInt(Y) * ADstPitch);
+    for X := 0 to AWidth - 1 do
+    begin
+      if Is444 then
+        CX := X
+      else
+        CX := X div 2;
+      UT := LongInt(URow[CX]) - 32768;
+      VT := LongInt(VRow[CX]) - 32768;
+      RT := VT * VR;
+      GT := (UT * UG) + (VT * VG);
+      BT := UT * UB;
+      YT := (LongInt(YRow[X]) - YShift) * YFactor;
+      Dst[X * 3] := Clamp16(YT + RT);
+      Dst[X * 3 + 1] := Clamp16(YT + GT);
+      Dst[X * 3 + 2] := Clamp16(YT + BT);
     end;
   end;
 end;

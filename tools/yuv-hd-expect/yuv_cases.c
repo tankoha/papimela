@@ -77,9 +77,9 @@ int main(void)
   if (!rr) { printf("INIT-ERR %s\n", SDL_GetError()); return 1; }
 
   /* 大きさ */
-  static const struct { const char *n; SDL_PixelFormat f; } fm[] = { { "I444", SDL_PIXELFORMAT_I444 }, { "P010", SDL_PIXELFORMAT_P010 } };
+  static const struct { const char *n; SDL_PixelFormat f; } fm[] = { { "I444", SDL_PIXELFORMAT_I444 }, { "P010", SDL_PIXELFORMAT_P010 }, { "I0FL", SDL_PIXELFORMAT_I0FL }, { "I4FL", SDL_PIXELFORMAT_I4FL } };
   static const int zs[][2] = { { 7, 5 }, { 8, 6 }, { 1, 1 }, { 40, 6 } };
-  for (int f = 0; f < 2; f++) for (int i = 0; i < 4; i++) {
+  for (int f = 0; f < 4; f++) for (int i = 0; i < 4; i++) {
     size_t sz = 0, pi = 0;
     if (SDL_CalculateYUVSize(fm[f].f, zs[i][0], zs[i][1], &sz, &pi))
       printf("Z %s %d %d %zu %zu\n", fm[f].n, zs[i][0], zs[i][1], sz, pi);
@@ -110,6 +110,20 @@ int main(void)
       printf("C P010 %s %d %d %08X\n", spaces[s].n, w, h, fnv(dst, (size_t)w * h * 4, 2166136261u));
     else printf("C P010 %s %d %d err %s\n", spaces[s].n, w, h, SDL_GetError());
     free(src); free(dst);
+
+    /* I0FL / I4FL -> RGB48（16 ビットの全域。SDL の clamp16 が飽和させる） */
+    for (int k = 0; k < 2; k++) {
+      SDL_PixelFormat f16 = k ? SDL_PIXELFORMAT_I4FL : SDL_PIXELFORMAT_I0FL;
+      SDL_CalculateYUVSize(f16, w, h, &sz, &pi);
+      src = calloc(1, sz); dst = calloc(1, (size_t)w * h * 6);
+      lcg = 23 + s * 5 + z + k * 100;
+      for (size_t i = 0; i < sz / 2; i++) ((unsigned short *)src)[i] = (unsigned short)(nx() & 0xFFFF);
+      if (SDL_ConvertPixelsAndColorspace(w, h, f16, spaces[s].c, 0, src, (int)pi,
+          SDL_PIXELFORMAT_RGB48, spaces[s].c, 0, dst, w * 6))
+        printf("C %s %s %d %d %08X\n", k ? "I4FL" : "I0FL", spaces[s].n, w, h, fnv(dst, (size_t)w * h * 6, 2166136261u));
+      else printf("C %s %s %d %d err %s\n", k ? "I4FL" : "I0FL", spaces[s].n, w, h, SDL_GetError());
+      free(src); free(dst);
+    }
   }
 
   /* I444 のテクスチャ: 詰めた画素での更新（UpdateTexture）、平面ごと（UpdateYUVTexture）、Lock */
@@ -201,5 +215,16 @@ int main(void)
     if (SDL_ConvertPixelsAndColorspace(4, 4, SDL_PIXELFORMAT_P010, SDL_COLORSPACE_BT709_LIMITED, 0, src, 8,
         SDL_PIXELFORMAT_XBGR2101010, SDL_COLORSPACE_BT709_LIMITED, 0, dst, 16)) printf("E p010_to_xbgr ok\n");
     else printf("E p010_to_xbgr %s\n", SDL_GetError()); }
+  /* 黒と白（限定範囲。I0FL の黒は 16 ビットで 16 << 8、白は 235 << 8） */
+  {
+    unsigned short buf[12];
+    unsigned short out[12];
+    unsigned short blk = 16 << 8, wht = 235 << 8, mid = 128 << 8;
+    buf[0] = blk; buf[1] = wht; buf[2] = blk; buf[3] = wht;   /* Y 2x2 */
+    buf[4] = mid; buf[5] = mid;
+    if (SDL_ConvertPixelsAndColorspace(2, 2, SDL_PIXELFORMAT_I0FL, SDL_COLORSPACE_BT709_LIMITED, 0, buf, 4,
+        SDL_PIXELFORMAT_RGB48, SDL_COLORSPACE_BT709_LIMITED, 0, out, 12))
+      printf("B I0FL_black %u %u %u white %u %u %u\n", out[0], out[1], out[2], out[3], out[4], out[5]);
+  }
   return 0;
 }

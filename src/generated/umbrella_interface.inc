@@ -614,6 +614,14 @@ procedure PMLConvertP010ToXBGR2101010(
   ASrcPitch: Integer;
   ADst: Pointer;
   ADstPitch: Integer); inline;
+procedure PMLConvertYUV16ToRGB48(
+  AWidth, AHeight: Integer;
+  AFormat: TPMLPixelFormat;
+  AColorspace: TPMLColorspace;
+  ASrc: Pointer;
+  ASrcPitch: Integer;
+  ADst: Pointer;
+  ADstPitch: Integer); inline;
 
 // ---- PaPiMeLa.IO
 type

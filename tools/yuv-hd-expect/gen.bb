@@ -25,12 +25,12 @@
   (when-not (zero? (:exit r)) (fail "コンパイルに失敗:\n" (:err r))))
 (def ^:private out (:out (shell {:out :string :err :string} exe)))
 (when (str/includes? out "INIT-ERR") (fail out))
-(def ^:private rows (filter #(re-find #"^[ZCTE] " %) (str/split-lines out)))
+(def ^:private rows (filter #(re-find #"^[ZCTEB] " %) (str/split-lines out)))
 (defn- q [s] (str "'" (str/replace s "'" "''") "'"))
 (spit "test/yuv_hd_expected.inc"
       (str "{ test/yuv_hd_expected.inc — tools/yuv-hd-expect/gen.bb が作る。手で直さない。\n"
            "  参照版 SDL の I444 / P010 の結果。1 行 = 1 場面（先頭の 1 字が種類）:\n"
-           "  'Z 形式 w h 大きさ ピッチ'、'C 形式 色空間 w h ハッシュ'、'T 場面 色空間 w h [ピッチ] ハッシュ'、'E 場面 文面'。 }\n\n"
+           "  'Z 形式 w h 大きさ ピッチ'、'B 場面 値…'（黒と白の測定）、'C 形式 色空間 w h ハッシュ'、'T 場面 色空間 w h [ピッチ] ハッシュ'、'E 場面 文面'。 }\n\n"
            "const\n  YUVHDExpected: array[0.." (dec (count rows)) "] of String = (\n"
            (str/join ",\n" (map #(str "    " (q %)) rows))
            "\n  );\n"))

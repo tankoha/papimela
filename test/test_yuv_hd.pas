@@ -1,5 +1,5 @@
 {
-  test_yuv_hd — I444 と P010（SDL_PIXELFORMAT_I444 / SDL_PIXELFORMAT_P010）
+  test_yuv_hd — I444 と P010（SDL_PIXELFORMAT_I444 / SDL_PIXELFORMAT_P010）と、I0FL / I4FL の変換
 
   Origin : original work (clean-room design; not derived from SDL sources)
 
@@ -189,17 +189,14 @@ var
   Name: String;
 begin
   WriteLn('1 大きさ（SDL_CalculateYUVSize）');
-  for F := 0 to 1 do
+  for F := 0 to 3 do
   begin
-    if F = 0 then
-    begin
-      Fmt := PML_PIXELFORMAT_I444;
-      Name := 'I444';
-    end
+    case F of
+      0: begin Fmt := PML_PIXELFORMAT_I444; Name := 'I444'; end;
+      1: begin Fmt := PML_PIXELFORMAT_P010; Name := 'P010'; end;
+      2: begin Fmt := PML_PIXELFORMAT_I0FL; Name := 'I0FL'; end;
     else
-    begin
-      Fmt := PML_PIXELFORMAT_P010;
-      Name := 'P010';
+      begin Fmt := PML_PIXELFORMAT_I4FL; Name := 'I4FL'; end;
     end;
     for I := 0 to 3 do
     begin
@@ -215,11 +212,12 @@ end;
 
 procedure TestConvert;
 var
-  S, Z, W, H, I: Integer;
+  S, Z, W, H, I, K: Integer;
   Size: PtrUInt;
   Pitch: Integer;
   Src, Dst: TBytes;
   Sp: TSpace;
+  Fmt: TPMLPixelFormat;
 begin
   WriteLn('2 変換の値（5 つの色空間 x 3 つの大きさ）');
   for S := 0 to 4 do
@@ -248,7 +246,51 @@ begin
         PWord(@Src[0])[I] := Word(Nx and $FFFF);
       PMLConvertP010ToXBGR2101010(W, H, Sp.Space, @Src[0], Pitch, @Dst[0], W * 4);
       Same(Format('C P010 %s %d %d %s', [Sp.Name, W, H, Hex(Fnv(@Dst[0], Length(Dst), 2166136261))]));
+      // I0FL / I4FL -> RGB48（16 ビットの全域）
+      for K := 0 to 1 do
+      begin
+        if K = 0 then
+          Fmt := PML_PIXELFORMAT_I0FL
+        else
+          Fmt := PML_PIXELFORMAT_I4FL;
+        PMLCalculateYUVSize(Fmt, W, H, Size, Pitch);
+        SetLength(Src, Size);
+        SetLength(Dst, W * H * 6);
+        FillChar(Src[0], Size, 0);
+        FillChar(Dst[0], Length(Dst), 0);
+        Lcg := 23 + S * 5 + Z + K * 100;
+        for I := 0 to Size div 2 - 1 do
+          PWord(@Src[0])[I] := Word(Nx and $FFFF);
+        PMLConvertYUV16ToRGB48(W, H, Fmt, Sp.Space, @Src[0], Pitch, @Dst[0], W * 6);
+        Same(Format('C %s %s %d %d %s', [PMLPixelFormatName(Fmt), Sp.Name, W, H,
+          Hex(Fnv(@Dst[0], Length(Dst), 2166136261))]));
+      end;
     end;
+end;
+
+{ 限定範囲の黒（16 ビットで 16 << 8）。SDL の輝度のオフセットの扱い（D-77）まで同じ値になる。 }
+procedure TestBlack;
+var
+  Buf: array[0..5] of Word;
+  Dst: array[0..11] of Word;
+  Line, Want: String;
+  I: Integer;
+begin
+  WriteLn('2b I0FL の黒と白（限定範囲。D-77）');
+  Buf[0] := 16 shl 8;
+  Buf[1] := 235 shl 8;
+  Buf[2] := 16 shl 8;
+  Buf[3] := 235 shl 8;
+  Buf[4] := 128 shl 8;
+  Buf[5] := 128 shl 8;
+  FillChar(Dst, SizeOf(Dst), 0);
+  PMLConvertYUV16ToRGB48(2, 2, PML_PIXELFORMAT_I0FL, PML_COLORSPACE_BT709_LIMITED, @Buf[0], 4, @Dst[0], 12);
+  Line := Format('B I0FL_black %d %d %d white %d %d %d', [Dst[0], Dst[1], Dst[2], Dst[3], Dst[4], Dst[5]]);
+  Want := '(場面が無い)';
+  for I := 0 to High(YUVHDExpected) do
+    if Copy(YUVHDExpected[I], 1, 13) = 'B I0FL_black ' then
+      Want := YUVHDExpected[I];
+  Check(Line = Want, Line + '   (SDL: ' + Want + ')');
 end;
 
 procedure TestTexture;
@@ -461,9 +503,16 @@ begin
   Check(PMLIsYUVFormat(PML_PIXELFORMAT_IYUV) and PMLIsYUVFormat(PML_PIXELFORMAT_YUY2) and PMLIsYUVFormat(PML_PIXELFORMAT_NV21),
     '既存の 7 形式は変わらない');
   Check(not PMLIsYUVFormat(PML_PIXELFORMAT_ARGB8888), 'ARGB8888 は YUV でない');
-  Check(not PMLCalculateYUVSize(PML_PIXELFORMAT_I0FL, 4, 4, Size, Pitch)
-    and not PMLCalculateYUVSize(PML_PIXELFORMAT_I4FL, 4, 4, Size, Pitch),
-    'I0FL / I4FL の大きさはまだ返さない（このユニットの範囲外）');
+  Check(not PMLIsYUVFormat(PML_PIXELFORMAT_I0FL) and not PMLIsYUVFormat(PML_PIXELFORMAT_I4FL),
+    'PMLIsYUVFormat は I0FL / I4FL を含まない（テクスチャは持たない）');
+  Raised := False;
+  try
+    R.CreateTexture(PML_PIXELFORMAT_I0FL, TPMLTextureAccess.Streaming, 4, 4, PML_COLORSPACE_BT709_FULL).Free;
+  except
+    on E: EPMLArgument do
+      Raised := True;
+  end;
+  Check(Raised, 'I0FL のテクスチャは作れない（色空間の変換が要る。EPMLArgument）');
 
   FillChar(Buf, SizeOf(Buf), 0);
   FillChar(Dst, SizeOf(Dst), 0);
@@ -475,6 +524,30 @@ begin
       Raised := True;
   end;
   Check(Raised, 'P010 を ARGB8888 に直す道は無い（EPMLArgument）。P010 は XBGR2101010 だけ');
+  Raised := False;
+  try
+    PMLConvertYUVToARGB8888(4, 4, PML_PIXELFORMAT_I4FL, PML_COLORSPACE_BT709_LIMITED, @Buf[0], 8, @Dst[0], 16);
+  except
+    on E: EPMLArgument do
+      Raised := True;
+  end;
+  Check(Raised, 'I4FL を ARGB8888 に直す道は無い（EPMLArgument）。I0FL / I4FL は RGB48 だけ');
+  Raised := False;
+  try
+    PMLConvertYUV16ToRGB48(4, 4, PML_PIXELFORMAT_I444, PML_COLORSPACE_BT709_LIMITED, @Buf[0], 8, @Dst[0], 24);
+  except
+    on E: EPMLArgument do
+      Raised := True;
+  end;
+  Check(Raised, 'PMLConvertYUV16ToRGB48 は I0FL / I4FL 以外の形式を断る');
+  Raised := False;
+  try
+    PMLConvertYUV16ToRGB48(4, 4, PML_PIXELFORMAT_I0FL, PML_COLORSPACE_BT2020_LIMITED, @Buf[0], 8, @Dst[0], 24);
+  except
+    on E: EPMLArgument do
+      Raised := True;
+  end;
+  Check(Raised, 'PMLConvertYUV16ToRGB48 は行列を選べない色空間（BT.2020 の限定範囲）を断る');
   Raised := False;
   try
     PMLConvertP010ToXBGR2101010(4, 4, PML_COLORSPACE_BT2020_LIMITED, @Buf[0], 8, @Dst[0], 16);
@@ -508,6 +581,7 @@ begin
   try
     TestSizes;
     TestConvert;
+    TestBlack;
     TestTexture;
     TestPitch;
     TestRefusals;
