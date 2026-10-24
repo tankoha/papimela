@@ -57,6 +57,21 @@ tools/genpulse.bb /tmp/audioroot/usr/include
 
 ヘッダの版を上げたら、生成物の差分（構造体の並び・定数）と、写したインライン関数の元の差分を読む。
 
+## デスクトップ GL のヘッダ（`tools/gengl.bb`）
+
+`PaPiMeLa.Platform.GL`（Render.GL 用）の定数と関数表は、`tools/gengl.bb` が生成する（`src/generated/gl_constants.inc`、
+`gl_functions.inc`、`gl_bind_*.inc`）。関数は `reference/SDL` の `SDL_glfuncs.h` の有効な行（コア）と、SDL が使う ARB / EXT の
+`glext.h` の型（拡張）、定数の値は `GL/gl.h` と `GL/glext.h`（Mesa の `mesa-common-dev` と GLVND の `libgl-dev`）から。
+`reference/SDL` の khronos には GL/ のヘッダが無い。ビルドと CI はヘッダを要らない。作り直すときだけ要る:
+
+```bash
+apt-get download libgl-dev mesa-common-dev
+for d in libgl-dev_*.deb mesa-common-dev_*.deb; do dpkg-deb -x $d /tmp/glroot; done
+tools/gengl.bb /tmp/glroot/usr/include
+```
+
+2026-10-25 に作った版: libgl-dev 1.7.0-3 と mesa-common-dev 26.0.3-1ubuntu1（arm64。ヘッダは版が同じなら amd64 と同じ）。
+
 ## 版を上げるとき
 
 1. `reference/SDL` を新しいコミットへ進め、この表のコミットと日付を書き換える

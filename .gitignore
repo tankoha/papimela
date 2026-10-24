@@ -94,3 +94,4 @@ test/demo_audio_tone
 spikes/spike4_foreign_thread
 test/test_haptic
 spikes/spike5_egl_desktop_gl
+test/test_platform_gl
