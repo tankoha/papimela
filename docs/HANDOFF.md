@@ -56,6 +56,10 @@
 >   `/dev/uinput` は root のみ。仮想の入力を作って本物の経路を通す検査は、権限が整ってから足せる。
 > **続けて ファイルシステム（#65）を済ませた**（2026-10-25。`PaPiMeLa.FileSystem`、`.Unicode.CaseFold`。T-74。SDL の不具合 D-82・D-83）。次は MessageBox（#40）。
 > **続けて MessageBox（#40）を済ませた**（同日。`PaPiMeLa.MessageBox`、T-75）。次はおすすめの順に、Haptic（#63。`input` グループの権限が要る）、libdecor（#69）、タブレット/ペン（#66）、Render.GL（#44）。
+> **再開時の最初にやること（2026-10-25 時点）**:
+>   1. `id` で `input` グループに入ったか確かめ、ゲームパッドをつないで実機の確認をする（`Ctx.Joysticks` / `Ctx.Gamepads` の一覧、入力、ランブル。T-71〜T-73 の「実機での確認は残っている」を片付け、結果を TEST-LOG に書く）。`/dev/input/event*` が読めれば Haptic（#63）にも進める。
+>   2. README の「上流の不具合」に D-82・D-83 を載せるかは持ち主の判断待ち（D-81 は papimela 自身なので載せない）。
+>   3. 作業の木はきれい（T-75 まで commit・push 済み、CI 緑）。
 > 次の候補は §3。
 
 ## 1. 今どこにいるか
@@ -65,7 +69,7 @@
 | リポジトリ | https://github.com/tankoha/papimela（公開、Issues 有効）。手元のセッションは `master` に直接 push、クラウドのセッションは指定のブランチへ push して、手元で早送りマージする |
 | CI | 緑。rawpaco 激辛、checkorigin、アンブレラの古さ（`genumbrella.bb --check`）、図の検査、表示サーバ無しのテスト 32 本、Pong の自己検査、GLES2 と ソフトウェアのドライバの画素比較（llvmpipe）。ジョブ 60 分・GLES2 の手順 5 分の時間制限つき |
 | テスト | 表示サーバ無しの 46 本はすべて成功（2026-10-15 に Pi5 で流した。以前の「件」は数え方が違うので、これからはこの数え方）。PipeWire の T-54 と PulseAudio の T-59 は手元専用で、どちらも Pi5 で通る。PipeWire の T-54 は手元専用（30 件）。手元専用と対話の検査は `docs/TEST-LOG.md` の各行 |
-| 不具合 | 79 件。うち上流 SDL の 30 件は未報告（D-53 は SDL 自身が FIXME で知っている。他の 25 件は報告するかを検討中。方針は `CLAUDE.md`。README の一覧に全件を載せた） |
+| 不具合 | 80 件（D-81 は papimela 自身の不具合、D-82・D-83 は上流 SDL）。うち上流 SDL の 31 件は未報告（D-53 は SDL 自身が FIXME で知っている。他の 25 件は報告するかを検討中。方針は `CLAUDE.md`。README の一覧に全件を載せた） |
 | 規模 | 手書き 63 ユニット（`src/*.pas`）+ 生成（Wayland プロトコル 21、キーボードの表 2、EGL / GLES2 の定数 2、DebugText の字形 1、音声のチャンネル数の変換と周波数の変換の係数 2、PipeWire の定数 1、アンブレラ 2）。手書きの `src/*.pas` が約 4.0 万行、生成を含めて約 5.5 万行（2026-10-14 に数え直した） |
 
 ### 動いているもの
