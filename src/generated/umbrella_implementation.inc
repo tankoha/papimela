@@ -28,6 +28,7 @@
 //   PaPiMeLa.Joystick
 //   PaPiMeLa.Gamepad.Mapping
 //   PaPiMeLa.Gamepad
+//   PaPiMeLa.FileSystem
 //   PaPiMeLa.TextInput
 //   PaPiMeLa.Time
 //   PaPiMeLa.Atomic
@@ -950,6 +951,12 @@ end;
 function PMLCreateGamepadLayer(AJoy: TPMLJoystickSystem): TPMLJoystickGamepadLayer;
 begin
   Result := PaPiMeLa.Gamepad.PMLCreateGamepadLayer(AJoy);
+end;
+
+// ---- PaPiMeLa.FileSystem
+function PMLWildcardMatch(const APattern, AText: String; out AMatchedToDir: Boolean): Boolean;
+begin
+  Result := PaPiMeLa.FileSystem.PMLWildcardMatch(APattern, AText, AMatchedToDir);
 end;
 
 // ---- PaPiMeLa.Time

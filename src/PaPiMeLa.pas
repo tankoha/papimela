@@ -76,6 +76,7 @@ uses
   PaPiMeLa.Joystick,
   PaPiMeLa.Gamepad.Mapping,
   PaPiMeLa.Gamepad,
+  PaPiMeLa.FileSystem,
   PaPiMeLa.TextInput,
   PaPiMeLa.TextInput.Backend,
   PaPiMeLa.Time,
