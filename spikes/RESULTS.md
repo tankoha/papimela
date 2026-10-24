@@ -146,6 +146,25 @@ ibus 1.5.29 と ibus-mozc 2.28.4715.102 を入れ、bwrap で隔離して動か�
   入口でも止め、入口で有効だった回数を数えて検査する（T-54）
 - D-40（GL）と同じ形。C のライブラリが自分のスレッドを作るときは、作る呼び出しの間に例外を止める
 
+## スパイク 5: EGL でデスクトップ GL（互換プロファイル 2.1）（2026-10-25、Raspberry Pi 5）
+
+`spikes/spike5_egl_desktop_gl.pas`（窓なし。`EGL_MESA_platform_surfaceless`）。Render.GL（#44）が SDL に合わせて GL 2.1 の互換プロファイルを使えるかの実測。
+
+| 項目 | V3D 7.1（Mesa 26.0.3。GL_VERSION は `3.1 Mesa`） | llvmpipe（`LIBGL_ALWAYS_SOFTWARE=1`。`4.5 (Compatibility Profile)`） |
+|---|---|---|
+| `eglBindAPI(EGL_OPENGL_API)` + `EGL_OPENGL_BIT` + 互換 2.1 のコンテキスト | 作れる | 作れる |
+| 面なしで MakeCurrent、`glGetString` | 読める | 読める |
+| SDL が要求する拡張（`GL_ARB_shader_objects`・`shading_language_100`・`vertex_shader`・`fragment_shader`・`GL_EXT_framebuffer_object`・`multitexture`・`texture_non_power_of_two`・`texture_rectangle`・`GL_EXT_bgra`） | 全部ある | 全部ある（後者は `GL_EXTENSIONS` の文字列で確認） |
+| 作れないコンテキスト（版 9.9）→ 続けて ES 2.0 → もう一度互換 2.1 | `EGL_BAD_MATCH` の後、ES も互換 2.1 も作れる | 同じ |
+| 参考: コアプロファイル 3.3 | **作れない**（V3D は GL 3.1 まで） | 作れる |
+
+分かったこと:
+- **互換 2.1 は、この 2 つの実装で EGL から作れる。** コア 3.3 は V3D では作れないので、SDL と同じ 2.1 互換にする判断は、実機の面でも正しい（コアだけにすると、この機械では GL が使えなくなる）
+- **関数は `libGL.so.1` の `dlsym` で引ける。** `gl*` の本体の関数（`glClear`・`glGenTextures`・`glMatrixMode`・`glVertexPointer`・`glDrawArrays`・`glBlendEquation`・`glReadPixels`・`glPixelStorei` など）と、ARB / EXT の名前（`glCreateShaderObjectARB`・`glActiveTextureARB`・`glGenFramebuffersEXT` など）の両方。`dlsym` は存在しない名前に nil を返す
+- **`eglGetProcAddress` は存在しない名前にも非 nil を返す**（glvnd。D-38 の脇）。存在の確認には使えないので、デスクトップ GL の関数は `libGL` の `dlsym` を先にし、`eglGetProcAddress` は拡張だけにする
+- **未確認**: 窓つき（Wayland）での「GL の作成に失敗 → 同じ窓で ES」の順。窓の面の config は最初の `CreateContext` で決まるので、段 2 で `test_gl_window` に足して確かめる。Ubuntu 24.04（Mesa 25.2.8 / LLVM 20）の差（D-40）は、CI の結果と、この端末が aarch64 なので arm64 の ubuntu-base での再現で確かめる（`docs/HANDOFF.md` §5 の手順は amd64）
+- `eglInitialize` が返した版が 0.0 と表示された（Mesa の surfaceless の癖か、呼び出しの癖かは追っていない。動作には関係しない）
+
 ## 優先順位への影響
 
 設計書は IBus バックエンドを先に実装する前提だったが、**Fcitx5 バックエンドを先に実装するほうが合理的**。
