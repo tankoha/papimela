@@ -95,3 +95,4 @@ spikes/spike4_foreign_thread
 test/test_haptic
 spikes/spike5_egl_desktop_gl
 test/test_platform_gl
+test/test_gl_desktop_window

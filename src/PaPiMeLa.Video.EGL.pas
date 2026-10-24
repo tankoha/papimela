@@ -51,6 +51,10 @@
   接尾辞（KHR / EXT / OES ...）を持つ名前に限って eglGetProcAddress に任せる。
   接尾辞の付いた存在しない名前は代理が返る（EGL の仕様どおり）。
 
+  デスクトップ GL（互換 / コアのプロファイル。EGL_OPENGL_API）のコンテキストでは、`gl` の本体の関数は
+  libGLESv2 でなく libGL（libGL.so.1 など）から引く。API はコンテキストごとに記録し、MakeCurrent で今の API を決める。
+  ES とデスクトップ GL のコンテキストを同じバックエンドで作れる（Render.GL が先に作れなければ GLES2 へ戻れる）。
+
   Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
   Copyright (C) 2026 papimela contributors
   （zlib ライセンス本文は papimela.inc を参照）
@@ -82,6 +86,7 @@ type
   TPMLEGLContextRec = record
     Context : EGLContext;
     Interval: Integer;   // このコンテキストのスワップ間隔（D-53）
+    Api     : EGLenum;   // このコンテキストの API（EGL_OPENGL_ES_API / EGL_OPENGL_API）
   end;
 
   TPMLEGLBackend = class abstract(TPMLGLBackend)
@@ -92,6 +97,8 @@ type
     FDisplayExtensions: String;
     FGLES      : TPMLDynLib;
     FGLESTried : Boolean;
+    FDesktopGL : TPMLDynLib;
+    FDesktopTried: Boolean;
     FSurfaces  : array of TPMLEGLWindowSurface;
     FContexts  : array of TPMLEGLContextRec;
     FCurrentSurface: EGLSurface;
@@ -120,6 +127,7 @@ type
     function  ReleaseCurrent: Boolean;
     function  IndexOfContext(AContext: EGLContext): Integer;
     function  GLESSymbol(const AName: String): Pointer;
+    function  DesktopSymbol(const AName: String): Pointer;
   strict protected
     { 描画面の記録とコンテキストを畳み、eglTerminate してライブラリを手放す。
       何度呼んでもよい。派生クラスは、自分のフィールドを壊す前にこれを呼ぶこと
@@ -180,6 +188,9 @@ implementation
 
 const
   GLES_NAMES: array[0..1] of String = ('libGLESv2.so.2', 'libGLESv2.so');
+
+  // デスクトップ GL のライブラリ。libGL.so.1（GLVND）は gl の本体の関数を全部持つ。libOpenGL.so.0 は GLX を持たない版
+  DESKTOP_GL_NAMES: array[0..2] of String = ('libGL.so.1', 'libOpenGL.so.0', 'libGL.so');
 
   // SDL_GL_CONTEXT_DEBUG_FLAG と EGL_CONTEXT_OPENGL_DEBUG_BIT_KHR は同じ値
   CONTEXT_DEBUG_FLAG = 1;
@@ -249,6 +260,7 @@ begin
     FDisplay := EGL_NO_DISPLAY;
   end;
   FreeAndNil(FGLES);
+  FreeAndNil(FDesktopGL);
   if FLibLoaded then
   begin
     PMLEGLUnload;
@@ -718,6 +730,7 @@ begin
   SetLength(FContexts, Length(FContexts) + 1);
   FContexts[High(FContexts)].Context := Ctx;
   FContexts[High(FContexts)].Interval := 0;
+  FContexts[High(FContexts)].Api := FApiType;
   if not MakeCurrent(AWindow, Ctx) then
   begin
     DestroyContext(Ctx);
@@ -741,7 +754,10 @@ begin
     Exit(False);
   end;
 
-  // このスレッドに正しい API が結び付いているようにする
+  // このスレッドに正しい API が結び付いているようにする。コンテキストごとに API が違う（ES とデスクトップ GL を
+  // 同じバックエンドで作れる）ので、解放でなければ、そのコンテキストの API にする
+  if (AContext <> nil) and (IndexOfContext(AContext) >= 0) then
+    FApiType := FContexts[IndexOfContext(AContext)].Api;
   if FApiType <> 0 then
     eglBindAPI(FApiType);
 
@@ -935,6 +951,28 @@ begin
   Result := FGLES.TryResolve(AName);
 end;
 
+{ libGL（デスクトップ GL）から AName を引く。ライブラリは最初に要るときに 1 度だけ開く。
+  ヒント PAPIMELA_OPENGL_LIBRARY は、papimela では GLES のライブラリを指す（GLESSymbol）ので、ここでは使わない。 }
+function TPMLEGLBackend.DesktopSymbol(const AName: String): Pointer;
+begin
+  if (FDesktopGL = nil) and (not FDesktopTried) then
+  begin
+    FDesktopTried := True;
+    try
+      FDesktopGL := TPMLDynLib.Create(DESKTOP_GL_NAMES);
+    except
+      on E: Exception do
+      begin
+        FDesktopGL := nil;
+        FLastError := E.Message;
+      end;
+    end;
+  end;
+  if FDesktopGL = nil then
+    Exit(nil);
+  Result := FDesktopGL.TryResolve(AName);
+end;
+
 function TPMLEGLBackend.GetProcAddress(const AName: String): Pointer;
 begin
   Result := nil;
@@ -944,6 +982,16 @@ begin
     Exit;
   if (Length(AName) > 2) and (Copy(AName, 1, 2) = 'gl') then
   begin
+    // デスクトップ GL のコンテキストが今の API なら、本体の関数は libGL から引く
+    if FApiType = EGL_OPENGL_API then
+    begin
+      Result := DesktopSymbol(AName);
+      if Result <> nil then
+        Exit;
+      if not HasVendorSuffix(AName) then
+        Exit(nil);
+      Exit(eglGetProcAddress(PAnsiChar(AName)));
+    end;
     // コア関数は libGLESv2 が確定させる。無い名前は、拡張の接尾辞があるときだけ
     // eglGetProcAddress に任せる（ヘッダの PORT-NOTE を参照）。
     Result := GLESSymbol(AName);

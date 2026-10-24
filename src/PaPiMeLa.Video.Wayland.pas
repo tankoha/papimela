@@ -213,13 +213,16 @@ begin
   if (FClipboard <> nil) and FClipboard.SupportsDrag then
     Include(FCapabilities, TPMLVideoCapability.DragAndDrop);
 
-  // GL の部品。両方のライブラリが開ければ能力 OpenGLES を出す。開くのは確認だけで、
+  // GL の部品。EGL と wayland-egl の両方が開ければ能力 OpenGLES を出す（libGL も開ければ OpenGL も）。開くのは確認だけで、
   // 読み込み（PMLEGLLoad）は最初のコンテキストまで遅らせる。
   if TPMLDynLib.IsAvailable(['libEGL.so.1', 'libEGL.so'])
     and TPMLDynLib.IsAvailable(['libwayland-egl.so.1', 'libwayland-egl.so']) then
   begin
     FGL := TPMLWaylandEGL.Create(ContextRef, Self, FConn);
     Include(FCapabilities, TPMLVideoCapability.OpenGLES);
+    // デスクトップ GL（互換 / コアのプロファイル）は、libGL も開けるときだけ
+    if TPMLDynLib.IsAvailable(['libGL.so.1', 'libOpenGL.so.0', 'libGL.so']) then
+      Include(FCapabilities, TPMLVideoCapability.OpenGL);
   end;
 end;
 

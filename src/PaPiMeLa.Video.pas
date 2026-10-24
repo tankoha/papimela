@@ -165,8 +165,8 @@ type
     procedure RemoveDependent(const ADependent: IPMLWindowDependent);
     function  DependentCount: Integer;
 
-    // GL（SDL_GL_CreateContext / SDL_GL_SwapWindow）。能力 OpenGLES と、
-    // TPMLWindowOptions.OpenGL で作ったウィンドウが要る。無ければ EPMLUnsupported。
+    // GL（SDL_GL_CreateContext / SDL_GL_SwapWindow）。ES は能力 OpenGLES、デスクトップ GL（互換 / コアの
+    // プロファイル）は能力 OpenGL と、TPMLWindowOptions.OpenGL で作ったウィンドウが要る。無ければ EPMLUnsupported。
     // 作ったコンテキストはこのウィンドウに対して現在のものになる。所有者はウィンドウ。
     function  CreateGLContext: TPMLGLContext; overload;
     function  CreateGLContext(const AAttrs: TPMLGLAttributes): TPMLGLContext; overload;
@@ -677,7 +677,11 @@ var
   H: TPMLGLContextHandle;
 begin
   CheckMainThread;
-  FSystem.Require(TPMLVideoCapability.OpenGLES, 'OpenGL ES');
+  // ES は OpenGLES、デスクトップ GL（互換 / コア）は OpenGL の能力が要る
+  if AAttrs.Profile = TPMLGLProfile.ES then
+    FSystem.Require(TPMLVideoCapability.OpenGLES, 'OpenGL ES')
+  else
+    FSystem.Require(TPMLVideoCapability.OpenGL, 'OpenGL');
   if not (TPMLWindowFlag.OpenGL in FFlags) then
     raise EPMLUnsupported.CreateNative(
       'the window was not created with TPMLWindowOptions.OpenGL', 0, FSystem.BackendName);
@@ -698,7 +702,9 @@ end;
 
 function TPMLVideoSystem.GLGetProcAddress(const AName: String): Pointer;
 begin
-  Require(TPMLVideoCapability.OpenGLES, 'OpenGL ES');
+  // ES でもデスクトップ GL でも、どちらかの GL を持つビデオ（今のコンテキストの API で引く先が決まる）
+  if not ((TPMLVideoCapability.OpenGLES in GetCapabilities) or (TPMLVideoCapability.OpenGL in GetCapabilities)) then
+    Require(TPMLVideoCapability.OpenGLES, 'OpenGL ES');
   Result := FBackend.GL.GetProcAddress(AName);
 end;
 
