@@ -15,7 +15,7 @@
     オブジェクトグラフにし、同一プロセスに複数の Context を作ることを禁じない。
 
   RESOLVED:
-    - 破棄順序は TextInput → Joystick → Audio → Video → Timer → Events → Log → Properties → Hints
+    - 破棄順序は TextInput → Haptic → Joystick → Audio → Video → Timer → Events → Log → Properties → Hints
     - finalization 節では何もしない。破棄はアプリの Context.Free に委ねる
     - Context を生成したスレッドがメインスレッド。子はそれを継承する
     - SIGINT / SIGTERM の手続きは Events より先に置き（Events が世代を覚える）、Events の後に外す。
@@ -24,9 +24,8 @@
       作るときからログを書ける）
     - Joysticks は Joystick か Gamepad を要求したときだけ作る。ゲームパッドの層（マッピングの DB）は
       Joysticks が作るとき必ず付き、Gamepad を要求したときだけゲームパッドのイベントを出し始める
-
-  NOT RESOLVED:
-    - Haptic は未実装で、要求されたら EPMLUnsupported を投げる
+    - Haptics は Haptic を要求したときだけ作る。ジョイスティックの後に作り、先に壊す。バックエンドは登録制で、
+      登録が無ければ EPMLUnsupported（PaPiMeLa か PaPiMeLa.Haptic.Linux を uses する）
 
   Copyright (C) 2026 papimela contributors
   （zlib ライセンス本文は papimela.inc を参照）
@@ -50,6 +49,7 @@ uses
   PaPiMeLa.Audio,
   PaPiMeLa.Joystick,
   PaPiMeLa.Gamepad,
+  PaPiMeLa.Haptic,
   PaPiMeLa.TextInput;
 
 type
@@ -121,6 +121,7 @@ type
     FVideo     : TPMLVideoSystem;
     FAudio     : TPMLAudioSystem;
     FJoysticks : TPMLJoystickSystem;
+    FHaptics   : TPMLHapticSystem;
     FTextInput : TPMLTextInputSystem;
     FSubsystems: TPMLSubsystems;
     FQuitSignals: Boolean;   // PMLInstallQuitSignals を呼んだ（Destroy で取り消す）
@@ -143,6 +144,8 @@ type
     property Video     : TPMLVideoSystem     read FVideo;
     property Audio     : TPMLAudioSystem     read FAudio;
     property Joysticks : TPMLJoystickSystem  read FJoysticks;
+    // ハプティクス（力覚）。Haptic を要求したときだけ。無ければ nil
+    property Haptics   : TPMLHapticSystem    read FHaptics;
     // ゲームパッド（Joystick か Gamepad を要求したときだけ。無ければ nil）
     property Gamepads  : TPMLGamepadSystem   read GetGamepads;
     property TextInput : TPMLTextInputSystem read FTextInput;
@@ -279,8 +282,6 @@ begin
     FAudio := TPMLAudioSystem.Create(Self, Self, FEvents, FHints.GetHint(PML_HINT_AUDIO_DRIVER));
     FLog.Info(PML_LOG_CATEGORY_AUDIO, 'audio backend: ' + FAudio.BackendName);
   end;
-  if TPMLSubsystem.Haptic in ASubsystems then
-    raise EPMLUnsupported.Create('the haptic subsystem is not implemented yet');
   // ゲームパッドはジョイスティックの上に乗る（SDL_InitSubSystem(GAMEPAD) も ジョイスティックを始める）
   if (TPMLSubsystem.Joystick in ASubsystems) or (TPMLSubsystem.Gamepad in ASubsystems) then
   begin
@@ -288,6 +289,12 @@ begin
     FLog.Info(PML_LOG_CATEGORY_INPUT, 'joystick backends: ' + IntToStr(FJoysticks.BackendCount));
     if TPMLSubsystem.Gamepad in ASubsystems then
       Gamepads.Start;
+  end;
+  // ハプティクスはジョイスティックの後（SDL_INIT_HAPTIC の順。ジョイスティックから開けるので、壊すのは先）
+  if TPMLSubsystem.Haptic in ASubsystems then
+  begin
+    FHaptics := TPMLHapticSystem.Create(Self, Self, FHints);
+    FLog.Info(PML_LOG_CATEGORY_INPUT, 'haptic backend: ' + FHaptics.BackendName);
   end;
 
   if TPMLSubsystem.TextInput in ASubsystems then
@@ -314,6 +321,7 @@ begin
   if Assigned(FEvents) then
     FEvents.KeyFilter := nil;
   FreeAndNil(FTextInput);
+  FreeAndNil(FHaptics);
   FreeAndNil(FJoysticks);
   FreeAndNil(FAudio);
   FreeAndNil(FVideo);

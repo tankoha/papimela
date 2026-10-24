@@ -49,6 +49,8 @@ var
   Abs_: TPMLInputAbsInfo;
   Id: TPMLInputID;
   Ff: TPMLFFEffect;
+  Env: TPMLFFEnvelope;
+  Cond: TPMLFFCondition;
   Js: TPMLJsEvent;
   P: TStringList;
   Name: String;
@@ -71,6 +73,9 @@ begin
       else if P[1] = 'ff_trigger' then Result := '4'
       else if P[1] = 'ff_envelope' then Result := '8'
       else if P[1] = 'ff_rumble_effect' then Result := '4'
+      else if P[1] = 'ff_constant_effect' then Result := IntToStr(SizeOf(Ff.ConstantLevel) + SizeOf(Ff.ConstantEnvelope))
+      else if P[1] = 'ff_ramp_effect' then Result := IntToStr(SizeOf(Ff.RampStart) + SizeOf(Ff.RampEnd) + SizeOf(Ff.RampEnvelope))
+      else if P[1] = 'ff_condition_effect' then Result := IntToStr(SizeOf(Ff.Condition[0]))
       else if P[1] = 'ff_periodic_effect' then Result := '32'
       else if P[1] = 'js_event' then Result := IntToStr(SizeOf(TPMLJsEvent))
       else if P[1] = 'timeval' then Result := '16';
@@ -108,6 +113,25 @@ begin
       else if Name = 'ff_periodic_effect.offset' then Result := IntToStr(Off(Ff.RumbleStrong, Ff.PeriodicOffset))
       else if Name = 'ff_periodic_effect.phase' then Result := IntToStr(Off(Ff.RumbleStrong, Ff.PeriodicPhase))
       else if Name = 'ff_periodic_effect.envelope' then Result := IntToStr(Off(Ff.RumbleStrong, Ff.EnvAttackLength))
+      else if Name = 'ff_periodic_effect.custom_len' then Result := IntToStr(Off(Ff.RumbleStrong, Ff.CustomLen))
+      else if Name = 'ff_periodic_effect.custom_data' then Result := IntToStr(Off(Ff.RumbleStrong, Ff.CustomData))
+      else if Name = 'ff_trigger.button' then Result := IntToStr(Off(Ff.TriggerButton, Ff.TriggerButton))
+      else if Name = 'ff_trigger.interval' then Result := IntToStr(Off(Ff.TriggerButton, Ff.TriggerInterval))
+      else if Name = 'ff_envelope.attack_length' then Result := IntToStr(Off(Env, Env.AttackLength))
+      else if Name = 'ff_envelope.attack_level' then Result := IntToStr(Off(Env, Env.AttackLevel))
+      else if Name = 'ff_envelope.fade_length' then Result := IntToStr(Off(Env, Env.FadeLength))
+      else if Name = 'ff_envelope.fade_level' then Result := IntToStr(Off(Env, Env.FadeLevel))
+      else if Name = 'ff_constant_effect.level' then Result := IntToStr(Off(Ff.ConstantLevel, Ff.ConstantLevel))
+      else if Name = 'ff_constant_effect.envelope' then Result := IntToStr(Off(Ff.ConstantLevel, Ff.ConstantEnvelope))
+      else if Name = 'ff_ramp_effect.start_level' then Result := IntToStr(Off(Ff.RampStart, Ff.RampStart))
+      else if Name = 'ff_ramp_effect.end_level' then Result := IntToStr(Off(Ff.RampStart, Ff.RampEnd))
+      else if Name = 'ff_ramp_effect.envelope' then Result := IntToStr(Off(Ff.RampStart, Ff.RampEnvelope))
+      else if Name = 'ff_condition_effect.right_saturation' then Result := IntToStr(Off(Cond, Cond.RightSaturation))
+      else if Name = 'ff_condition_effect.left_saturation' then Result := IntToStr(Off(Cond, Cond.LeftSaturation))
+      else if Name = 'ff_condition_effect.right_coeff' then Result := IntToStr(Off(Cond, Cond.RightCoeff))
+      else if Name = 'ff_condition_effect.left_coeff' then Result := IntToStr(Off(Cond, Cond.LeftCoeff))
+      else if Name = 'ff_condition_effect.deadband' then Result := IntToStr(Off(Cond, Cond.Deadband))
+      else if Name = 'ff_condition_effect.center' then Result := IntToStr(Off(Cond, Cond.Center))
       else if Name = 'js_event.time' then Result := IntToStr(Off(Js, Js.Time))
       else if Name = 'js_event.value' then Result := IntToStr(Off(Js, Js.Value))
       else if Name = 'js_event.type' then Result := IntToStr(Off(Js, Js.EventType))
@@ -121,6 +145,7 @@ begin
       if Name = 'EVIOCGID' then Result := LowerCase(IntToHex(PMLEVIOCGID, 1))
       else if Name = 'EVIOCSFF' then Result := LowerCase(IntToHex(PMLEVIOCSFF, 1))
       else if Name = 'EVIOCRMFF' then Result := LowerCase(IntToHex(PMLEVIOCRMFF, 1))
+      else if Name = 'EVIOCGEFFECTS' then Result := LowerCase(IntToHex(PMLEVIOCGEFFECTS, 1))
       else if Name = 'JSIOCGAXES' then Result := LowerCase(IntToHex(PMLJSIOCGAXES, 1))
       else if Name = 'JSIOCGBUTTONS' then Result := LowerCase(IntToHex(PMLJSIOCGBUTTONS, 1))
       else if Name = 'EVIOCGBIT' then Result := LowerCase(IntToHex(PMLEVIOCGBIT(A, B), 1))

@@ -65,6 +65,8 @@
    {:unit "PaPiMeLa.Joystick"}
    {:unit "PaPiMeLa.Gamepad.Mapping"}
    {:unit "PaPiMeLa.Gamepad"}
+   {:unit "PaPiMeLa.Haptic.Backend"}
+   {:unit "PaPiMeLa.Haptic"}
    {:unit "PaPiMeLa.FileSystem"}
    {:unit "PaPiMeLa.MessageBox"}
    {:unit "PaPiMeLa.TextInput"}

@@ -56,6 +56,8 @@ ABS_X ABS_Y ABS_Z ABS_RX ABS_RY ABS_RZ ABS_THROTTLE ABS_RUDDER ABS_WHEEL ABS_GAS
 ABS_HAT0X ABS_HAT0Y ABS_HAT1X ABS_HAT1Y ABS_HAT2X ABS_HAT2Y ABS_HAT3X ABS_HAT3Y ABS_MAX ABS_CNT
 REL_X REL_Y REL_MAX
 FF_RUMBLE FF_PERIODIC FF_SINE FF_MAX
+FF_CONSTANT FF_SPRING FF_FRICTION FF_DAMPER FF_INERTIA FF_RAMP FF_SQUARE FF_TRIANGLE FF_SAW_UP FF_SAW_DOWN FF_CUSTOM
+FF_GAIN FF_AUTOCENTER FF_STATUS_STOPPED FF_STATUS_PLAYING
 INPUT_PROP_POINTER INPUT_PROP_DIRECT INPUT_PROP_BUTTONPAD INPUT_PROP_SEMI_MT INPUT_PROP_TOPBUTTONPAD
 INPUT_PROP_POINTING_STICK INPUT_PROP_ACCELEROMETER INPUT_PROP_MAX
 JS_EVENT_BUTTON JS_EVENT_AXIS JS_EVENT_INIT"
@@ -65,7 +67,8 @@ JS_EVENT_BUTTON JS_EVENT_AXIS JS_EVENT_INIT"
 
 (def ^:private struct-sizes
   ["input_event" "input_absinfo" "input_id" "ff_effect" "ff_replay" "ff_trigger" "ff_envelope"
-   "ff_rumble_effect" "ff_periodic_effect" "js_event" "timeval"])
+   "ff_rumble_effect" "ff_periodic_effect" "ff_constant_effect" "ff_ramp_effect" "ff_condition_effect"
+   "js_event" "timeval"])
 
 ;; 欄の位置（[構造体 欄...]）
 (def ^:private struct-fields
@@ -73,9 +76,14 @@ JS_EVENT_BUTTON JS_EVENT_AXIS JS_EVENT_INIT"
    ["input_absinfo" "value" "minimum" "maximum" "fuzz" "flat" "resolution"]
    ["input_id" "bustype" "vendor" "product" "version"]
    ["ff_effect" "type" "id" "direction" "trigger" "replay" "u"]
+   ["ff_trigger" "button" "interval"]
    ["ff_replay" "length" "delay"]
+   ["ff_envelope" "attack_length" "attack_level" "fade_length" "fade_level"]
+   ["ff_constant_effect" "level" "envelope"]
+   ["ff_ramp_effect" "start_level" "end_level" "envelope"]
+   ["ff_condition_effect" "right_saturation" "left_saturation" "right_coeff" "left_coeff" "deadband" "center"]
    ["ff_rumble_effect" "strong_magnitude" "weak_magnitude"]
-   ["ff_periodic_effect" "waveform" "period" "magnitude" "offset" "phase" "envelope"]
+   ["ff_periodic_effect" "waveform" "period" "magnitude" "offset" "phase" "envelope" "custom_len" "custom_data"]
    ["js_event" "time" "value" "type" "number"]])
 
 ;; ioctl の番号。C の式の結果を %lx（小文字の 16 進）で出す
@@ -85,6 +93,7 @@ JS_EVENT_BUTTON JS_EVENT_AXIS JS_EVENT_INIT"
   [(ioc "ioctl EVIOCGID" "EVIOCGID")
    (ioc "ioctl EVIOCSFF" "EVIOCSFF")
    (ioc "ioctl EVIOCRMFF" "EVIOCRMFF")
+   (ioc "ioctl EVIOCGEFFECTS" "EVIOCGEFFECTS")
    (ioc "ioctl JSIOCGAXES" "JSIOCGAXES")
    (ioc "ioctl JSIOCGBUTTONS" "JSIOCGBUTTONS")
    (ioc "ioctl EVIOCGBIT 0 4" "EVIOCGBIT(0, 4)")

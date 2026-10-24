@@ -67,6 +67,11 @@ type
     function  RemoveEffect(AID: Integer): Boolean; virtual; abstract;
     // 効果を始める（EV_FF の input_event を write）。
     function  PlayEffect(AID: Integer): Boolean; virtual; abstract;
+    { EV_FF の input_event を 1 つ書く（効果の開始・停止、FF_GAIN、FF_AUTOCENTER）。既定は書けない（False）。
+      ハプティクス（PaPiMeLa.Haptic.Linux）が使う。 }
+    function  WriteFF(ACode, AValue: Integer): Boolean; virtual;
+    { EVIOCGEFFECTS。同時に持てる効果の数。既定は取れない（False）。 }
+    function  GetEffectCount(out ACount: Integer): Boolean; virtual;
     function  Gone: Boolean; virtual; abstract;
     function  Writable: Boolean; virtual; abstract;
     function  Error: String; virtual; abstract;
@@ -135,6 +140,19 @@ type
 
 implementation
 
+{ TPMLEvdevNode }
+
+function TPMLEvdevNode.WriteFF(ACode, AValue: Integer): Boolean;
+begin
+  Result := False;
+end;
+
+function TPMLEvdevNode.GetEffectCount(out ACount: Integer): Boolean;
+begin
+  ACount := 0;
+  Result := False;
+end;
+
 const
   O_CLOEXEC   = $80000;      // aarch64 / x86_64 の値
   IN_NONBLOCK = $800;
@@ -171,6 +189,8 @@ type
     function  UploadEffect(var AEffect: TPMLFFEffect): Boolean; override;
     function  RemoveEffect(AID: Integer): Boolean; override;
     function  PlayEffect(AID: Integer): Boolean; override;
+    function  WriteFF(ACode, AValue: Integer): Boolean; override;
+    function  GetEffectCount(out ACount: Integer): Boolean; override;
     function  Gone: Boolean; override;
     function  Writable: Boolean; override;
     function  Error: String; override;
@@ -299,6 +319,34 @@ begin
   Result := fpWrite(FFd, E, SizeOf(E)) >= 0;
   if not Result then
     FError := SysErrorMessage(fpGetErrno);
+end;
+
+function TRealEvdevNode.WriteFF(ACode, AValue: Integer): Boolean;
+var
+  E: TPMLInputEvent;
+begin
+  FillChar(E, SizeOf(E), 0);
+  E.EventType := EV_FF;
+  E.Code := ACode;
+  E.Value := AValue;
+  Result := fpWrite(FFd, E, SizeOf(E)) >= 0;
+  if not Result then
+    FError := SysErrorMessage(fpGetErrno);
+end;
+
+function TRealEvdevNode.GetEffectCount(out ACount: Integer): Boolean;
+var
+  N: cint;
+begin
+  N := 0;
+  Result := fpIOCtl(FFd, PMLEVIOCGEFFECTS, @N) >= 0;
+  if Result then
+    ACount := N
+  else
+  begin
+    ACount := 0;
+    FError := SysErrorMessage(fpGetErrno);
+  end;
 end;
 
 function TRealEvdevNode.Gone: Boolean;

@@ -1,10 +1,10 @@
 # 引き継ぎ資料
 
-新しいセッションは、`CLAUDE.md` の次にこれを読む。最終更新: 2026-10-24（Raspberry Pi 5 の端末で、ゲームパッドを足した後）。
+新しいセッションは、`CLAUDE.md` の次にこれを読む。最終更新: 2026-10-25（Raspberry Pi 5 の端末で、Haptic を足した後）。
 
->   1. **`input` グループは効いている**（2026-10-25 に確認。`/dev/input/event0`〜`event10` の 11 個が読み書きできる）。ただし今は USB レシーバー（キーボードとマウス）・電源ボタン・HDMI の機器しか無く、**ゲームパッドは未接続**（`/dev/input/js*` も無い）。実機の確認（一覧・入力・ランブル。T-71〜T-73 の「残り」）は、持ち主がゲームパッドをつないだときに `Ctx.Joysticks` / `Ctx.Gamepads` で行い、結果を TEST-LOG に書く。
->   2. 次の仕事は Haptic（#63）から（権限はあるので進められる。実機の確認はゲームパッドがつながってから）。
->   3. README の上流の不具合に D-82・D-83 を載せた（済み。コミット 1b6dad5。これで上流の 31 件すべて載っている。D-81 は papimela 自身なので載せない）。作業の木はきれい（CI 緑）。
+>   1. **ゲームパッドは接続されていた**（2026-10-25 に確認。GameSir-K1 Controller for Xbox、`event11` + `js0`、`input` グループで読める）。T-71〜T-73 の実機の確認は済み（一覧・ゲームパッド判定・軸 6・ハット 1・ボタン 16・入力が読める。TEST-LOG の先頭）。**ただしこの機器は FF（EV_FF）を出さない**ので、ランブルは FALSE（カーネルの力覚の経路が無い）。力覚（ランブル・Haptic）の実機の確認は、FF を持つ機器（xpad で動く Xbox 系、FF 付きハンドルなど）がつながったときに残る。
+>   2. **Haptic（#63）を済ませた**（2026-10-25。Sonnet 5.5 の手元のセッション）: `PaPiMeLa.Haptic.Backend`（効果の型 `TPMLHapticEffect`・抽象バックエンド・開いた機器 `TPMLHaptic`）、`PaPiMeLa.Haptic`（`Ctx.Haptics` = `TPMLHapticSystem`。一覧・開く・マウス・ジョイスティックから）、`PaPiMeLa.Haptic.Linux`（evdev の FF。`PMLHapticToFFEffect` は SDL の `SDL_SYS_ToFFEffect` と 735 場面で全バイト一致）。`Platform.Evdev` に FF の共用体（一定・傾斜・条件）・`EVIOCGEFFECTS`・FF の定数を足し（`tools/genevdev.bb`）、`TPMLEvdevNode` に `WriteFF` / `GetEffectCount` を足した。ヒントは `PAPIMELA_JOYSTICK_HAPTIC_AXES` と `PAPIMELA_HAPTIC_GAIN_MAX`。Context は `[TPMLSubsystem.Haptic]` で `Haptics` を作る（ジョイスティックの後・先に壊す）。T-76（201 件）。**検査を実装の後に書いた**ので、変異 56 通りで歯を確かめた（TEST-LOG の T-76）。SDL の不具合 D-84〜D-86 を見つけた（偽の FF 機器に SDL のコードを通して確かめた。`tools/haptic-expect/haptic_suspects.c`）。**README の上流の不具合に D-84〜D-86 を載せるかは持ち主の判断待ち**。
+>   3. 次の仕事は、おすすめの順に libdecor（#69）、タブレット/ペン（#66）、Render.GL（#44）。作業の木は T-76 まで commit する（CI が緑かは push の後に見る）。
  **2026-10-14 の手元のセッションで**: §3 の 3b（パレット、INDEX8）と 3c（YUV。YV12 / IYUV / NV12 / NV21 / YUY2 / UYVY / YVYU）を
 > 済ませ、テクスチャの種類（§3 の 1）は終わった。README の上流の不具合に D-58〜D-61 を載せた（持ち主の判断）。SDL の不具合を
 > 4 つ見つけた（D-60〜D-63）。表示サーバ無しの 28 本（1243 件）と T-22（llvmpipe・radeonsi・窓）は全部通る。
@@ -58,11 +58,11 @@
 >   実機の軸の範囲・ハットの作り・`EVIOCGKEY` の戻り・ff_effect の受け入れ。SDL から外した所: 旧 js・加速度計とジャイロ・Steam の仮想ゲームパッドの並べ替え。
 >   `/dev/uinput` は root のみ。仮想の入力を作って本物の経路を通す検査は、権限が整ってから足せる。
 > **続けて ファイルシステム（#65）を済ませた**（2026-10-25。`PaPiMeLa.FileSystem`、`.Unicode.CaseFold`。T-74。SDL の不具合 D-82・D-83）。次は MessageBox（#40）。
-> **続けて MessageBox（#40）を済ませた**（同日。`PaPiMeLa.MessageBox`、T-75）。次はおすすめの順に、Haptic（#63。`input` グループの権限が要る）、libdecor（#69）、タブレット/ペン（#66）、Render.GL（#44）。
+> **続けて MessageBox（#40）を済ませた**（同日。`PaPiMeLa.MessageBox`、T-75）。次の候補は libdecor（#69）、タブレット/ペン（#66）、Render.GL（#44）。Haptic（#63）は同日に済んだ（冒頭）。
 > **再開時の最初にやること（2026-10-25 時点）**:
->   1. `id` で `input` グループに入ったか確かめ、ゲームパッドをつないで実機の確認をする（`Ctx.Joysticks` / `Ctx.Gamepads` の一覧、入力、ランブル。T-71〜T-73 の「実機での確認は残っている」を片付け、結果を TEST-LOG に書く）。`/dev/input/event*` が読めれば Haptic（#63）にも進める。
->   2. README の「上流の不具合」に D-82・D-83 を載せるかは持ち主の判断待ち（D-81 は papimela 自身なので載せない）。
->   3. 作業の木はきれい（T-75 まで commit・push 済み、CI 緑）。
+>   1. FF を持つ機器がつながったら、`Ctx.Haptics`（一覧・`Open`・`InitRumble` / `PlayRumble`）とジョイスティック経由の `OpenFromJoystick` で実機の力覚を確かめ、TEST-LOG に書く（今の GameSir-K1 は FF が無い）。偽物の検査が見られない所: 実機の `EVIOCGEFFECTS` の値、`FF_GAIN` / `FF_AUTOCENTER` の write の受け入れ、効果のアップロードの受け入れ。
+>   2. README の「上流の不具合」に D-84〜D-86 を載せるかは持ち主の判断待ち（コード側の確認は済み）。
+>   3. 作業の木は T-76 の commit を push した後に、CI が緑かを見る。
 > 次の候補は §3。
 
 ## 1. 今どこにいるか
@@ -72,8 +72,8 @@
 | リポジトリ | https://github.com/tankoha/papimela（公開、Issues 有効）。手元のセッションは `master` に直接 push、クラウドのセッションは指定のブランチへ push して、手元で早送りマージする |
 | CI | 緑。rawpaco 激辛、checkorigin、アンブレラの古さ（`genumbrella.bb --check`）、図の検査、表示サーバ無しのテスト 32 本、Pong の自己検査、GLES2 と ソフトウェアのドライバの画素比較（llvmpipe）。ジョブ 60 分・GLES2 の手順 5 分の時間制限つき |
 | テスト | 表示サーバ無しの 46 本はすべて成功（2026-10-15 に Pi5 で流した。以前の「件」は数え方が違うので、これからはこの数え方）。PipeWire の T-54 と PulseAudio の T-59 は手元専用で、どちらも Pi5 で通る。PipeWire の T-54 は手元専用（30 件）。手元専用と対話の検査は `docs/TEST-LOG.md` の各行 |
-| 不具合 | 80 件（D-81 は papimela 自身の不具合、D-82・D-83 は上流 SDL）。うち上流 SDL の 31 件は未報告（D-53 は SDL 自身が FIXME で知っている。他の 25 件は報告するかを検討中。方針は `CLAUDE.md`。README の一覧に全件を載せた） |
-| 規模 | 手書き 63 ユニット（`src/*.pas`）+ 生成（Wayland プロトコル 21、キーボードの表 2、EGL / GLES2 の定数 2、DebugText の字形 1、音声のチャンネル数の変換と周波数の変換の係数 2、PipeWire の定数 1、アンブレラ 2）。手書きの `src/*.pas` が約 4.0 万行、生成を含めて約 5.5 万行（2026-10-14 に数え直した） |
+| 不具合 | 83 件（D-81 は papimela 自身の不具合、D-82〜D-86 は上流 SDL）。うち上流 SDL の 34 件は未報告（D-53 は SDL 自身が FIXME で知っている。他の 25 件は報告するかを検討中。方針は `CLAUDE.md`。README の一覧に全件を載せた） |
+| 規模 | 手書き 66 ユニット（`src/*.pas`）+ 生成（Wayland プロトコル 21、キーボードの表 2、EGL / GLES2 の定数 2、DebugText の字形 1、音声のチャンネル数の変換と周波数の変換の係数 2、PipeWire の定数 1、アンブレラ 2）。手書きの `src/*.pas` が約 4.0 万行、生成を含めて約 5.5 万行（2026-10-14 に数え直した） |
 
 ### 動いているもの
 
@@ -97,7 +97,7 @@ EGL の GL コンテキスト（スワップ間隔はコンテキストごと）
 #21、#45、#46、#47、#48、#49、#50、#51、#52、#53（`.Audio.Mixer` は F32 の分だけ）、#55、#56、#64、#68（YUV から ARGB8888 への変換、I444 のテクスチャ、P010 から XBGR2101010 への変換、I0FL / I4FL から RGB48 への変換）、#70、#71。
 
 未着手: #11、#18–21、#23、#30、#40、#44、
-#18–19、#60、#62–63（evdev・udev・Linux のジョイスティック、ゲームパッド、ハプティクス。#59 と #61 は済み）、#65–67、#69。
+#18–19、#66–67、#69（#59–63・#65 は済み）。
 
 ## 2. 前のセッション（2026-10-14、手元）でしたこと
 
@@ -272,7 +272,7 @@ Pong もすべて書き換え、今は `uses SysUtils, Math, PaPiMeLa` だけで
 表示サーバ無しで通るもの（CI と同じ）:
 
 ```bash
-for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_render_transform test_render_target test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_drop test_drag_source test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds test_audio_convert test_audio_stream test_audio_mixer test_audio_wave test_audio_device test_pipewire_abi test_pulse_abi test_alsa_abi test_alsa_chmap test_audio_autoselect test_texture_lock test_texture_colorkey test_yuv_hd test_colorspace test_joystick test_gamepad_mapping test_gamepad test_evdev test_udev test_joystick_linux test_filesystem test_messagebox; do
+for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_render_transform test_render_target test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_drop test_drag_source test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds test_audio_convert test_audio_stream test_audio_mixer test_audio_wave test_audio_device test_pipewire_abi test_pulse_abi test_alsa_abi test_alsa_chmap test_audio_autoselect test_texture_lock test_texture_colorkey test_yuv_hd test_colorspace test_joystick test_gamepad_mapping test_gamepad test_evdev test_udev test_joystick_linux test_filesystem test_messagebox test_haptic; do
   fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/$t test/$t.pas && ./test/$t
 done
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -oexamples/pong examples/pong.pas && ./examples/pong --selftest
@@ -300,7 +300,7 @@ env -u WAYLAND_DISPLAY LIBGL_ALWAYS_SOFTWARE=1 ./test/test_render_gles2   # Mesa
 cd papimela && mkdir -p lib
 B='fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib'
 # 0. 表示サーバ無しの分（CI と同じ。手元の新しい Mesa でも通るか）
-for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds test_audio_convert test_audio_stream test_audio_mixer test_audio_wave test_audio_device test_pipewire_abi test_pulse_abi test_alsa_abi test_alsa_chmap test_audio_autoselect test_texture_lock test_texture_colorkey test_yuv_hd test_colorspace test_joystick test_gamepad_mapping test_gamepad test_evdev test_udev test_joystick_linux test_filesystem test_messagebox; do
+for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds test_audio_convert test_audio_stream test_audio_mixer test_audio_wave test_audio_device test_pipewire_abi test_pulse_abi test_alsa_abi test_alsa_chmap test_audio_autoselect test_texture_lock test_texture_colorkey test_yuv_hd test_colorspace test_joystick test_gamepad_mapping test_gamepad test_evdev test_udev test_joystick_linux test_filesystem test_messagebox test_haptic; do
   $B -otest/$t test/$t.pas && ./test/$t | tail -1
 done
 # 1. 実機の Wayland（自動判定。最後の行が「結論」で終わればよい）

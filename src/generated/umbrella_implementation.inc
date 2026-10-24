@@ -28,6 +28,8 @@
 //   PaPiMeLa.Joystick
 //   PaPiMeLa.Gamepad.Mapping
 //   PaPiMeLa.Gamepad
+//   PaPiMeLa.Haptic.Backend
+//   PaPiMeLa.Haptic
 //   PaPiMeLa.FileSystem
 //   PaPiMeLa.MessageBox
 //   PaPiMeLa.TextInput
@@ -952,6 +954,18 @@ end;
 function PMLCreateGamepadLayer(AJoy: TPMLJoystickSystem): TPMLJoystickGamepadLayer;
 begin
   Result := PaPiMeLa.Gamepad.PMLCreateGamepadLayer(AJoy);
+end;
+
+// ---- PaPiMeLa.Haptic.Backend
+function PMLHapticBackendNames: TStringArray;
+begin
+  Result := PaPiMeLa.Haptic.Backend.PMLHapticBackendNames;
+end;
+
+// ---- PaPiMeLa.Haptic
+function PMLHapticAxesFromHint(const AHint: String; AVendor, AProduct: Word): Integer;
+begin
+  Result := PaPiMeLa.Haptic.PMLHapticAxesFromHint(AHint, AVendor, AProduct);
 end;
 
 // ---- PaPiMeLa.FileSystem

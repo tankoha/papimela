@@ -92,3 +92,4 @@ test/test_pipewire_abi
 test/test_audio_pipewire
 test/demo_audio_tone
 spikes/spike4_foreign_thread
+test/test_haptic

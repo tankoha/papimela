@@ -88,7 +88,25 @@ type
     Number: cuint8;
   end;
 
-  { struct ff_effect（EVIOCSFF）。共用体の部分は、ランブルと周期的な効果だけを名前にした。
+  // struct ff_envelope
+  TPMLFFEnvelope = record
+    AttackLength: cuint16;
+    AttackLevel : cuint16;
+    FadeLength  : cuint16;
+    FadeLevel   : cuint16;
+  end;
+
+  // struct ff_condition_effect（ばね・ダンパ・慣性・摩擦。共用体の中で 2 本ぶん）
+  TPMLFFCondition = record
+    RightSaturation: cuint16;
+    LeftSaturation : cuint16;
+    RightCoeff     : cint16;
+    LeftCoeff      : cint16;
+    Deadband       : cuint16;
+    Center         : cint16;
+  end;
+
+  { struct ff_effect（EVIOCSFF）。共用体の部分は、ランブル・周期的・一定・傾斜・条件の効果を名前にした。
     ID は -1 で新しく割り当てさせる。 }
   TPMLFFEffect = record
     EffectType: cuint16;
@@ -112,7 +130,13 @@ type
           EnvFadeLevel     : cuint16;
           CustomLen        : cuint32;
           CustomData       : Pointer);
-      2: (Padding: array[0..31] of Byte);   // union の大きさ（condition[2] などが入る）
+      2: (Padding: array[0..31] of Byte);   // union の大きさ
+      3: (ConstantLevel   : cint16;         // ff_constant_effect
+          ConstantEnvelope: TPMLFFEnvelope);
+      4: (RampStart   : cint16;             // ff_ramp_effect
+          RampEnd     : cint16;
+          RampEnvelope: TPMLFFEnvelope);
+      5: (Condition: array[0..1] of TPMLFFCondition);   // ff_condition_effect[2]
   end;
 
 // ---- ioctl の番号（_IOC の計算）
@@ -126,6 +150,7 @@ function PMLEVIOCGPROP(ALength: Integer): culong;
 function PMLEVIOCGKEY(ALength: Integer): culong;
 function PMLEVIOCSFF: culong;
 function PMLEVIOCRMFF: culong;
+function PMLEVIOCGEFFECTS: culong;
 function PMLJSIOCGAXES: culong;
 function PMLJSIOCGBUTTONS: culong;
 function PMLJSIOCGNAME(ALength: Integer): culong;
@@ -202,6 +227,11 @@ end;
 function PMLEVIOCRMFF: culong;
 begin
   Result := PMLIOC(IOC_WRITE, Ord('E'), $81, SizeOf(cint));
+end;
+
+function PMLEVIOCGEFFECTS: culong;
+begin
+  Result := PMLIOC(IOC_READ, Ord('E'), $84, SizeOf(cint));
 end;
 
 function PMLJSIOCGAXES: culong;

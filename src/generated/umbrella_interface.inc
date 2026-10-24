@@ -28,6 +28,8 @@
 //   PaPiMeLa.Joystick
 //   PaPiMeLa.Gamepad.Mapping
 //   PaPiMeLa.Gamepad
+//   PaPiMeLa.Haptic.Backend
+//   PaPiMeLa.Haptic
 //   PaPiMeLa.FileSystem
 //   PaPiMeLa.MessageBox
 //   PaPiMeLa.TextInput
@@ -1016,6 +1018,54 @@ type
   TPMLGamepadSystem = PaPiMeLa.Gamepad.TPMLGamepadSystem;
 function PMLCreateGamepadLayer(AJoy: TPMLJoystickSystem): TPMLJoystickGamepadLayer; inline;
 
+// ---- PaPiMeLa.Haptic.Backend
+type
+  TPMLHapticID = PaPiMeLa.Haptic.Backend.TPMLHapticID;
+  TPMLHapticIDs = PaPiMeLa.Haptic.Backend.TPMLHapticIDs;
+  TPMLHapticEffectID = PaPiMeLa.Haptic.Backend.TPMLHapticEffectID;
+  TPMLHapticDirection = PaPiMeLa.Haptic.Backend.TPMLHapticDirection;
+  TPMLHapticConstant = PaPiMeLa.Haptic.Backend.TPMLHapticConstant;
+  TPMLHapticPeriodic = PaPiMeLa.Haptic.Backend.TPMLHapticPeriodic;
+  TPMLHapticCondition = PaPiMeLa.Haptic.Backend.TPMLHapticCondition;
+  TPMLHapticRamp = PaPiMeLa.Haptic.Backend.TPMLHapticRamp;
+  TPMLHapticLeftRight = PaPiMeLa.Haptic.Backend.TPMLHapticLeftRight;
+  TPMLHapticCustom = PaPiMeLa.Haptic.Backend.TPMLHapticCustom;
+  TPMLHapticEffect = PaPiMeLa.Haptic.Backend.TPMLHapticEffect;
+  TPMLHapticCore = PaPiMeLa.Haptic.Backend.TPMLHapticCore;
+  TPMLHapticSlot = PaPiMeLa.Haptic.Backend.TPMLHapticSlot;
+  TPMLHaptic = PaPiMeLa.Haptic.Backend.TPMLHaptic;
+  TPMLHapticBackend = PaPiMeLa.Haptic.Backend.TPMLHapticBackend;
+  TPMLHapticBackendFactory = PaPiMeLa.Haptic.Backend.TPMLHapticBackendFactory;
+const
+  PML_HAPTIC_INFINITY = PaPiMeLa.Haptic.Backend.PML_HAPTIC_INFINITY;
+  PML_HAPTIC_CONSTANT = PaPiMeLa.Haptic.Backend.PML_HAPTIC_CONSTANT;
+  PML_HAPTIC_SINE = PaPiMeLa.Haptic.Backend.PML_HAPTIC_SINE;
+  PML_HAPTIC_SQUARE = PaPiMeLa.Haptic.Backend.PML_HAPTIC_SQUARE;
+  PML_HAPTIC_TRIANGLE = PaPiMeLa.Haptic.Backend.PML_HAPTIC_TRIANGLE;
+  PML_HAPTIC_SAWTOOTHUP = PaPiMeLa.Haptic.Backend.PML_HAPTIC_SAWTOOTHUP;
+  PML_HAPTIC_SAWTOOTHDOWN = PaPiMeLa.Haptic.Backend.PML_HAPTIC_SAWTOOTHDOWN;
+  PML_HAPTIC_RAMP = PaPiMeLa.Haptic.Backend.PML_HAPTIC_RAMP;
+  PML_HAPTIC_SPRING = PaPiMeLa.Haptic.Backend.PML_HAPTIC_SPRING;
+  PML_HAPTIC_DAMPER = PaPiMeLa.Haptic.Backend.PML_HAPTIC_DAMPER;
+  PML_HAPTIC_INERTIA = PaPiMeLa.Haptic.Backend.PML_HAPTIC_INERTIA;
+  PML_HAPTIC_FRICTION = PaPiMeLa.Haptic.Backend.PML_HAPTIC_FRICTION;
+  PML_HAPTIC_LEFTRIGHT = PaPiMeLa.Haptic.Backend.PML_HAPTIC_LEFTRIGHT;
+  PML_HAPTIC_CUSTOM = PaPiMeLa.Haptic.Backend.PML_HAPTIC_CUSTOM;
+  PML_HAPTIC_GAIN = PaPiMeLa.Haptic.Backend.PML_HAPTIC_GAIN;
+  PML_HAPTIC_AUTOCENTER = PaPiMeLa.Haptic.Backend.PML_HAPTIC_AUTOCENTER;
+  PML_HAPTIC_STATUS = PaPiMeLa.Haptic.Backend.PML_HAPTIC_STATUS;
+  PML_HAPTIC_PAUSE = PaPiMeLa.Haptic.Backend.PML_HAPTIC_PAUSE;
+  PML_HAPTIC_POLAR = PaPiMeLa.Haptic.Backend.PML_HAPTIC_POLAR;
+  PML_HAPTIC_CARTESIAN = PaPiMeLa.Haptic.Backend.PML_HAPTIC_CARTESIAN;
+  PML_HAPTIC_SPHERICAL = PaPiMeLa.Haptic.Backend.PML_HAPTIC_SPHERICAL;
+  PML_HAPTIC_STEERING_AXIS = PaPiMeLa.Haptic.Backend.PML_HAPTIC_STEERING_AXIS;
+function PMLHapticBackendNames: TStringArray; inline;
+
+// ---- PaPiMeLa.Haptic
+type
+  TPMLHapticSystem = PaPiMeLa.Haptic.TPMLHapticSystem;
+function PMLHapticAxesFromHint(const AHint: String; AVendor, AProduct: Word): Integer; inline;
+
 // ---- PaPiMeLa.FileSystem
 type
   TPMLUserFolder = PaPiMeLa.FileSystem.TPMLUserFolder;
@@ -1194,6 +1244,8 @@ const
   PML_HINT_JOYSTICK_OLD_XBOXONE_CONTROLLERS_EXCLUDED = PaPiMeLa.Properties.PML_HINT_JOYSTICK_OLD_XBOXONE_CONTROLLERS_EXCLUDED;
   PML_HINT_GAMEPAD_TYPE = PaPiMeLa.Properties.PML_HINT_GAMEPAD_TYPE;
   PML_HINT_JOYSTICK_DEVICE = PaPiMeLa.Properties.PML_HINT_JOYSTICK_DEVICE;
+  PML_HINT_JOYSTICK_HAPTIC_AXES = PaPiMeLa.Properties.PML_HINT_JOYSTICK_HAPTIC_AXES;
+  PML_HINT_HAPTIC_GAIN_MAX = PaPiMeLa.Properties.PML_HINT_HAPTIC_GAIN_MAX;
   PML_HINT_JOYSTICK_DISABLE_UDEV = PaPiMeLa.Properties.PML_HINT_JOYSTICK_DISABLE_UDEV;
   PML_HINT_JOYSTICK_LINUX_DIGITAL_HATS = PaPiMeLa.Properties.PML_HINT_JOYSTICK_LINUX_DIGITAL_HATS;
   PML_HINT_JOYSTICK_LINUX_DEADZONES = PaPiMeLa.Properties.PML_HINT_JOYSTICK_LINUX_DEADZONES;
