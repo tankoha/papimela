@@ -451,6 +451,15 @@ noted), and none of them reported either:
   32-digit GUID with 9 extra digits. `SDL_StringToGUID` reads only the first 32,
   so both lines are the same GUID with the same mapping; the second is dead
   data.
+- **D-82**, `StepUTF8` in `stdlib/SDL_string.c` (`SDL_StepUTF8`): for a 4-byte
+  sequence it masks the second byte with 0x1F instead of 0x3F, so any code point
+  with bit 17 set (U+20000-U+3FFFF, U+60000 and up, U+E0000 and up) is decoded
+  wrongly: U+20000 (F0 A0 80 80) comes out as four U+FFFD, U+E0000 as U+C0000.
+- **D-83**, `SDL_SYS_GetPrefPath` in `filesystem/unix/SDL_sysfilesystem.c`: when
+  `XDG_DATA_HOME` is set to an empty string it is used as is (not NULL), so the
+  `$HOME/.local/share` fallback is skipped, a byte before the string is read
+  (`envr[len - 1]` with len = 0), and `SDL_GetPrefPath` tries to create
+  `/Org/App/` directly under the root. XDG says empty means unset.
 
 One more is different in kind. **D-53**: SDL documents the swap interval as
 belonging to "the current OpenGL context", but keeps a single value for the
@@ -579,6 +588,12 @@ SDL のコードを実際に動かして確かめたもので（1 件は一部�
 - **D-80**、`SDL_gamepad_db.h`（Linux の表）: 隣り合う 2 行の Atari Game Controller の後ろの行の GUID が 41 桁
   （前の行の 32 桁に 9 桁が付いた形）。`SDL_StringToGUID` は先頭の 32 桁しか読まないので、2 行は同じ GUID で
   割り当ても同じ。後ろの行は使われない
+- **D-82**、`stdlib/SDL_string.c` の `StepUTF8`（`SDL_StepUTF8`）: 4 バイトの並びの 2 バイト目を 0x3F ではなく 0x1F で
+  マスクする。ビット 17 が立つコードポイント（U+20000〜U+3FFFF、U+60000〜、U+E0000〜）が壊れ、
+  U+20000（F0 A0 80 80）は U+FFFD 4 つに、U+E0000 は U+C0000 になる
+- **D-83**、`filesystem/unix/SDL_sysfilesystem.c` の `SDL_SYS_GetPrefPath`: `XDG_DATA_HOME` が空の文字列で
+  設定されていると NULL ではないのでそのまま使われ、`$HOME/.local/share` へ行かず、文字列の前の 1 バイトを読み
+  （`envr[len - 1]`、len = 0）、ルート直下の `/Org/App/` を作ろうとする。XDG では空は設定していないのと同じ
 
 もう 1 件は種類が違う。**D-53**: SDL はスワップ間隔を「現在の OpenGL コンテキストの」
 ものとして説明しているが、値はビデオの装置全体で 1 つしか持たず、コンテキストを
