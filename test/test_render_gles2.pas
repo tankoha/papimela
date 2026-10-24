@@ -700,7 +700,7 @@ end;
 
 { ---- YUV（§3 の 3c） ----
 
-  GLES2 のドライバは YV12 / IYUV / NV12 / NV21 を平面のテクスチャで持ち、シェーダで色に直す
+  GLES2 のドライバは YV12 / IYUV / I444 / NV12 / NV21 を平面のテクスチャで持ち、シェーダで色に直す
   （SDL_shaders_gles2.c の YUV と NV12 のシェーダ）。YUY2 / UYVY / YVYU はレンダラの肩代わり。
   ソフトウェアのドライバは整数の表で直すので、GPU の浮動小数の行列とは 1 成分あたり数だけ違いうる。 }
 
@@ -816,7 +816,68 @@ begin
   R.RenderTexture(Tgt, FR(0, 0, 0, 0), FR(1, 44, 20, 8));
 end;
 
-{ GPU だけの確かめ。平面の 4 形式はドライバが自分で持つ（肩代わりでない）。 }
+{ I444（色差が輝度と同じ大きさ）。GPU は 3 平面のテクスチャで持ち、ソフトウェアのドライバは肩代わり。
+  色差を 2x2 の区画に寄せる処理は I444 では効かせない（寄せると隣の画素の色差を引く）。 }
+procedure SceneYUV444(R: TPMLRenderer);
+var
+  Spaces: array[0..4] of TPMLColorspace;
+  T, Tgt: TPMLTexture;
+  I: Integer;
+  Y, U, V: array[0..63] of Byte;
+begin
+  Background(R);
+  Spaces[0] := PML_COLORSPACE_BT601_LIMITED;
+  Spaces[1] := PML_COLORSPACE_JPEG;
+  Spaces[2] := PML_COLORSPACE_BT709_LIMITED;
+  Spaces[3] := PML_COLORSPACE_BT709_FULL;
+  Spaces[4] := PML_COLORSPACE_BT2020_FULL;
+  // 5 つの色空間 x 1:1
+  for I := 0 to 4 do
+  begin
+    T := NewYUVTexture(R, PML_PIXELFORMAT_I444, Spaces[I], 8, 6, 700 + I);
+    R.RenderTexture(T, FR(0, 0, 0, 0), FR(1 + I * 9, 1, 8, 6));
+  end;
+  // 奇数の大きさ（7x5）の 1:1 と 2 倍（Nearest。ソフトウェアのドライバの Linear は Nearest のままなので、補間は比べない）
+  T := NewYUVTexture(R, PML_PIXELFORMAT_I444, PML_COLORSPACE_BT709_LIMITED, 7, 5, 710);
+  R.RenderTexture(T, FR(0, 0, 0, 0), FR(1, 9, 7, 5));
+  R.RenderTexture(T, FR(0, 0, 0, 0), FR(10, 9, 14, 10));
+  // 変調と Blend、回転
+  T := NewYUVTexture(R, PML_PIXELFORMAT_I444, PML_COLORSPACE_YUV_DEFAULT, 8, 6, 711);
+  T.ColorMod := TPMLColor.Make(200, 255, 120);
+  T.AlphaMod := 160;
+  T.BlendMode := TPMLBlendMode.Blend;
+  R.RenderTexture(T, FR(0, 0, 0, 0), FR(42, 9, 16, 12));
+  T := NewYUVTexture(R, PML_PIXELFORMAT_I444, PML_COLORSPACE_YUV_DEFAULT, 8, 6, 712);
+  R.RenderTextureRotated(T, FR(0, 0, 0, 0), FR(1, 22, 16, 12), 90);
+  // 平面ごとの更新（全体と部分）と、詰めた画素の部分の更新
+  YuvLcg := 800;
+  for I := 0 to 63 do
+  begin
+    Y[I] := YuvByte;
+    U[I] := YuvByte;
+    V[I] := YuvByte;
+  end;
+  T := NewYUVTexture(R, PML_PIXELFORMAT_I444, PML_COLORSPACE_YUV_DEFAULT, 8, 6, 713);
+  T.UpdateYUV(TPMLRect.Make(0, 0, 0, 0), @Y[0], 8, @U[0], 8, @V[0], 8);
+  R.RenderTexture(T, FR(0, 0, 0, 0), FR(20, 22, 8, 6));
+  T := NewYUVTexture(R, PML_PIXELFORMAT_I444, PML_COLORSPACE_YUV_DEFAULT, 8, 6, 714);
+  T.UpdateYUV(TPMLRect.Make(2, 1, 5, 3), @Y[0], 5, @U[0], 5, @V[0], 5);
+  R.RenderTexture(T, FR(0, 0, 0, 0), FR(29, 22, 8, 6));
+  T := NewYUVTexture(R, PML_PIXELFORMAT_I444, PML_COLORSPACE_YUV_DEFAULT, 8, 6, 715);
+  T.Update(TPMLRect.Make(2, 1, 5, 3), @Y[0], 5);
+  R.RenderTexture(T, FR(0, 0, 0, 0), FR(38, 22, 8, 6));
+  // BGRA32 の描画先へ（R と B を入れ替えるシェーダ）
+  Tgt := R.CreateTexture(PML_PIXELFORMAT_BGRA32, TPMLTextureAccess.Target, 10, 8);
+  R.RenderTarget := Tgt;
+  R.DrawColor := TPMLColor.Make(20, 40, 60, 255);
+  R.Clear;
+  R.RenderTexture(NewYUVTexture(R, PML_PIXELFORMAT_I444, PML_COLORSPACE_BT709_FULL, 8, 6, 716),
+    FR(0, 0, 0, 0), FR(1, 1, 8, 6));
+  R.RenderTarget := nil;
+  R.RenderTexture(Tgt, FR(0, 0, 0, 0), FR(1, 36, 10, 8));
+end;
+
+{ GPU だけの確かめ。平面の 5 形式（YV12 / IYUV / I444 / NV12 / NV21）はドライバが自分で持つ（肩代わりでない）。 }
 procedure CheckYUVNative;
 var
   G: TPMLRenderer;
@@ -826,8 +887,11 @@ begin
     Check(G.Driver.SupportsTextureFormat(PML_PIXELFORMAT_IYUV)
       and G.Driver.SupportsTextureFormat(PML_PIXELFORMAT_YV12)
       and G.Driver.SupportsTextureFormat(PML_PIXELFORMAT_NV12)
-      and G.Driver.SupportsTextureFormat(PML_PIXELFORMAT_NV21),
-      'YV12 / IYUV / NV12 / NV21 のテクスチャを直接持てる（SDL の GLES2 と同じ）');
+      and G.Driver.SupportsTextureFormat(PML_PIXELFORMAT_NV21)
+      and G.Driver.SupportsTextureFormat(PML_PIXELFORMAT_I444),
+      'YV12 / IYUV / I444 / NV12 / NV21 のテクスチャを直接持てる（SDL の GLES2 と同じ）');
+    Check(not G.Driver.SupportsTextureFormat(PML_PIXELFORMAT_P010),
+      'P010 は持たない（SDL の GLES2 も持たない）');
     Check(not G.Driver.SupportsTextureFormat(PML_PIXELFORMAT_YUY2),
       'YUY2 は持たない（レンダラの肩代わりで描く。SDL の GLES2 と同じ）');
   finally
@@ -1026,6 +1090,7 @@ begin
   Compare('パレット（INDEX8。拡大・合成・変調・回転・色の変更・部分更新・BGRA32 の描画先）', @ScenePalette, 2);
   CheckPaletteNative;
   Compare('YUV（7 形式・5 つの色空間・奇数・拡大・変調・回転・平面ごとと部分の更新）', @SceneYUV, 3);
+  Compare('YUV の I444（5 つの色空間・奇数・拡大・変調・回転・平面ごとと部分の更新・BGRA の描画先）', @SceneYUV444, 3);
   CheckYUVNative;
   Compare('Lock / Unlock / LockToSurface（ARGB・INDEX8・IYUV・NV12・YUY2・サーフェス。全体と部分）', @SceneLock, 2);
 end;

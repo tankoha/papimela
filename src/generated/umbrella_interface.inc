@@ -607,6 +607,13 @@ procedure PMLConvertYUVToARGB8888(
   ASrcPitch: Integer;
   ADst: Pointer;
   ADstPitch: Integer); inline;
+procedure PMLConvertP010ToXBGR2101010(
+  AWidth, AHeight: Integer;
+  AColorspace: TPMLColorspace;
+  ASrc: Pointer;
+  ASrcPitch: Integer;
+  ADst: Pointer;
+  ADstPitch: Integer); inline;
 
 // ---- PaPiMeLa.IO
 type

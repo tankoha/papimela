@@ -60,7 +60,7 @@
     - ソフトウェアのドライバの拡大は Linear でも Nearest で描く（PMLBlitScaled が方式を使わない）。
       SDL のソフトウェアのレンダラは Linear で補間する
     - インデックス形式は INDEX8 だけ（SDL も INDEX1 / 2 / 4 のテクスチャは作れない）。YUV は
-      PaPiMeLa.Surface.YUV が変換できる 7 形式だけ（I444・P010 などは無い）
+      PaPiMeLa.Surface.YUV が変換できる 8 形式（I444 を含む）だけ。P010・I0FL・I4FL は、ドライバが持つときだけ
     - GPU のドライバは OpenGL ES 2.0（#43）だけ。デスクトップ GL（#44）は未着手
 
   Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
@@ -326,7 +326,7 @@ type
       EPMLArgument）。ARect が空ならテクスチャ全体。返すのは ARect の左上の画素で、APitch は行の幅
       （バイト）。Unlock までの間、その置き場に書く。**中身は Lock の前のものとは限らない**
       （GPU のドライバは、Update した絵を読み戻さない。全部書き直すか、先に全体を書いてから使う）。
-      YV12 / IYUV / NV12 / NV21 は全体の Lock だけ（でなければ EPMLArgument）。この 4 つは
+      YV12 / IYUV / I444 / NV12 / NV21 は全体の Lock だけ（でなければ EPMLArgument）。この 5 つは
       Y・U・V（UV）の平面が続けて並ぶ置き場（PMLCalculateYUVSize と同じ）で、行の幅は Y のもの。
       ARect がテクスチャの外に出るのは EPMLArgument（SDL は確かめず、置き場の外を指す）。
       Lock の間に描いてもよいが、Lock した置き場に書いた分は Unlock まで描かれる絵に効かない。 }
@@ -347,8 +347,9 @@ type
       インデックス形式でなければ、または色の数が 256 を超えれば EPMLArgument。 }
     procedure SetPalette(APalette: TPMLPalette; AOwned: Boolean = False);
 
-    { YUV の平面ごとに更新する（SDL_UpdateYUVTexture）。YV12 / IYUV だけ（ほかは EPMLArgument）。
-      ARect が空ならテクスチャ全体。テクスチャの外は切る。U と V は縦横とも半分の大きさ。 }
+    { YUV の平面ごとに更新する（SDL_UpdateYUVTexture）。YV12 / IYUV / I444 だけ（ほかは EPMLArgument）。
+      ARect が空ならテクスチャ全体。テクスチャの外は切る。U と V は、YV12 / IYUV では縦横とも半分の
+      大きさ、I444 では Y と同じ大きさ。 }
     procedure UpdateYUV(const ARect: TPMLRect; AY: Pointer; AYPitch: Integer;
       AU: Pointer; AUPitch: Integer; AV: Pointer; AVPitch: Integer);
     { Y と、U・V を交互に詰めた平面で更新する（SDL_UpdateNVTexture）。NV12 / NV21 だけ。 }
@@ -1379,7 +1380,7 @@ begin
   begin
     // 肩代わりの YUV（SDL_SW_LockYUVTexture）。平面の形式は全体だけ
     if not IsPackedYUV(FFormat) and ((R.X <> 0) or (R.Y <> 0) or (R.W <> FWidth) or (R.H <> FHeight)) then
-      raise EPMLArgument.Create('Lock: YV12, IYUV, NV12, NV21 textures only support full surface locks');
+      raise EPMLArgument.Create('Lock: YV12, IYUV, I444, NV12, NV21 textures only support full surface locks');
     if IsPackedYUV(FFormat) then
       Bpp := 2
     else
@@ -1451,8 +1452,9 @@ procedure TPMLTexture.UpdateYUV(const ARect: TPMLRect; AY: Pointer; AYPitch: Int
 var
   R: TPMLRect;
 begin
-  if (FFormat <> PML_PIXELFORMAT_YV12) and (FFormat <> PML_PIXELFORMAT_IYUV) then
-    raise EPMLArgument.CreateFmt('UpdateYUV needs a YV12 or IYUV texture, not %s',
+  if (FFormat <> PML_PIXELFORMAT_YV12) and (FFormat <> PML_PIXELFORMAT_IYUV)
+  and (FFormat <> PML_PIXELFORMAT_I444) then
+    raise EPMLArgument.CreateFmt('UpdateYUV needs a YV12, IYUV or I444 texture, not %s',
       [PMLPixelFormatName(FFormat)]);
   if (AY = nil) or (AU = nil) or (AV = nil) or (AYPitch = 0) or (AUPitch = 0) or (AVPitch = 0) then
     raise EPMLArgument.Create('UpdateYUV needs three planes and their pitches');

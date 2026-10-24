@@ -761,8 +761,8 @@ begin
   for I := 0 to High(YUVFormats) do
     if not PMLIsYUVFormat(YUVFormats[I]) then
       Ok := False;
-  Check(Ok and not PMLIsYUVFormat(PML_PIXELFORMAT_P010) and not PMLIsYUVFormat(PML_PIXELFORMAT_I444)
-    and not PMLIsYUVFormat(PML_PIXELFORMAT_ARGB8888), '変換できる YUV は 7 形式（P010 と I444 は持たない）');
+  Check(Ok and not PMLIsYUVFormat(PML_PIXELFORMAT_P010) and PMLIsYUVFormat(PML_PIXELFORMAT_I444)
+    and not PMLIsYUVFormat(PML_PIXELFORMAT_ARGB8888), '変換できる YUV は 8 形式（7 形式 + I444。P010 は持たない）');
   Check(PMLCalculateYUVSize(PML_PIXELFORMAT_IYUV, 7, 5, Size, Pitch) and (Size = 59) and (Pitch = 7),
     'IYUV 7x5 は 59 バイト、行の幅 7（SDL_CalculateYUVSize と同じ）');
   Check(PMLCalculateYUVSize(PML_PIXELFORMAT_NV21, 7, 5, Size, Pitch) and (Size = 59) and (Pitch = 7),

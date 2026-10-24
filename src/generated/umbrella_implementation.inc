@@ -328,6 +328,17 @@ begin
   PaPiMeLa.Surface.YUV.PMLConvertYUVToARGB8888(AWidth, AHeight, AFormat, AColorspace, ASrc, ASrcPitch, ADst, ADstPitch);
 end;
 
+procedure PMLConvertP010ToXBGR2101010(
+  AWidth, AHeight: Integer;
+  AColorspace: TPMLColorspace;
+  ASrc: Pointer;
+  ASrcPitch: Integer;
+  ADst: Pointer;
+  ADstPitch: Integer);
+begin
+  PaPiMeLa.Surface.YUV.PMLConvertP010ToXBGR2101010(AWidth, AHeight, AColorspace, ASrc, ASrcPitch, ADst, ADstPitch);
+end;
+
 // ---- PaPiMeLa.IO
 function PMLReadU8(AStream: TStream): Byte;
 begin

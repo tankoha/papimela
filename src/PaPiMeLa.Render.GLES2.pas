@@ -7,7 +7,7 @@
            フラグメントシェーダ、パレット（INDEX8）のフラグメントシェーダ
            （最近傍と線形、BGRA / BGRX の描画先向けの R と B の入れ替え付き）、
            パレットの写し（256x1 のテクスチャ）の作成・更新・破棄、
-           YUV（YV12 / IYUV / NV12 / NV21）のテクスチャの作成・更新（詰めた画素と平面ごと）・
+           YUV（YV12 / IYUV / I444 / NV12 / NV21）のテクスチャの作成・更新（詰めた画素と平面ごと）・
            破棄と、変換のフラグメントシェーダ（R と B の入れ替え付き）、
            合成モードから glBlendFunc への対応、
            ビューポートとクリップ矩形の GL への写し方（ウィンドウは上下反転）、
@@ -57,9 +57,9 @@
       入れ替えて渡す）ので、あとでそのテクスチャを描くときも、形式どおりに読める。
       描画元と描画先の形式の組で選ぶシェーダは CopyShader の PORT-NOTE を参照
 
-    - YV12 / IYUV / NV12 / NV21 は、平面ごとの GL テクスチャで持ち、変換はシェーダで行う
+    - YV12 / IYUV / I444 / NV12 / NV21 は、平面ごとの GL テクスチャで持ち、変換はシェーダで行う
       （SupportsTextureFormat が True を返すので、レンダラの ARGB8888 の肩代わりを通らない）。
-      Y はユニット 0、U（NV は UV）はユニット 1、V はユニット 2。色差は縦横とも半分の
+      Y はユニット 0、U（NV は UV）はユニット 1、V はユニット 2。色差は縦横とも半分の（I444 は輝度と同じ）
       大きさ（奇数は切り上げ）。NV の UV は GL_LUMINANCE_ALPHA（SDL の既定の RA 版）。
       色空間ごとの行列は SDL の SDL_GetYCbCRtoRGBConversionMatrix の値のまま。補間
       （Linear）は全部の平面に掛ける。YUY2 / UYVY / YVYU / P010 / I444 は持たない
@@ -119,7 +119,7 @@ type
       PalLinear     : INDEX8。4 つの添字の色を混ぜる（線形）
       PalNearestSwap: PalNearest の R と B を入れ替える（BGRA32 / BGRX32 の描画先）
       PalLinearSwap : PalLinear の R と B を入れ替える
-      YUV      : YV12 / IYUV。Y・U・V の 3 平面を変換する
+      YUV      : YV12 / IYUV / I444。Y・U・V の 3 平面を変換する
       NV12     : Y と、U,V の順に詰めた UV の平面を変換する
       NV21     : Y と、V,U の順に詰めた平面を変換する
       YUVSwap, NV12Swap, NV21Swap: それぞれの R と B を入れ替える
@@ -757,10 +757,11 @@ begin
     Result := TPMLGLES2Shader.BGR;
 end;
 
-{ このドライバが平面で持つ YUV の形式（平面ごとに分かれる 4 つ）か。 }
+{ このドライバが平面で持つ YUV の形式（平面ごとに分かれる 5 つ）か。 }
 function IsPlanarYUVFormat(AFormat: TPMLPixelFormat): Boolean; inline;
 begin
   Result := (AFormat = PML_PIXELFORMAT_YV12) or (AFormat = PML_PIXELFORMAT_IYUV)
+    or (AFormat = PML_PIXELFORMAT_I444)
     or (AFormat = PML_PIXELFORMAT_NV12) or (AFormat = PML_PIXELFORMAT_NV21);
 end;
 
@@ -1283,8 +1284,8 @@ begin
   Result := True;
 end;
 
-{ YV12 / IYUV / NV12 / NV21 は平面ごとのテクスチャで持つ（SDL の GLES2 も同じ 4 つに
-  I444 を加えて持つ）。YUY2 / UYVY / YVYU / P010 / I444 は持たない。 }
+{ YV12 / IYUV / I444 / NV12 / NV21 は平面ごとのテクスチャで持つ（SDL の GLES2 と同じ 5 つ）。
+  YUY2 / UYVY / YVYU / P010 は持たない。 }
 function TPMLGLES2RenderDriver.SupportsTextureFormat(AFormat: TPMLPixelFormat): Boolean;
 var
   BFirst, HasAlpha: Boolean;
@@ -1372,7 +1373,7 @@ end;
 
 { 形式に合ったテクスチャを作る。中身はすべて 0（透明な黒）にしておく。
 
-  YV12 / IYUV は Y・U・V の 3 枚（GL_LUMINANCE。U と V は縦横とも (n + 1) div 2）、
+  YV12 / IYUV は Y・U・V の 3 枚（GL_LUMINANCE。U と V は縦横とも (n + 1) div 2。I444 は輝度と同じ大きさ）、
   NV12 / NV21 は Y（GL_LUMINANCE）と UV（GL_LUMINANCE_ALPHA、同じ半分の大きさ）の 2 枚
   （SDL の GLES2_CreateTexture）。色空間は作るときに変換の種類へ決める。
 
@@ -1390,7 +1391,8 @@ var
 begin
   Result := False;
   Indexed := ATexture.Format = PML_PIXELFORMAT_INDEX8;
-  Planar := (ATexture.Format = PML_PIXELFORMAT_YV12) or (ATexture.Format = PML_PIXELFORMAT_IYUV);
+  Planar := (ATexture.Format = PML_PIXELFORMAT_YV12) or (ATexture.Format = PML_PIXELFORMAT_IYUV)
+    or (ATexture.Format = PML_PIXELFORMAT_I444);
   NV := (ATexture.Format = PML_PIXELFORMAT_NV12) or (ATexture.Format = PML_PIXELFORMAT_NV21);
   YCbCr := TPMLYCbCrType.BT601Limited;
   if Indexed then
@@ -1434,8 +1436,17 @@ begin
     BytesPerTexel(ATexture.Format), Data.Id);
   if Planar or NV then
   begin
-    CW := (ATexture.Width + 1) div 2;
-    CH := (ATexture.Height + 1) div 2;
+    // I444 の色差は輝度と同じ大きさ（SDL の GLES2_CreateTexture）
+    if ATexture.Format = PML_PIXELFORMAT_I444 then
+    begin
+      CW := ATexture.Width;
+      CH := ATexture.Height;
+    end
+    else
+    begin
+      CW := (ATexture.Width + 1) div 2;
+      CH := (ATexture.Height + 1) div 2;
+    end;
     if Planar then
     begin
       Created := CreatePlane(CW, CH, GL_LUMINANCE, 1, Data.IdU) and Created;
@@ -1512,9 +1523,10 @@ end;
 
 { 矩形の部分を更新する。行の幅が詰まっていないときの詰め直しは UploadPlane。
 
-  YUV（YV12 / IYUV / NV12 / NV21）は詰めた画素で来る（PMLCalculateYUVSize と同じ並び）。
+  YUV（YV12 / IYUV / I444 / NV12 / NV21）は詰めた画素で来る（PMLCalculateYUVSize と同じ並び）。
   ARect の Y が ARect.H 行、続いて色差の平面が、行の幅 (APitch + 1) div 2（NV は
-  UV を交互に詰めた 2 * ((APitch + 1) div 2)）で ((ARect.H + 1) div 2) 行ずつ。
+  UV を交互に詰めた 2 * ((APitch + 1) div 2)）で ((ARect.H + 1) div 2) 行ずつ
+  （I444 は色差も Y と同じ APitch で ARect.H 行ずつ）。
   YV12 は V、U の順、IYUV は U、V の順（SDL の GLES2_UpdateTexture）。 }
 function TPMLGLES2RenderDriver.UpdateTexture(ATexture: TPMLTexture;
   const ARect: TPMLRect; APixels: Pointer; APitch: Integer): Boolean;
@@ -1537,11 +1549,23 @@ begin
   begin
     FGL.glGetError();
     UploadPlane(Data.Id, ARect.X, ARect.Y, ARect.W, ARect.H, GL_LUMINANCE, APixels, APitch, 1);
-    CX := ARect.X div 2;
-    CY := ARect.Y div 2;
-    CW := (ARect.W + 1) div 2;
-    CH := (ARect.H + 1) div 2;
-    ChromaPitch := (APitch + 1) div 2;
+    if ATexture.Format = PML_PIXELFORMAT_I444 then
+    begin
+      // 色差も輝度と同じ大きさ（行の幅も Y と同じ）
+      CX := ARect.X;
+      CY := ARect.Y;
+      CW := ARect.W;
+      CH := ARect.H;
+      ChromaPitch := APitch;
+    end
+    else
+    begin
+      CX := ARect.X div 2;
+      CY := ARect.Y div 2;
+      CW := (ARect.W + 1) div 2;
+      CH := (ARect.H + 1) div 2;
+      ChromaPitch := (APitch + 1) div 2;
+    end;
     // 色差の平面は、Y の ARect.H 行のあと
     Src := PByte(APixels) + PtrInt(ARect.H) * PtrInt(APitch);
     if Data.Planar then
@@ -1575,7 +1599,7 @@ begin
   Result := True;
 end;
 
-{ 平面ごとの更新（SDL の GLES2_UpdateTextureYUV）。YV12 / IYUV。 }
+{ 平面ごとの更新（SDL の GLES2_UpdateTextureYUV）。YV12 / IYUV / I444。 }
 function TPMLGLES2RenderDriver.UpdateTextureYUV(ATexture: TPMLTexture; const ARect: TPMLRect;
   AY: Pointer; AYPitch: Integer; AU: Pointer; AUPitch: Integer;
   AV: Pointer; AVPitch: Integer): Boolean;
@@ -1591,10 +1615,18 @@ begin
     Exit;
   EnsureCurrent;
   FGL.glGetError();
-  UploadPlane(Data.IdV, ARect.X div 2, ARect.Y div 2, (ARect.W + 1) div 2, (ARect.H + 1) div 2,
-    GL_LUMINANCE, AV, AVPitch, 1);
-  UploadPlane(Data.IdU, ARect.X div 2, ARect.Y div 2, (ARect.W + 1) div 2, (ARect.H + 1) div 2,
-    GL_LUMINANCE, AU, AUPitch, 1);
+  if ATexture.Format = PML_PIXELFORMAT_I444 then
+  begin
+    UploadPlane(Data.IdV, ARect.X, ARect.Y, ARect.W, ARect.H, GL_LUMINANCE, AV, AVPitch, 1);
+    UploadPlane(Data.IdU, ARect.X, ARect.Y, ARect.W, ARect.H, GL_LUMINANCE, AU, AUPitch, 1);
+  end
+  else
+  begin
+    UploadPlane(Data.IdV, ARect.X div 2, ARect.Y div 2, (ARect.W + 1) div 2, (ARect.H + 1) div 2,
+      GL_LUMINANCE, AV, AVPitch, 1);
+    UploadPlane(Data.IdU, ARect.X div 2, ARect.Y div 2, (ARect.W + 1) div 2, (ARect.H + 1) div 2,
+      GL_LUMINANCE, AU, AUPitch, 1);
+  end;
   UploadPlane(Data.Id, ARect.X, ARect.Y, ARect.W, ARect.H, GL_LUMINANCE, AY, AYPitch, 1);
   Result := FGL.glGetError() = GL_NO_ERROR;
 end;
@@ -2162,8 +2194,9 @@ begin
     end;
     if IsYUVShader(Shader) then
     begin
-      // 補間なしのときだけ、色差の座標を 2x2 の区画に寄せる（シェーダの PORT-NOTE）
-      if ACmd.ScaleMode = TPMLScaleMode.Linear then
+      // 補間なしのときだけ、色差の座標を 2x2 の区画に寄せる（シェーダの PORT-NOTE）。
+      // I444 は色差が輝度と同じ大きさなので寄せない
+      if (ACmd.ScaleMode = TPMLScaleMode.Linear) or (Data.Format = PML_PIXELFORMAT_I444) then
         Snap := 0
       else
         Snap := 1;

@@ -1,6 +1,6 @@
 # 引き継ぎ資料
 
-新しいセッションは、`CLAUDE.md` の次にこれを読む。最終更新: 2026-10-17（Raspberry Pi 5 の端末で、カラーキーを足した後。今週の作業はここまで、続きは週明け）。
+新しいセッションは、`CLAUDE.md` の次にこれを読む。最終更新: 2026-10-24（Raspberry Pi 5 の端末で、I444 / P010 を足した後）。
 
 > **2026-10-14 の手元のセッションで**: §3 の 3b（パレット、INDEX8）と 3c（YUV。YV12 / IYUV / NV12 / NV21 / YUY2 / UYVY / YVYU）を
 > 済ませ、テクスチャの種類（§3 の 1）は終わった。README の上流の不具合に D-58〜D-61 を載せた（持ち主の判断）。SDL の不具合を
@@ -18,6 +18,10 @@
 > さらに PulseAudio（`PaPiMeLa.Audio.Pulse`、#57。`PaPiMeLa.Platform.Pulse`、#20）と ALSA（`PaPiMeLa.Audio.Alsa`、#58。`PaPiMeLa.Platform.Alsa`、#20）を済ませた（T-58・T-60・T-61 は CI、T-59・T-62 は手元専用）。SDL の不具合 D-74・D-75 を見つけた。**これでオーディオは、第 11 章の #51〜#58 とヒントの口まで揃った**（残りは下の「残り」）。
 > 続けて **テクスチャの Lock / Unlock（T-64）とサーフェスから作るときのカラーキー（T-65）を済ませた**（2026-10-16〜17）。参照版 SDL の静的ビルドは `/home/joerg/claude-work/sdl-ref-build`（`/tmp` は消えるので永続の場所に作った）。
 > 表示サーバ無しの 40 本が全部通る。**手元（Pi 5）の対話の確認は残っていない。** この端末の違いは §2.1。
+> **2026-10-24 に I444 と P010 を済ませた**（Opus。T-66）。I444 はテクスチャ（レンダラの肩代わりと GLES2 の 3 平面のシェーダ）と変換、P010 は
+> `PMLConvertP010ToXBGR2101010`（XBGR2101010 だけ）と大きさの計算。**P010 のテクスチャは作らない**（SDL のソフトウェアのレンダラも GLES2 も
+> 作れない。Vulkan のドライバが持つときは `SupportsTextureFormat` で答えれば、レンダラの層は変えずに通る）。SDL の不具合 D-76 を見つけた
+> （限定範囲の P010 の黒が黒にならない）。README への掲載は持ち主の判断を待つ。表示サーバ無しの 41 本が全部通る。**手元（Pi 5）の対話の確認は残っていない。**
 > 次の候補は §3。
 
 ## 1. 今どこにいるか
@@ -26,8 +30,8 @@
 |---|---|
 | リポジトリ | https://github.com/tankoha/papimela（公開、Issues 有効）。手元のセッションは `master` に直接 push、クラウドのセッションは指定のブランチへ push して、手元で早送りマージする |
 | CI | 緑。rawpaco 激辛、checkorigin、アンブレラの古さ（`genumbrella.bb --check`）、図の検査、表示サーバ無しのテスト 32 本、Pong の自己検査、GLES2 と ソフトウェアのドライバの画素比較（llvmpipe）。ジョブ 60 分・GLES2 の手順 5 分の時間制限つき |
-| テスト | 表示サーバ無しの 40 本はすべて成功（2026-10-15 に Pi5 で流した。以前の「件」は数え方が違うので、これからはこの数え方）。PipeWire の T-54 と PulseAudio の T-59 は手元専用で、どちらも Pi5 で通る。PipeWire の T-54 は手元専用（30 件）。手元専用と対話の検査は `docs/TEST-LOG.md` の各行 |
-| 不具合 | 73 件。うち上流 SDL の 25 件は未報告（D-53 は SDL 自身が FIXME で知っている。他の 24 件は報告するかを検討中。方針は `CLAUDE.md`。README の一覧に全件を載せた） |
+| テスト | 表示サーバ無しの 41 本はすべて成功（2026-10-15 に Pi5 で流した。以前の「件」は数え方が違うので、これからはこの数え方）。PipeWire の T-54 と PulseAudio の T-59 は手元専用で、どちらも Pi5 で通る。PipeWire の T-54 は手元専用（30 件）。手元専用と対話の検査は `docs/TEST-LOG.md` の各行 |
+| 不具合 | 74 件。うち上流 SDL の 26 件は未報告（D-53 は SDL 自身が FIXME で知っている。他の 24 件は報告するかを検討中。方針は `CLAUDE.md`。README の一覧に全件を載せた） |
 | 規模 | 手書き 63 ユニット（`src/*.pas`）+ 生成（Wayland プロトコル 21、キーボードの表 2、EGL / GLES2 の定数 2、DebugText の字形 1、音声のチャンネル数の変換と周波数の変換の係数 2、PipeWire の定数 1、アンブレラ 2）。手書きの `src/*.pas` が約 4.0 万行、生成を含めて約 5.5 万行（2026-10-14 に数え直した） |
 
 ### 動いているもの
@@ -49,7 +53,7 @@ EGL の GL コンテキスト（スワップ間隔はコンテキストごと）
 済み（一部を含む）: #1–10、#12–17（#17 の `.GL` は未）、#22、#24（`Events.Keymap`。押下状態は
 `PaPiMeLa.Events` の `TPMLKeyboardState`）、#25 の一部（マウスとタッチの状態機械は `PaPiMeLa.Events`）、
 #26–29、#31–39、#41–43（#41 は済み）、
-#21、#45、#46、#47、#48、#49、#50、#51、#52、#53（`.Audio.Mixer` は F32 の分だけ）、#55、#56、#64、#68（YUV から ARGB8888 への変換だけ）、#70、#71。
+#21、#45、#46、#47、#48、#49、#50、#51、#52、#53（`.Audio.Mixer` は F32 の分だけ）、#55、#56、#64、#68（YUV から ARGB8888 への変換、I444 のテクスチャ、P010 から XBGR2101010 への変換。I0FL / I4FL は未）、#70、#71。
 
 未着手: #11、#18–21、#23、#30、#40、#44、
 #54、#57–63（WAV、PulseAudio・ALSA、ジョイスティック、ゲームパッド、ハプティクス）、#65–67、#69。
@@ -139,6 +143,9 @@ D-69（録音で書き換えたバイト数を次の論理デバイスへ持ち�
 - **参照版の SDL（main）を Pi 5 で静的に作れる**（cmake と ninja を入れた後、約 5 分）: `cmake -G Ninja -S reference/SDL -B <場所> -DSDL_UNIX_CONSOLE_BUILD=ON -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TESTS=OFF -DSDL_X11=OFF -DSDL_WAYLAND=OFF -DSDL_KMSDRM=OFF -DSDL_OPENGL=OFF -DSDL_OPENGLES=OFF -DSDL_AUDIO=OFF -DSDL_GPU=OFF -DSDL_VULKAN=OFF -DSDL_CAMERA=OFF -DSDL_JOYSTICK=OFF -DSDL_HAPTIC=OFF -DSDL_SENSOR=OFF -DSDL_DIALOG=OFF -DSDL_TRAY=OFF -DCMAKE_BUILD_TYPE=Release && ninja -C <場所>`。
   Pascal 側の期待値は、システムの 3.4.2 でなく**これ**（papimela は main を写すので、3.4.2 と違う所がある。例: パックされた YUV の Lock）。テクスチャの Lock の期待値の作り方は `tools/texture-lock-expect/gen.bb`
 - **T-22 の「VSync 1 は画面のリフレッシュに揃う」は、この端末の画面（180 Hz と報告されるが 90 fps）で落ちる**。Lock の変更とは無関係（2026-10-16 に確認）。ほかの 6 つの窓の検査は通る
+- **SDL の内部の関数は、静的に作った参照版にリンクして直接呼べる**（`SDL_CalculateYUVSize` など。`tools/yuv-hd-expect/yuv_cases.c` の `extern`）。
+  コードを部分的に読んで「不具合らしい」と思ったら（`SDL_CalculateYUVSize` の I444 の色差の大きさは、読んだ範囲では 4:2:0 の式に見えた）、
+  書く前に呼んで確かめる。この件は実測で不具合でなかった（別の枝が 3 平面の大きさを返す）。P010 の輝度のオフセット（D-76）は実測で本物だった
 - **大きさを偽るストリーム**（`Size` を実際より大きく答える）で、data チャンクが宣言より短い場面を作れる。SDL 側は `SDL_OpenIO` で同じ嘘をつくストリームを作る。
   切り詰めのヒントの本丸の経路は、これでしか通らない
 - **変異の検査は、クラッシュと「落ちた」を区別する**。落ちた件数を grep で数えるだけだと、実行時エラーで途中で終わった変異が「0 件」に見える。結論の行の有無も見る
@@ -169,8 +176,7 @@ D-69（録音で書き換えたバイト数を次の論理デバイスへ持ち�
      録音は手元にソースが無いので実機では通していない（T-54 は飛ばす）。PipeWire の既定の変更での移動も実機では見ていない
      （利用者の既定を変えるので）
    - 浮動小数の変換は、範囲の外の値で SDL の SSE2 版とスカラー版の結果が割れる（D-64・D-65）。期待値の入力は範囲の中に置く
-2. 残してあるテクスチャのもの: ~~テクスチャの Lock / Unlock~~ **済んだ（2026-10-16、Pi 5 で。`TPMLTexture.Lock` / `Unlock` / `LockToSurface`、T-64）**。残りは
-   I444 / P010 などの YUV、~~サーフェスから作るときのカラーキー~~ **済んだ（2026-10-17、Pi 5 で。`CreateTextureFromSurface` が 17 形式のキー・変調・ブレンドの引き継ぎを SDL と合わせた、T-65）**、~~ソフトウェアのレンダラの Linear が
+2. 残してあるテクスチャのもの: ~~テクスチャの Lock / Unlock~~ **済んだ（2026-10-16、Pi 5 で。`TPMLTexture.Lock` / `Unlock` / `LockToSurface`、T-64）**。~~I444 / P010~~ **済んだ（2026-10-24、Pi 5 で。T-66。上の冒頭）**、残りは I0FL / I4FL（16 ビットの浮動小数向けの YUV。SDL のソフトウェアのレンダラだけが持つ）と、P010 を XBGR2101010 以外へ直す道（SDL は XBGR2101010 を経由して色空間を変換する）、~~サーフェスから作るときのカラーキー~~ **済んだ（2026-10-17、Pi 5 で。`CreateTextureFromSurface` が 17 形式のキー・変調・ブレンドの引き継ぎを SDL と合わせた、T-65）**、~~ソフトウェアのレンダラの Linear が
    実は Nearest（`PMLBlitScaled` が方式を使わない。SDL は補間する）~~（**2026-10-17 に持ち主が「そのまま」と決めた。直さない**）
 3. IME の残り: 埋め込み候補（`TextEditingCandidates`）、IBus の ForwardKeyEvent、ibus-anthy など他のエンジンの属性の実測、GNOME / KDE での IBus 直結（§7.5 の要検証）。IBus の検査環境は `tools/ibus-sandbox/`（ibus + ibus-mozc を入れた Ubuntu 24.04 の最小 rootfs を bwrap で隔離。デスクトップの fcitx5 と混ざらない）。実測の結果は `spikes/RESULTS.md` のスパイク 3
 
@@ -219,7 +225,7 @@ Pong もすべて書き換え、今は `uses SysUtils, Math, PaPiMeLa` だけで
 表示サーバ無しで通るもの（CI と同じ）:
 
 ```bash
-for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_render_transform test_render_target test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_drop test_drag_source test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds test_audio_convert test_audio_stream test_audio_mixer test_audio_wave test_audio_device test_pipewire_abi test_pulse_abi test_alsa_abi test_alsa_chmap test_audio_autoselect test_texture_lock test_texture_colorkey; do
+for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_render_transform test_render_target test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_drop test_drag_source test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds test_audio_convert test_audio_stream test_audio_mixer test_audio_wave test_audio_device test_pipewire_abi test_pulse_abi test_alsa_abi test_alsa_chmap test_audio_autoselect test_texture_lock test_texture_colorkey test_yuv_hd; do
   fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/$t test/$t.pas && ./test/$t
 done
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -oexamples/pong examples/pong.pas && ./examples/pong --selftest
@@ -247,7 +253,7 @@ env -u WAYLAND_DISPLAY LIBGL_ALWAYS_SOFTWARE=1 ./test/test_render_gles2   # Mesa
 cd papimela && mkdir -p lib
 B='fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib'
 # 0. 表示サーバ無しの分（CI と同じ。手元の新しい Mesa でも通るか）
-for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds test_audio_convert test_audio_stream test_audio_mixer test_audio_wave test_audio_device test_pipewire_abi test_pulse_abi test_alsa_abi test_alsa_chmap test_audio_autoselect test_texture_lock test_texture_colorkey; do
+for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds test_audio_convert test_audio_stream test_audio_mixer test_audio_wave test_audio_device test_pipewire_abi test_pulse_abi test_alsa_abi test_alsa_chmap test_audio_autoselect test_texture_lock test_texture_colorkey test_yuv_hd; do
   $B -otest/$t test/$t.pas && ./test/$t | tail -1
 done
 # 1. 実機の Wayland（自動判定。最後の行が「結論」で終わればよい）
