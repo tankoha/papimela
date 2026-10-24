@@ -310,7 +310,7 @@ compares that argument with itself, so a validation that *looks* like a
 validation always succeeds. It is in `docs/DEFECTS.md`. It has not been
 reported.
 
-It is not the only one. Twenty-two more are in `docs/DEFECTS.md`, each confirmed
+It is not the only one. Twenty-three more are in `docs/DEFECTS.md`, each confirmed
 by running SDL's own code rather than by reading alone (one only in part, as
 noted), and none of them reported either:
 
@@ -425,6 +425,12 @@ noted), and none of them reported either:
 - **D-75**, ALSA `ALSA_pcm_cfg_hw_chans_n_scan`: when no sample format can be set, the
   error is built from the return value of an earlier, successful call, so it
   reads "ALSA: Unsupported audio format: Success" (3.4.2 and main).
+- **D-76**, `yuvp010_xbgr2101010_std` (`yuv_rgb_std_func.h`): the luma offset
+  `y_shift` is the 8-bit value 16, but it is subtracted from the 16-bit P010
+  sample before the shift down to 10 bits, instead of 64 after it. In a
+  limited-range colorspace black (Y = 64) converts to R = G = B = 73 rather
+  than 0; white still saturates, so it is easy to miss. Full range
+  (BT.2020, `y_shift` = 0) is not affected (3.4.2 and main).
 
 One more is different in kind. **D-53**: SDL documents the swap interval as
 belonging to "the current OpenGL context", but keeps a single value for the
@@ -461,7 +467,7 @@ SDL は AI 生成物の貢献を受け付けない方針を明示している。
 比較しているため、**検証の形をしたまま必ず成功する**。`docs/DEFECTS.md` に
 記録してある。報告はしていない。
 
-これだけではない。`docs/DEFECTS.md` にはあと 22 件ある。どれも読んだだけでなく
+これだけではない。`docs/DEFECTS.md` にはあと 23 件ある。どれも読んだだけでなく
 SDL のコードを実際に動かして確かめたもので（1 件は一部だけ。その旨を書いた）、どれも報告していない。
 
 - **D-36**、`imKStoUCS.c` の 312 行目: 範囲の判定が表の先頭より 6 つ手前から
@@ -536,6 +542,10 @@ SDL のコードを実際に動かして確かめたもので（1 件は一部�
   シンクを消すと、シンクの削除の知らせは来るが、そのモニターには来ず、録音デバイスの一覧に残る（3.4.2 と main）
 - **D-75**、ALSA の `ALSA_pcm_cfg_hw_chans_n_scan`: どの形式も設定できなかったとき、エラーの文面を前の成功した呼び出しの
   戻り値で作るので、「ALSA: Unsupported audio format: Success」になる（3.4.2 と main）
+- **D-76**、`yuv_rgb_std_func.h` の `yuvp010_xbgr2101010_std`: 輝度のオフセット `y_shift` は 8 ビットの値 16 なのに、
+  16 ビットの P010 の標本から、10 ビットへ寄せる前に引いている（寄せたあとに 64 を引くべき）。限定範囲の色空間では、
+  黒（Y = 64）が 0 でなく R = G = B = 73 になる。白は飽和するので気づきにくい。全範囲（BT.2020。`y_shift` が 0）は
+  影響しない（3.4.2 と main）
 
 もう 1 件は種類が違う。**D-53**: SDL はスワップ間隔を「現在の OpenGL コンテキストの」
 ものとして説明しているが、値はビデオの装置全体で 1 つしか持たず、コンテキストを
