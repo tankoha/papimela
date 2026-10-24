@@ -441,6 +441,16 @@ noted), and none of them reported either:
   instead of the texture height, so its rows land in the second plane and the
   third plane is left untouched. Main only: 3.4.2 writes them to the right
   place.
+- **D-79**, `VIRTUAL_JoystickOpen` in `joystick/virtual/SDL_virtualjoystick.c`: it
+  copies `naxes`, `nbuttons` and `nhats` from the descriptor to the opened
+  joystick but never `nballs`, so a virtual joystick created with `nballs` > 0
+  reports 0 balls, drops its ball events, and `SDL_GetJoystickBall` fails
+  ("Joystick only has 0 balls"). Same in main and 3.4.2.
+- **D-80**, `SDL_gamepad_db.h` (Linux table): the "Atari Game Controller" entry
+  on the second of two adjacent lines has a 41-digit GUID, the previous line's
+  32-digit GUID with 9 extra digits. `SDL_StringToGUID` reads only the first 32,
+  so both lines are the same GUID with the same mapping; the second is dead
+  data.
 
 One more is different in kind. **D-53**: SDL documents the swap interval as
 belonging to "the current OpenGL context", but keeps a single value for the
@@ -562,6 +572,13 @@ SDL のコードを実際に動かして確かめたもので（1 件は一部�
 - **D-78**、`SDL_yuv_sw.c` の `SDL_SW_UpdateYUVTexture`: YV12 / IYUV / I0FL の詰めた画素での部分の更新が、3 つ目の平面の
   書き込み先をテクスチャの高さでなく `rect->h` で測る。3 つ目の平面の行が 2 つ目の平面に入り、3 つ目の平面は
   書き換わらない。main だけ。3.4.2 は正しい位置に書く
+- **D-79**、`joystick/virtual/SDL_virtualjoystick.c` の `VIRTUAL_JoystickOpen`: 記述から開いたジョイスティックへ
+  `naxes`・`nbuttons`・`nhats` は写すが `nballs` を写さない。`nballs` > 0 で作った仮想ジョイスティックでも
+  ボールは 0 個になり、ボールのイベントは捨てられ、`SDL_GetJoystickBall` は "Joystick only has 0 balls" で失敗する。
+  main と 3.4.2 の両方で同じ
+- **D-80**、`SDL_gamepad_db.h`（Linux の表）: 隣り合う 2 行の Atari Game Controller の後ろの行の GUID が 41 桁
+  （前の行の 32 桁に 9 桁が付いた形）。`SDL_StringToGUID` は先頭の 32 桁しか読まないので、2 行は同じ GUID で
+  割り当ても同じ。後ろの行は使われない
 
 もう 1 件は種類が違う。**D-53**: SDL はスワップ間隔を「現在の OpenGL コンテキストの」
 ものとして説明しているが、値はビデオの装置全体で 1 つしか持たず、コンテキストを

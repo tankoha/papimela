@@ -63,6 +63,8 @@
    {:unit "PaPiMeLa.Joystick.GUID"}
    {:unit "PaPiMeLa.Joystick.Backend"}
    {:unit "PaPiMeLa.Joystick"}
+   {:unit "PaPiMeLa.Gamepad.Mapping"}
+   {:unit "PaPiMeLa.Gamepad"}
    {:unit "PaPiMeLa.TextInput"}
    {:unit "PaPiMeLa.Time"}
    {:unit "PaPiMeLa.Atomic"}

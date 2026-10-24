@@ -22,10 +22,11 @@
       PAPIMELA_NO_SIGNAL_HANDLERS が真なら置かない
     - Hints・Properties・Log はサブシステムより先に作り、後に壊す（どのサブシステムも
       作るときからログを書ける）
-    - Joysticks は Joystick を要求したときだけ作る
+    - Joysticks は Joystick か Gamepad を要求したときだけ作る。ゲームパッドの層（マッピングの DB）は
+      Joysticks が作るとき必ず付き、Gamepad を要求したときだけゲームパッドのイベントを出し始める
 
   NOT RESOLVED:
-    - Gamepad と Haptic は未実装で、要求されたら EPMLUnsupported を投げる
+    - Haptic は未実装で、要求されたら EPMLUnsupported を投げる
 
   Copyright (C) 2026 papimela contributors
   （zlib ライセンス本文は papimela.inc を参照）
@@ -48,6 +49,7 @@ uses
   PaPiMeLa.Video,
   PaPiMeLa.Audio,
   PaPiMeLa.Joystick,
+  PaPiMeLa.Gamepad,
   PaPiMeLa.TextInput;
 
 type
@@ -122,6 +124,7 @@ type
     FTextInput : TPMLTextInputSystem;
     FSubsystems: TPMLSubsystems;
     FQuitSignals: Boolean;   // PMLInstallQuitSignals を呼んだ（Destroy で取り消す）
+    function  GetGamepads: TPMLGamepadSystem;
   public
     constructor Create(ASubsystems: TPMLSubsystems); overload;
     constructor Create(ASubsystems: TPMLSubsystems;
@@ -140,6 +143,8 @@ type
     property Video     : TPMLVideoSystem     read FVideo;
     property Audio     : TPMLAudioSystem     read FAudio;
     property Joysticks : TPMLJoystickSystem  read FJoysticks;
+    // ゲームパッド（Joystick か Gamepad を要求したときだけ。無ければ nil）
+    property Gamepads  : TPMLGamepadSystem   read GetGamepads;
     property TextInput : TPMLTextInputSystem read FTextInput;
     property Subsystems: TPMLSubsystems      read FSubsystems;
   end;
@@ -274,12 +279,15 @@ begin
     FAudio := TPMLAudioSystem.Create(Self, Self, FEvents, FHints.GetHint(PML_HINT_AUDIO_DRIVER));
     FLog.Info(PML_LOG_CATEGORY_AUDIO, 'audio backend: ' + FAudio.BackendName);
   end;
-  if (TPMLSubsystem.Gamepad in ASubsystems) or (TPMLSubsystem.Haptic in ASubsystems) then
-    raise EPMLUnsupported.Create('the gamepad and haptic subsystems are not implemented yet');
-  if TPMLSubsystem.Joystick in ASubsystems then
+  if TPMLSubsystem.Haptic in ASubsystems then
+    raise EPMLUnsupported.Create('the haptic subsystem is not implemented yet');
+  // ゲームパッドはジョイスティックの上に乗る（SDL_InitSubSystem(GAMEPAD) も ジョイスティックを始める）
+  if (TPMLSubsystem.Joystick in ASubsystems) or (TPMLSubsystem.Gamepad in ASubsystems) then
   begin
-    FJoysticks := TPMLJoystickSystem.Create(Self, Self, FEvents, FHints);
+    FJoysticks := TPMLJoystickSystem.Create(Self, Self, FEvents, FHints, @PMLCreateGamepadLayer);
     FLog.Info(PML_LOG_CATEGORY_INPUT, 'joystick backends: ' + IntToStr(FJoysticks.BackendCount));
+    if TPMLSubsystem.Gamepad in ASubsystems then
+      Gamepads.Start;
   end;
 
   if TPMLSubsystem.TextInput in ASubsystems then
@@ -290,6 +298,14 @@ begin
     FEvents.KeyFilter := FTextInput as IPMLKeyFilter;
     FLog.Info(PML_LOG_CATEGORY_INPUT, 'text input backend: ' + FTextInput.BackendName);
   end;
+end;
+
+function TPMLContext.GetGamepads: TPMLGamepadSystem;
+begin
+  if (FJoysticks <> nil) and (FJoysticks.GamepadLayer is TPMLGamepadSystem) then
+    Result := TPMLGamepadSystem(FJoysticks.GamepadLayer)
+  else
+    Result := nil;
 end;
 
 destructor TPMLContext.Destroy;

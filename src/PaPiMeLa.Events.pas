@@ -74,7 +74,7 @@ type
     JoystickAxisMotion, JoystickBallMotion, JoystickHatMotion, JoystickButtonDown, JoystickButtonUp,
     JoystickAdded, JoystickRemoved, JoystickBatteryUpdated, JoystickUpdateComplete,
     GamepadAxisMotion, GamepadButtonDown, GamepadButtonUp, GamepadAdded,
-    GamepadRemoved, GamepadRemapped,
+    GamepadRemoved, GamepadRemapped, GamepadUpdateComplete,
     FingerDown, FingerUp, FingerMotion, FingerCanceled,
     ClipboardUpdate,
     DropFile, DropText, DropBegin, DropComplete, DropPosition,
@@ -215,6 +215,20 @@ type
     Percent: Integer;         // 0..100。分からなければ -1
   end;
 
+  { GamepadAxisMotion の付随情報（SDL_GamepadAxisEvent）。Axis は TPMLGamepadAxis の値。 }
+  TPMLGamepadAxisEventData = record
+    Which: LongWord;
+    Axis : Byte;
+    Value: SmallInt;          // -32768..32767
+  end;
+
+  { GamepadButtonDown / GamepadButtonUp の付随情報（SDL_GamepadButtonEvent）。Button は TPMLGamepadButton の値。 }
+  TPMLGamepadButtonEventData = record
+    Which : LongWord;
+    Button: Byte;
+    Down  : Boolean;
+  end;
+
   TPMLUserEventData = record
     Code        : Int32;
     Data1, Data2: Pointer;
@@ -250,6 +264,9 @@ type
       16: (JHat            : TPMLJoystickHatEventData);
       17: (JButton         : TPMLJoystickButtonEventData);
       18: (JBattery        : TPMLJoystickBatteryEventData);
+      // GamepadAdded / GamepadRemoved / GamepadRemapped / GamepadUpdateComplete は JDevice を使う
+      19: (GAxis           : TPMLGamepadAxisEventData);
+      20: (GButton         : TPMLGamepadButtonEventData);
       // Display / JAxis / GAxis / Finger ... は各サブシステム着手時に追加する。
       // 可変部への追加は既存コードに影響しない。
   end;
@@ -1571,6 +1588,20 @@ begin
       Add('button', IntToStr(AEvent.JButton.Button));
     end;
     TPMLEventKind.JoystickAdded, TPMLEventKind.JoystickRemoved, TPMLEventKind.JoystickUpdateComplete:
+      Add('which', IntToStr(AEvent.JDevice.Which));
+    TPMLEventKind.GamepadAxisMotion:
+    begin
+      Add('which', IntToStr(AEvent.GAxis.Which));
+      Add('axis', IntToStr(AEvent.GAxis.Axis));
+      Add('value', IntToStr(AEvent.GAxis.Value));
+    end;
+    TPMLEventKind.GamepadButtonDown, TPMLEventKind.GamepadButtonUp:
+    begin
+      Add('which', IntToStr(AEvent.GButton.Which));
+      Add('button', IntToStr(AEvent.GButton.Button));
+    end;
+    TPMLEventKind.GamepadAdded, TPMLEventKind.GamepadRemoved, TPMLEventKind.GamepadRemapped,
+    TPMLEventKind.GamepadUpdateComplete:
       Add('which', IntToStr(AEvent.JDevice.Which));
     TPMLEventKind.JoystickBatteryUpdated:
     begin

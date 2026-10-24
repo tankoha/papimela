@@ -80,6 +80,8 @@ test/test_texture_colorkey
 test/test_yuv_hd
 test/test_colorspace
 test/test_joystick
+test/test_gamepad_mapping
+test/test_gamepad
 test/test_audio_device
 test/test_pipewire_abi
 test/test_audio_pipewire

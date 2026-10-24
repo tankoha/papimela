@@ -47,12 +47,32 @@ uses
   PaPiMeLa.Events,
   PaPiMeLa.Joystick.GUID,
   PaPiMeLa.Joystick.Tables,
-  PaPiMeLa.Joystick.Backend;
+  PaPiMeLa.Joystick.Backend,
+  PaPiMeLa.Gamepad.Mapping;
 
 type
+  { ゲームパッドの層（PaPiMeLa.Gamepad の TPMLGamepadSystem が実装する）。マッピングの DB を持ち、
+    機器がゲームパッドか、無視するか、を答え、ゲームパッドの Added / Removed と、遅れたガイドボタンの
+    処理を受け持つ。差し込まれていなければ、ゲームパッドは無い（IsGamepad は False）。 }
+  TPMLJoystickGamepadLayer = class abstract(TPMLSystemObject)
+  public
+    // ゲームパッドのイベントを止め、開いたものを全部閉じる（SDL_QuitGamepads）。
+    procedure Shutdown; virtual; abstract;
+    function  IsGamepad(AID: TPMLJoystickID): Boolean; virtual; abstract;
+    function  ShouldIgnore(AVendor, AProduct, AVersion: Word; const AName: String): Boolean; virtual; abstract;
+    procedure GamepadAdded(AID: TPMLJoystickID); virtual; abstract;
+    procedure GamepadRemoved(AID: TPMLJoystickID); virtual; abstract;
+    procedure DelayedGuideButton(AJoystick: TPMLJoystick); virtual; abstract;
+  end;
+
   { ウィンドウがあってキーボードフォーカスが無いか（SDL_HasWindows() かつ SDL_GetKeyboardFocus() = NULL）。
     True の間は、入力のイベントを捨てる（静止に戻す動きは通す）。nil なら捨てない。 }
   TPMLJoystickBackgroundGuard = function: Boolean of object;
+
+  TPMLJoystickSystem = class;
+
+  // ゲームパッドの層を作る工場。ジョイスティックのサブシステムが、バックエンドを始める前に呼ぶ。
+  TPMLJoystickGamepadLayerFactory = function(AJoy: TPMLJoystickSystem): TPMLJoystickGamepadLayer;
 
   TPMLJoystickSystem = class sealed(TPMLJoystickCore, IPMLEventPumpSource)
   strict private
@@ -73,6 +93,7 @@ type
     FBeingAdded     : Boolean;
     FAllowBackground: Boolean;
     FGuard          : TPMLJoystickBackgroundGuard;
+    FLayer          : TPMLJoystickGamepadLayer;
     procedure CreateLists;
     procedure FreeLists;
     procedure AllowBackgroundChanged(const AName: String; const AOld, ANew: TPMLHintValue);
@@ -91,7 +112,7 @@ type
     function  FindVirtual: IPMLVirtualJoystickBackend;
   public
     constructor Create(AContextRef: TObject; AOwner: TPMLObject; AQueue: TPMLEventQueue;
-      AHints: TPMLHints);
+      AHints: TPMLHints; AMakeLayer: TPMLJoystickGamepadLayerFactory = nil);
     destructor Destroy; override;
 
     { ---- アプリが使う ---- }
@@ -133,6 +154,22 @@ type
     function  EventsEnabled: Boolean;
     // 入力を捨ててよい（フォーカスが無い）かを聞く手続き。
     property  BackgroundGuard: TPMLJoystickBackgroundGuard read FGuard write FGuard;
+    // ゲームパッドの層（Context が差し込む）。
+    property  GamepadLayer: TPMLJoystickGamepadLayer read FLayer write FLayer;
+    // 機器を足している最中か（SDL_IsJoystickBeingAdded）。ゲームパッドの Added を二重に出さないために見る。
+    property  BeingAdded: Boolean read FBeingAdded;
+    property  Hints: TPMLHints read FHints;
+    property  Queue: TPMLEventQueue read FQueue;
+    // バックエンドが言う、自動のマッピング（SDL_PrivateJoystickGetAutoGamepadMapping）。無ければ False。
+    function  AutoGamepadMapping(AID: TPMLJoystickID; out AMapping: TPMLGamepadMapping): Boolean;
+    // GameCube のアダプタか（SDL_IsJoystickGameCube）。
+    function  IsGameCube(AVendor, AProduct: Word): Boolean;
+    { ゲームパッドの種類（SDL_GetGamepadTypeFromVIDPID / SDL_GetGamepadTypeFromGUID）。AForUI は
+      表示用の種類（GameCube などを見分ける）。HIDAPI は無いので、その GUID は Standard。 }
+    function  GamepadTypeFromVIDPID(AVendor, AProduct: Word; const AName: String; AForUI: Boolean): TPMLGamepadType;
+    function  GamepadTypeFromGUID(const AGUID: TPMLGUID; const AName: String): TPMLGamepadType;
+    // 開いている機器の数（ゲームパッドが閉じ終わったかの確認用）。
+    function  OpenCount: Integer;
     property  BackendCount: Integer read GetBackendCount;
     function  BackendName(AIndex: Integer): String;
 
@@ -174,7 +211,7 @@ var
 { ---- 作る・壊す ---- }
 
 constructor TPMLJoystickSystem.Create(AContextRef: TObject; AOwner: TPMLObject;
-  AQueue: TPMLEventQueue; AHints: TPMLHints);
+  AQueue: TPMLEventQueue; AHints: TPMLHints; AMakeLayer: TPMLJoystickGamepadLayerFactory);
 var
   Names: TStringArray;
   I: Integer;
@@ -190,6 +227,9 @@ begin
     FHints.AddCallback(PML_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, @AllowBackgroundChanged);
   Lock;
   try
+    // マッピングの DB は、バックエンドが機器を見つけるより前に要る
+    if Assigned(AMakeLayer) then
+      FLayer := AMakeLayer(Self);
     // 登録されたバックエンドを、並び順（優先度の大きい順）に全部始める。始められなければ使わない
     Names := PMLJoystickBackendNames;
     for I := 0 to High(Names) do
@@ -231,6 +271,8 @@ var
 begin
   if FQueue <> nil then
     FQueue.UnregisterPumpSource(Self as IPMLEventPumpSource);
+  if FLayer <> nil then
+    FLayer.Shutdown;
   Lock;
   try
     FQuitting := True;
@@ -251,6 +293,7 @@ begin
   finally
     Unlock;
   end;
+  FreeAndNil(FLayer);
   if FHints <> nil then
     FHints.RemoveCallback(PML_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, @AllowBackgroundChanged);
   FreeLists;
@@ -491,6 +534,8 @@ end;
 function TPMLJoystickSystem.TypeForID(AID: TPMLJoystickID): TPMLJoystickType;
 begin
   Result := JoystickTypeOf(GUIDForID(AID));
+  if (Result = TPMLJoystickType.Unknown) and IsGamepad(AID) then
+    Result := TPMLJoystickType.Gamepad;
 end;
 
 function TPMLJoystickSystem.PlayerIndexForID(AID: TPMLJoystickID): Integer;
@@ -690,7 +735,31 @@ end;
 
 function TPMLJoystickSystem.IsGamepad(AID: TPMLJoystickID): Boolean;
 begin
-  Result := False;      // PaPiMeLa.Gamepad が入るまで
+  Result := (FLayer <> nil) and FLayer.IsGamepad(AID);
+end;
+
+function TPMLJoystickSystem.AutoGamepadMapping(AID: TPMLJoystickID; out AMapping: TPMLGamepadMapping): Boolean;
+var
+  B: TPMLJoystickBackend;
+  N: Integer;
+begin
+  AMapping := PMLEmptyGamepadMapping;
+  Lock;
+  try
+    Result := FindBackendAndIndex(AID, B, N) and B.GamepadMapping(N, AMapping);
+  finally
+    Unlock;
+  end;
+end;
+
+function TPMLJoystickSystem.IsGameCube(AVendor, AProduct: Word): Boolean;
+begin
+  Result := FLists.GameCube.Contains(AVendor, AProduct);
+end;
+
+function TPMLJoystickSystem.OpenCount: Integer;
+begin
+  Result := Length(FOpen);
 end;
 
 procedure TPMLJoystickSystem.PushEvent(const AEvent: TPMLEvent);
@@ -704,7 +773,9 @@ var
   B: TPMLJoystickBackend;
   N, PlayerIndex: Integer;
   E: TPMLEvent;
+  IsGamepadNow: Boolean;
 begin
+  IsGamepadNow := False;
   if FQuitting then
     Exit;
   FBeingAdded := True;
@@ -724,9 +795,13 @@ begin
       E.JDevice.Which := AID;
       PushEvent(E);
     end;
+    // 自動のマッピングを作るかもしれないので、判定はイベントのあと（SDL と同じ）
+    IsGamepadNow := IsGamepad(AID);
   finally
     FBeingAdded := False;
   end;
+  if IsGamepadNow and (FLayer <> nil) then
+    FLayer.GamepadAdded(AID);
 end;
 
 procedure TPMLJoystickSystem.ForceRecentering(AJoystick: TPMLJoystick);
@@ -761,6 +836,8 @@ begin
     ForceRecentering(J);
     J.SetAttached(False);
   end;
+  if IsGamepad(AID) and (FLayer <> nil) then
+    FLayer.GamepadRemoved(AID);
   if (FQueue <> nil) and FQueue.Enabled[TPMLEventKind.JoystickRemoved] then
   begin
     E := Default(TPMLEvent);
@@ -966,6 +1043,8 @@ begin
       if not J.Connected then
         Continue;
       J.Backend.Update(J);
+      if J.DelayedGuideButton and (FLayer <> nil) then
+        FLayer.DelayedGuideButton(J);
       J.UpdateRumbleTimers;
     end;
     if (FQueue <> nil) and FQueue.Enabled[TPMLEventKind.JoystickUpdateComplete] then
@@ -1039,7 +1118,7 @@ begin
   if not PMLStringBoolean(Hint(PML_HINT_JOYSTICK_ROG_CHAKRAM), False) then
     if FLists.RogMice.Contains(AVendor, AProduct) then
       Exit(True);
-  Result := False;     // ゲームパッドの無視の表は PaPiMeLa.Gamepad が入るまで無い
+  Result := (FLayer <> nil) and FLayer.ShouldIgnore(AVendor, AProduct, AVersion, AName);
 end;
 
 function TPMLJoystickSystem.HandledByAnotherBackend(ABackend: TPMLJoystickBackend; AVendor, AProduct,
@@ -1113,6 +1192,74 @@ begin
   if PMLGuessControllerType(FHints, V, P) <> PML_CONTROLLER_TYPE_UNKNOWN_NON_STEAM then
     Exit(TPMLJoystickType.Gamepad);
   Result := TPMLJoystickType.Unknown;
+end;
+
+{ ---- ゲームパッドの種類 ---- }
+
+function TPMLJoystickSystem.GamepadTypeFromVIDPID(AVendor, AProduct: Word; const AName: String;
+  AForUI: Boolean): TPMLGamepadType;
+const
+  VendorNintendo = $057E;
+begin
+  Result := TPMLGamepadType.Standard;
+  if (AVendor = 0) and (AProduct = 0) then
+  begin
+    // 名前でしか分からない機器
+    if (AName = 'Lic Pro Controller') or (AName = 'Nintendo Wireless Gamepad') or (AName = 'Wireless Gamepad') then
+      Result := TPMLGamepadType.SwitchPro;
+  end
+  else if (AVendor = 1) and (AProduct = 1) then
+    Result := TPMLGamepadType.Standard
+  else if (AVendor = VendorNintendo) and ((AProduct = $2006) or (AProduct = $2067)) then
+    Result := TPMLGamepadType.JoyConLeft
+  else if (AVendor = VendorNintendo) and ((AProduct = $2007) or (AProduct = $2066)) then
+  begin
+    if Pos('NES Controller', AName) > 0 then
+      Result := TPMLGamepadType.Standard
+    else
+      Result := TPMLGamepadType.JoyConRight;
+  end
+  else if (AVendor = VendorNintendo) and (AProduct = $200E) then
+  begin
+    if Pos('(L)', AName) > 0 then
+      Result := TPMLGamepadType.JoyConLeft
+    else if Pos('L+R', AName) > 0 then
+      Result := TPMLGamepadType.JoyConPair
+    else
+      Result := TPMLGamepadType.JoyConRight;
+  end
+  else if (AVendor = VendorNintendo) and ((AProduct = $2008) or (AProduct = $2068)) then
+    Result := TPMLGamepadType.JoyConPair
+  else if AForUI and IsGameCube(AVendor, AProduct) then
+    Result := TPMLGamepadType.GameCube
+  else
+    case PMLGuessControllerType(FHints, AVendor, AProduct) of
+      PML_CONTROLLER_TYPE_XBOX360: Result := TPMLGamepadType.Xbox360;
+      PML_CONTROLLER_TYPE_XBOXONE, PML_CONTROLLER_TYPE_XBOX_ELITE: Result := TPMLGamepadType.XboxOne;
+      PML_CONTROLLER_TYPE_PS3: Result := TPMLGamepadType.PS3;
+      PML_CONTROLLER_TYPE_PS4: Result := TPMLGamepadType.PS4;
+      PML_CONTROLLER_TYPE_PS5, PML_CONTROLLER_TYPE_PS5_EDGE: Result := TPMLGamepadType.PS5;
+      PML_CONTROLLER_TYPE_XINPUT_PS4:
+        if AForUI then Result := TPMLGamepadType.PS4 else Result := TPMLGamepadType.Standard;
+      PML_CONTROLLER_TYPE_SWITCH_PRO, PML_CONTROLLER_TYPE_SWITCH2_PRO,
+      PML_CONTROLLER_TYPE_SWITCH_INPUT_ONLY, PML_CONTROLLER_TYPE_SWITCH2_INPUT_ONLY:
+        Result := TPMLGamepadType.SwitchPro;
+      PML_CONTROLLER_TYPE_XINPUT_SWITCH:
+        if AForUI then Result := TPMLGamepadType.SwitchPro else Result := TPMLGamepadType.Xbox360;
+      PML_CONTROLLER_TYPE_STEAM, PML_CONTROLLER_TYPE_STEAM_V2, PML_CONTROLLER_TYPE_STEAM_NEPTUNE,
+      PML_CONTROLLER_TYPE_STEAM_TRITON, PML_CONTROLLER_TYPE_HORI_STEAM, PML_CONTROLLER_TYPE_UNKNOWN_STEAM:
+        Result := TPMLGamepadType.Steam;
+    end;
+end;
+
+function TPMLJoystickSystem.GamepadTypeFromGUID(const AGUID: TPMLGUID; const AName: String): TPMLGamepadType;
+var
+  V, P, Ver, CRC: Word;
+begin
+  PMLGetJoystickGUIDInfo(AGUID, V, P, Ver, CRC);
+  Result := GamepadTypeFromVIDPID(V, P, AName, True);
+  if (Result = TPMLGamepadType.Standard) and PMLIsJoystickXInputGUID(AGUID) then
+    Result := TPMLGamepadType.XboxOne;
 end;
 
 { ---- 仮想ジョイスティック ---- }

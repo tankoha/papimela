@@ -206,6 +206,7 @@ type
     FHats            : array of Byte;
     FButtons         : array of Boolean;
     FSwapFaceButtons : Boolean;
+    FDelayedGuideButton: Boolean;
     FIsVirtual       : Boolean;
     FUpdateComplete  : UInt64;
     FLowFrequencyRumble, FHighFrequencyRumble: Word;
@@ -304,6 +305,8 @@ type
     // 最後に状態を送った時刻（ナノ秒。0 なら無い）。UpdateComplete のイベントに使う。
     property  UpdateComplete: UInt64 read FUpdateComplete write FUpdateComplete;
     property  SwapFaceButtons: Boolean read FSwapFaceButtons write FSwapFaceButtons;
+    // ガイドボタンが短く押されて離され、通知を遅らせている（SDL_Joystick.delayed_guide_button）。
+    property  DelayedGuideButton: Boolean read FDelayedGuideButton write FDelayedGuideButton;
     property  Backend: TPMLJoystickBackend read FBackend;
     property  HwData: TObject read FHwData write FHwData;
     property  Core: TPMLJoystickCore read FCore;
@@ -648,6 +651,8 @@ end;
 function TPMLJoystick.GetJoystickType: TPMLJoystickType;
 begin
   Result := FCore.JoystickTypeOf(FGUID);
+  if (Result = TPMLJoystickType.Unknown) and FCore.IsGamepad(FID) then
+    Result := TPMLJoystickType.Gamepad;
 end;
 
 function TPMLJoystick.GetVendorID: Word;

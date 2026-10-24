@@ -26,6 +26,8 @@
 //   PaPiMeLa.Joystick.GUID
 //   PaPiMeLa.Joystick.Backend
 //   PaPiMeLa.Joystick
+//   PaPiMeLa.Gamepad.Mapping
+//   PaPiMeLa.Gamepad
 //   PaPiMeLa.TextInput
 //   PaPiMeLa.Time
 //   PaPiMeLa.Atomic
@@ -115,6 +117,8 @@ type
   TPMLJoystickHatEventData = PaPiMeLa.Events.TPMLJoystickHatEventData;
   TPMLJoystickButtonEventData = PaPiMeLa.Events.TPMLJoystickButtonEventData;
   TPMLJoystickBatteryEventData = PaPiMeLa.Events.TPMLJoystickBatteryEventData;
+  TPMLGamepadAxisEventData = PaPiMeLa.Events.TPMLGamepadAxisEventData;
+  TPMLGamepadButtonEventData = PaPiMeLa.Events.TPMLGamepadButtonEventData;
   TPMLUserEventData = PaPiMeLa.Events.TPMLUserEventData;
   TPMLEvent = PaPiMeLa.Events.TPMLEvent;
   IPMLEventPumpSource = PaPiMeLa.Events.IPMLEventPumpSource;
@@ -953,8 +957,62 @@ function PMLEmptyGamepadMapping: TPMLGamepadMapping; inline;
 
 // ---- PaPiMeLa.Joystick
 type
+  TPMLJoystickGamepadLayer = PaPiMeLa.Joystick.TPMLJoystickGamepadLayer;
   TPMLJoystickBackgroundGuard = PaPiMeLa.Joystick.TPMLJoystickBackgroundGuard;
+  TPMLJoystickGamepadLayerFactory = PaPiMeLa.Joystick.TPMLJoystickGamepadLayerFactory;
   TPMLJoystickSystem = PaPiMeLa.Joystick.TPMLJoystickSystem;
+
+// ---- PaPiMeLa.Gamepad.Mapping
+type
+  TPMLGamepadType = PaPiMeLa.Gamepad.Mapping.TPMLGamepadType;
+  TPMLGamepadFaceStyle = PaPiMeLa.Gamepad.Mapping.TPMLGamepadFaceStyle;
+  TPMLGamepadButtonLabel = PaPiMeLa.Gamepad.Mapping.TPMLGamepadButtonLabel;
+  TPMLGamepadBindType = PaPiMeLa.Gamepad.Mapping.TPMLGamepadBindType;
+  TPMLGamepadBinding = PaPiMeLa.Gamepad.Mapping.TPMLGamepadBinding;
+  TPMLGamepadBindings = PaPiMeLa.Gamepad.Mapping.TPMLGamepadBindings;
+  TPMLGamepadMappingPriority = PaPiMeLa.Gamepad.Mapping.TPMLGamepadMappingPriority;
+  TPMLGamepadMappingEntry = PaPiMeLa.Gamepad.Mapping.TPMLGamepadMappingEntry;
+  TPMLGamepadMappingTracker = PaPiMeLa.Gamepad.Mapping.TPMLGamepadMappingTracker;
+  TPMLIsGameCubeFunc = PaPiMeLa.Gamepad.Mapping.TPMLIsGameCubeFunc;
+  TPMLGamepadMappingDB = PaPiMeLa.Gamepad.Mapping.TPMLGamepadMappingDB;
+const
+  PML_GAMEPAD_PLATFORM = PaPiMeLa.Gamepad.Mapping.PML_GAMEPAD_PLATFORM;
+  PML_MINIMUM_GUIDE_BUTTON_DELAY_MS = PaPiMeLa.Gamepad.Mapping.PML_MINIMUM_GUIDE_BUTTON_DELAY_MS;
+function PMLGamepadTypeFromString(const AText: String): TPMLGamepadType; inline;
+function PMLGamepadTypeToString(AType: TPMLGamepadType): String; inline;
+function PMLGamepadAxisFromString(const AText: String; out AAxis: TPMLGamepadAxis): Boolean; inline;
+function PMLGamepadAxisToString(AAxis: TPMLGamepadAxis): String; inline;
+function PMLGamepadButtonFromString(
+  const AText: String;
+  out AButton: TPMLGamepadButton): Boolean; inline;
+function PMLGamepadButtonToString(AButton: TPMLGamepadButton): String; inline;
+function PMLGamepadFaceStyleFromString(const AText: String): TPMLGamepadFaceStyle; inline;
+function PMLGamepadFaceStyleForType(AType: TPMLGamepadType): TPMLGamepadFaceStyle; inline;
+function PMLGamepadButtonLabelForFaceStyle(
+  AStyle: TPMLGamepadFaceStyle;
+  AButton: TPMLGamepadButton): TPMLGamepadButtonLabel; inline;
+function PMLGamepadButtonLabelForType(
+  AType: TPMLGamepadType;
+  AButton: TPMLGamepadButton): TPMLGamepadButtonLabel; inline;
+function PMLParseGamepadBindings(
+  const AMapping: String;
+  var ABindings: TPMLGamepadBindings): Boolean; inline;
+function PMLMappingTypeField(const AMapping: String; ANeedComma: Boolean): TPMLGamepadType; inline;
+function PMLMappingFaceStyle(
+  const AMapping: String;
+  AType: TPMLGamepadType): TPMLGamepadFaceStyle; inline;
+function PMLMappingStringGUID(const AText: String; out AGUID: String): Boolean; inline;
+function PMLMappingStringName(const AText: String; out AName: String): Boolean; inline;
+function PMLMappingStringBody(const AText: String; out ABody: String): Boolean; inline;
+function PMLAutomaticMappingString(
+  const AName: String;
+  const ARaw: TPMLGamepadMapping): String; inline;
+
+// ---- PaPiMeLa.Gamepad
+type
+  TPMLGamepad = PaPiMeLa.Gamepad.TPMLGamepad;
+  TPMLGamepadSystem = PaPiMeLa.Gamepad.TPMLGamepadSystem;
+function PMLCreateGamepadLayer(AJoy: TPMLJoystickSystem): TPMLJoystickGamepadLayer; inline;
 
 // ---- PaPiMeLa.TextInput
 type
@@ -1093,6 +1151,11 @@ const
   PML_HINT_JOYSTICK_OLD_XBOXONE_CONTROLLERS = PaPiMeLa.Properties.PML_HINT_JOYSTICK_OLD_XBOXONE_CONTROLLERS;
   PML_HINT_JOYSTICK_OLD_XBOXONE_CONTROLLERS_EXCLUDED = PaPiMeLa.Properties.PML_HINT_JOYSTICK_OLD_XBOXONE_CONTROLLERS_EXCLUDED;
   PML_HINT_GAMEPAD_TYPE = PaPiMeLa.Properties.PML_HINT_GAMEPAD_TYPE;
+  PML_HINT_GAMEPAD_CONFIG = PaPiMeLa.Properties.PML_HINT_GAMEPAD_CONFIG;
+  PML_HINT_GAMEPAD_CONFIG_FILE = PaPiMeLa.Properties.PML_HINT_GAMEPAD_CONFIG_FILE;
+  PML_HINT_GAMEPAD_IGNORE_DEVICES = PaPiMeLa.Properties.PML_HINT_GAMEPAD_IGNORE_DEVICES;
+  PML_HINT_GAMEPAD_IGNORE_DEVICES_EXCEPT = PaPiMeLa.Properties.PML_HINT_GAMEPAD_IGNORE_DEVICES_EXCEPT;
+  PML_HINT_GAMEPAD_ALLOW_STEAM_VIRTUAL = PaPiMeLa.Properties.PML_HINT_GAMEPAD_ALLOW_STEAM_VIRTUAL;
 function PMLGetEnvironment(const AName: String; out AValue: String): Boolean; inline;
 function PMLStringBoolean(const AValue: String; ADefault: Boolean): Boolean; inline;
 function PMLStringInteger(const AValue: String; ADefault: Integer): Integer; inline;
