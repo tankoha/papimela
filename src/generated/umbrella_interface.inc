@@ -12,6 +12,7 @@
 //   PaPiMeLa.Surface
 //   PaPiMeLa.Surface.Blit
 //   PaPiMeLa.Surface.BMP
+//   PaPiMeLa.Surface.Colorspace
 //   PaPiMeLa.Surface.YUV
 //   PaPiMeLa.IO
 //   PaPiMeLa.Video
@@ -588,6 +589,41 @@ function PMLLoadBMPFile(const APath: String): TPMLSurface; inline;
 procedure PMLSaveBMP(AStream: TStream; ASurface: TPMLSurface); inline;
 procedure PMLSaveBMPFile(const APath: String; ASurface: TPMLSurface); inline;
 
+// ---- PaPiMeLa.Surface.Colorspace
+type
+  TPMLColorspaceOptions = PaPiMeLa.Surface.Colorspace.TPMLColorspaceOptions;
+function PMLColorspaceDefaults: TPMLColorspaceOptions; inline;
+function PMLColorspacePrimaries(AColorspace: TPMLColorspace): Integer; inline;
+function PMLColorspaceTransfer(AColorspace: TPMLColorspace): Integer; inline;
+function PMLSRGBToLinear(AValue: Single): Single; inline;
+function PMLSRGBFromLinear(AValue: Single): Single; inline;
+function PMLPQToNits(AValue: Single): Single; inline;
+function PMLPQFromNits(AValue: Single): Single; inline;
+function PMLColorPrimariesMatrix(ASrc, ADst: Integer): PSingle; inline;
+function PMLDefaultSDRWhitePoint(AColorspace: TPMLColorspace): Single; inline;
+function PMLDefaultHDRHeadroom(AColorspace: TPMLColorspace): Single; inline;
+procedure PMLConvertPixelsAndColorspace(
+  AWidth, AHeight: Integer;
+  ASrcFormat: TPMLPixelFormat;
+  ASrcColorspace: TPMLColorspace;
+  ASrc: Pointer;
+  ASrcPitch: Integer;
+  ADstFormat: TPMLPixelFormat;
+  ADstColorspace: TPMLColorspace;
+  ADst: Pointer;
+  ADstPitch: Integer); inline; overload;
+procedure PMLConvertPixelsAndColorspace(
+  AWidth, AHeight: Integer;
+  ASrcFormat: TPMLPixelFormat;
+  ASrcColorspace: TPMLColorspace;
+  ASrc: Pointer;
+  ASrcPitch: Integer;
+  ADstFormat: TPMLPixelFormat;
+  ADstColorspace: TPMLColorspace;
+  ADst: Pointer;
+  ADstPitch: Integer;
+  const AOptions: TPMLColorspaceOptions); inline; overload;
+
 // ---- PaPiMeLa.Surface.YUV
 type
   TPMLYCbCrType = PaPiMeLa.Surface.YUV.TPMLYCbCrType;
@@ -620,6 +656,16 @@ procedure PMLConvertYUV16ToRGB48(
   AColorspace: TPMLColorspace;
   ASrc: Pointer;
   ASrcPitch: Integer;
+  ADst: Pointer;
+  ADstPitch: Integer); inline;
+procedure PMLConvertYUVPixels(
+  AWidth, AHeight: Integer;
+  ASrcFormat: TPMLPixelFormat;
+  ASrcColorspace: TPMLColorspace;
+  ASrc: Pointer;
+  ASrcPitch: Integer;
+  ADstFormat: TPMLPixelFormat;
+  ADstColorspace: TPMLColorspace;
   ADst: Pointer;
   ADstPitch: Integer); inline;
 

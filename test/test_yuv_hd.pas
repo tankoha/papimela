@@ -12,8 +12,11 @@
        矩形つきの更新。描いた絵のハッシュ
     4. 断るもの: P010 のテクスチャ（SDL のソフトウェアのレンダラも作れない）、I444 に UpdateNV、
        I444 の部分の Lock、NV12 に UpdateYUV
-    5. papimela の足した検査: 形式の判定（PMLIsYUVFormat は I444 を含み P010 を含まない）、P010 から
-       ほかの形式への変換は無い（EPMLArgument）、色空間を選べないものは断る
+    4b. I0FL / I4FL のテクスチャ（肩代わり）: 詰めた画素・平面ごと・Lock・矩形つきの更新。色空間は PQ でない 4 つ
+    4c. YUV から任意の形式への変換（色空間の変換を挟む。PMLConvertYUVPixels）。7 つの YUV の形式 x 出力の形式
+    4d. 詰めた画素の部分の更新が平面ごとと同じ絵（D-78。SDL の参照版は 3 つ目の平面を誤った位置に書く）
+    5. papimela の足した検査: 形式の判定（PMLIsYUVFormat は I444 / I0FL / I4FL を含み P010 を含まない）、
+       P010 を ARGB8888 に直す道（PMLConvertYUVToARGB8888）は無い、色空間を選べないものは断る
 
   WHY:
     §3 の 2「残してあるテクスチャのもの」の I444 / P010 の受け入れ検査。表示サーバは要らない。
@@ -268,6 +271,58 @@ begin
     end;
 end;
 
+{ YUV から任意の形式・色空間へ（SDL_ConvertPixels_YUV_to_RGB の後半。色空間の変換を挟む）。
+  SDL の側 (yuv_cases.c) と同じ順で入力を作る。ハッシュは出力の全バイトで、完全に一致する。 }
+procedure TestAnyDestination;
+const
+  YF: array[0..6] of TPMLPixelFormat = (PML_PIXELFORMAT_I444, PML_PIXELFORMAT_IYUV, PML_PIXELFORMAT_NV12,
+    PML_PIXELFORMAT_YUY2, PML_PIXELFORMAT_P010, PML_PIXELFORMAT_I0FL, PML_PIXELFORMAT_I4FL);
+  DF: array[0..9] of TPMLPixelFormat = (PML_PIXELFORMAT_ARGB8888, PML_PIXELFORMAT_ABGR8888,
+    PML_PIXELFORMAT_XRGB8888, PML_PIXELFORMAT_RGB24, PML_PIXELFORMAT_RGB565, PML_PIXELFORMAT_XBGR2101010,
+    PML_PIXELFORMAT_RGB48, PML_PIXELFORMAT_RGBA128_FLOAT, PML_PIXELFORMAT_ARGB2101010,
+    PML_PIXELFORMAT_RGB48_FLOAT);
+var
+  DC: array[0..9] of TPMLColorspace;
+  Y, D, K, SIdx, W, H, Pitch, Bpp, I: Integer;
+  Size: PtrUInt;
+  Src, Dst: TBytes;
+  Sp: TSpace;
+begin
+  WriteLn('3c YUV から任意の形式へ（色空間の変換つき）');
+  DC[0] := PML_COLORSPACE_SRGB; DC[1] := PML_COLORSPACE_SRGB; DC[2] := PML_COLORSPACE_SRGB;
+  DC[3] := PML_COLORSPACE_SRGB; DC[4] := PML_COLORSPACE_SRGB; DC[5] := PML_COLORSPACE_HDR10;
+  DC[6] := PML_COLORSPACE_SRGB_LINEAR; DC[7] := PML_COLORSPACE_SRGB_LINEAR; DC[8] := PML_COLORSPACE_SRGB;
+  DC[9] := PML_COLORSPACE_HDR10;
+  K := 0;
+  W := 7;
+  H := 5;
+  for Y := 0 to 6 do
+    for D := 0 to 9 do
+    begin
+      if ((Y + D) mod 2 <> 0) and (D <> 0) and (D <> 5) and (D <> 6) then
+        Continue;
+      Inc(K);
+      SIdx := (K - 1) mod 5;
+      Sp := Spaces(SIdx);
+      PMLCalculateYUVSize(YF[Y], W, H, Size, Pitch);
+      SetLength(Src, Size);
+      FillChar(Src[0], Size, 0);
+      Bpp := PMLBytesPerPixel(DF[D]);
+      SetLength(Dst, W * H * Bpp);
+      FillChar(Dst[0], Length(Dst), 0);
+      Lcg := 300 + K;
+      if (YF[Y] = PML_PIXELFORMAT_P010) or (YF[Y] = PML_PIXELFORMAT_I0FL) or (YF[Y] = PML_PIXELFORMAT_I4FL) then
+        for I := 0 to Size div 2 - 1 do
+          PWord(@Src[0])[I] := Word(Nx and $FFFF)
+      else
+        for I := 0 to Size - 1 do
+          Src[I] := Byte(96 + (Nx and 63));
+      PMLConvertYUVPixels(W, H, YF[Y], Sp.Space, @Src[0], Pitch, DF[D], DC[D], @Dst[0], W * Bpp);
+      Same(Format('Y y%.2d %s %s %s %s %d %d %s', [K, Hex(YF[Y]), Hex(Sp.Space), Hex(DF[D]), Hex(DC[D]), W, H,
+        Hex(Fnv(@Dst[0], Length(Dst), 2166136261))]));
+    end;
+end;
+
 { 限定範囲の黒（16 ビットで 16 << 8）。SDL の輝度のオフセットの扱い（D-77）まで同じ値になる。 }
 procedure TestBlack;
 var
@@ -371,6 +426,211 @@ begin
     Same(Format('T packed_rect bt709l %d %d %s', [W, H, Hex(RenderHash(T, W, H))]));
   finally
     T.Free;
+  end;
+end;
+
+{ I0FL / I4FL のテクスチャ（16 ビット。色空間は PQ でない 4 つ）。SDL の側と同じ順で入力を作る。 }
+procedure TestTexture16;
+const
+  HF: array[0..1] of TPMLPixelFormat = (PML_PIXELFORMAT_I0FL, PML_PIXELFORMAT_I4FL);
+  HN: array[0..1] of String = ('I0FL', 'I4FL');
+var
+  F, S, Z, W, H, Pitch, LockPitch, CW, CH, I: Integer;
+  Size: PtrUInt;
+  Src, A, B: TBytes;
+  T: TPMLTexture;
+  P: PByte;
+  Sp: TSpace;
+  HS: array[0..3] of TSpace;
+  Rc: TPMLRect;
+begin
+  WriteLn('3d I0FL / I4FL のテクスチャ');
+  HS[0] := Spaces(0);   // bt601l
+  HS[1] := Spaces(1);   // jpeg
+  HS[2] := Spaces(2);   // bt709l
+  HS[3] := Spaces(3);   // bt709f
+  for F := 0 to 1 do
+    for S := 0 to 3 do
+      for Z := 0 to 2 do
+      begin
+        Sp := HS[S];
+        W := SizeW[Z];
+        H := SizeH[Z];
+        PMLCalculateYUVSize(HF[F], W, H, Size, Pitch);
+        SetLength(Src, Size);
+        FillChar(Src[0], Size, 0);
+        Lcg := 500 + F * 100 + S * 10 + Z;
+        for I := 0 to Size div 2 - 1 do
+          PWord(@Src[0])[I] := Word(Nx and $FFFF);
+        T := NewTexture(HF[F], Sp.Space, W, H);
+        try
+          T.Update(TPMLRect.Make(0, 0, 0, 0), @Src[0], Pitch);
+          Same(Format('T %s_packed %s %d %d %s', [HN[F], Sp.Name, W, H, Hex(RenderHash(T, W, H))]));
+        finally
+          T.Free;
+        end;
+        if F = 1 then
+        begin
+          CW := W;
+          CH := H;
+        end
+        else
+        begin
+          CW := (W + 1) div 2;
+          CH := (H + 1) div 2;
+        end;
+        T := NewTexture(HF[F], Sp.Space, W, H);
+        try
+          T.UpdateYUV(TPMLRect.Make(0, 0, 0, 0), @Src[0], Pitch, @Src[Pitch * H], CW * 2,
+            @Src[Pitch * H + CW * 2 * CH], CW * 2);
+          Same(Format('T %s_planar %s %d %d %s', [HN[F], Sp.Name, W, H, Hex(RenderHash(T, W, H))]));
+        finally
+          T.Free;
+        end;
+        T := NewTexture(HF[F], Sp.Space, W, H);
+        try
+          P := T.Lock(TPMLRect.Make(0, 0, 0, 0), LockPitch);
+          Move(Src[0], P^, Size);
+          T.Unlock;
+          Same(Format('T %s_lock %s %d %d %d %s', [HN[F], Sp.Name, W, H, LockPitch, Hex(RenderHash(T, W, H))]));
+        finally
+          T.Free;
+        end;
+      end;
+  // 矩形つきの更新
+  for F := 0 to 1 do
+  begin
+    W := 16;
+    H := 6;
+    PMLCalculateYUVSize(HF[F], W, H, Size, Pitch);
+    SetLength(A, Size);
+    SetLength(B, Size);
+    Lcg := 900 + F;
+    for I := 0 to Size div 2 - 1 do
+      PWord(@A[0])[I] := Word(Nx and $FFFF);
+    Lcg := 910 + F;
+    for I := 0 to Size div 2 - 1 do
+      PWord(@B[0])[I] := Word(Nx and $FFFF);
+    Rc := TPMLRect.Make(3, 0, 9, 6);   // 高さは全体（D-78。SDL の参照版は部分の高さで 3 つ目の平面を測る）
+    T := NewTexture(HF[F], PML_COLORSPACE_BT709_LIMITED, W, H);
+    try
+      T.Update(TPMLRect.Make(0, 0, 0, 0), @A[0], Pitch);
+      T.Update(Rc, @B[0], Pitch);
+      Same(Format('T %s_packed_rect bt709l %d %d %s', [HN[F], W, H, Hex(RenderHash(T, W, H))]));
+    finally
+      T.Free;
+    end;
+    if F = 1 then
+    begin
+      CW := W;
+      CH := H;
+    end
+    else
+    begin
+      CW := (W + 1) div 2;
+      CH := (H + 1) div 2;
+    end;
+    T := NewTexture(HF[F], PML_COLORSPACE_BT709_LIMITED, W, H);
+    try
+      T.Update(TPMLRect.Make(0, 0, 0, 0), @A[0], Pitch);
+      T.UpdateYUV(Rc, @B[0], Pitch, @B[Pitch * H], CW * 2, @B[Pitch * H + CW * 2 * CH], CW * 2);
+      Same(Format('T %s_planar_rect bt709l %d %d %s', [HN[F], W, H, Hex(RenderHash(T, W, H))]));
+    finally
+      T.Free;
+    end;
+  end;
+end;
+
+{ 詰めた画素での部分の更新と、平面ごとの部分の更新が、同じ絵になる（YV12 / IYUV / I0FL）。
+  SDL の参照版は、詰めた画素の部分の更新で 3 つ目の平面を「矩形の高さ」で測った位置に書く
+  （D-78。3.4.2 は正しい）。papimela は 3.4.2 と同じ（正しい位置）で、平面ごとの更新（SDL も正しい）と比べる。 }
+procedure TestPartialPacked;
+const
+  Fmts: array[0..2] of TPMLPixelFormat = (PML_PIXELFORMAT_IYUV, PML_PIXELFORMAT_YV12, PML_PIXELFORMAT_I0FL);
+var
+  F, I, W, H, RW, RH, CW, CH, Bpp, FullPitch, PktPitch, Cfg: Integer;
+  Size: PtrUInt;
+  A, Pkt, YPl, UPl, VPl: TBytes;
+  T1, T2: TPMLTexture;
+  Rc: TPMLRect;
+  H1, H2: LongWord;
+  Sp: TPMLColorspace;
+begin
+  WriteLn('3e 部分の更新（詰めた画素と平面ごとが同じ絵。D-78）');
+  W := 8;
+  H := 6;
+  for Cfg := 0 to 1 do
+  for F := 0 to 2 do
+  begin
+    // 矩形は (2, 2, 4, 2) と、幅が奇数の (2, 2, 3, 3)
+    if Cfg = 0 then
+    begin
+      RW := 4;
+      RH := 2;
+    end
+    else
+    begin
+      RW := 3;
+      RH := 3;
+    end;
+    CW := (RW + 1) div 2;
+    CH := (RH + 1) div 2;
+    Rc := TPMLRect.Make(2, 2, RW, RH);
+    if Fmts[F] = PML_PIXELFORMAT_I0FL then
+    begin
+      Bpp := 2;
+      Sp := PML_COLORSPACE_BT709_LIMITED;
+    end
+    else
+    begin
+      Bpp := 1;
+      Sp := PML_COLORSPACE_BT709_LIMITED;
+    end;
+    PMLCalculateYUVSize(Fmts[F], W, H, Size, FullPitch);
+    SetLength(A, Size);
+    Lcg := 1234 + F;
+    for I := 0 to High(A) do
+      A[I] := Byte(96 + (Nx and 63));
+    // 矩形の分の Y・U・V（値は 96..159 の 1 バイト。I0FL は 1 標本 2 バイトにして同じ値を 2 つ並べる）
+    SetLength(YPl, RW * RH * Bpp);
+    SetLength(UPl, CW * CH * Bpp);
+    SetLength(VPl, CW * CH * Bpp);
+    Lcg := 4321 + F;
+    for I := 0 to High(YPl) do
+      YPl[I] := Byte(96 + (Nx and 63));
+    for I := 0 to High(UPl) do
+      UPl[I] := Byte(96 + (Nx and 63));
+    for I := 0 to High(VPl) do
+      VPl[I] := Byte(96 + (Nx and 63));
+    // 詰めた画素: Y、次の平面、その次の平面（YV12 は V・U の順）
+    PktPitch := RW * Bpp;
+    SetLength(Pkt, Length(YPl) + Length(UPl) + Length(VPl));
+    Move(YPl[0], Pkt[0], Length(YPl));
+    if Fmts[F] = PML_PIXELFORMAT_YV12 then
+    begin
+      Move(VPl[0], Pkt[Length(YPl)], Length(VPl));
+      Move(UPl[0], Pkt[Length(YPl) + Length(VPl)], Length(UPl));
+    end
+    else
+    begin
+      Move(UPl[0], Pkt[Length(YPl)], Length(UPl));
+      Move(VPl[0], Pkt[Length(YPl) + Length(UPl)], Length(VPl));
+    end;
+    T1 := NewTexture(Fmts[F], Sp, W, H);
+    T2 := NewTexture(Fmts[F], Sp, W, H);
+    try
+      T1.Update(TPMLRect.Make(0, 0, 0, 0), @A[0], FullPitch);
+      T1.Update(Rc, @Pkt[0], PktPitch);
+      T2.Update(TPMLRect.Make(0, 0, 0, 0), @A[0], FullPitch);
+      T2.UpdateYUV(Rc, @YPl[0], PktPitch, @UPl[0], CW * Bpp, @VPl[0], CW * Bpp);
+      H1 := RenderHash(T1, W, H);
+      H2 := RenderHash(T2, W, H);
+      Check(H1 = H2, PMLPixelFormatName(Fmts[F]) + ': 詰めた画素の部分の更新（' + IntToStr(RW) + 'x' + IntToStr(RH) + '）が平面ごとと同じ絵（'
+        + Hex(H1) + ' / ' + Hex(H2) + '）');
+    finally
+      T1.Free;
+      T2.Free;
+    end;
   end;
 end;
 
@@ -503,16 +763,24 @@ begin
   Check(PMLIsYUVFormat(PML_PIXELFORMAT_IYUV) and PMLIsYUVFormat(PML_PIXELFORMAT_YUY2) and PMLIsYUVFormat(PML_PIXELFORMAT_NV21),
     '既存の 7 形式は変わらない');
   Check(not PMLIsYUVFormat(PML_PIXELFORMAT_ARGB8888), 'ARGB8888 は YUV でない');
-  Check(not PMLIsYUVFormat(PML_PIXELFORMAT_I0FL) and not PMLIsYUVFormat(PML_PIXELFORMAT_I4FL),
-    'PMLIsYUVFormat は I0FL / I4FL を含まない（テクスチャは持たない）');
+  Check(PMLIsYUVFormat(PML_PIXELFORMAT_I0FL) and PMLIsYUVFormat(PML_PIXELFORMAT_I4FL),
+    'PMLIsYUVFormat は I0FL / I4FL を含む（16 ビットのテクスチャを肩代わりで持つ）');
   Raised := False;
   try
-    R.CreateTexture(PML_PIXELFORMAT_I0FL, TPMLTextureAccess.Streaming, 4, 4, PML_COLORSPACE_BT709_FULL).Free;
+    R.CreateTexture(PML_PIXELFORMAT_I0FL, TPMLTextureAccess.Streaming, 4, 4).Free;
   except
     on E: EPMLArgument do
       Raised := True;
   end;
-  Check(Raised, 'I0FL のテクスチャは作れない（色空間の変換が要る。EPMLArgument）');
+  ExpectRaise('i0fl_default_cs', Raised);
+  Raised := False;
+  try
+    R.CreateTexture(PML_PIXELFORMAT_I4FL, TPMLTextureAccess.Target, 4, 4, PML_COLORSPACE_BT709_FULL).Free;
+  except
+    on E: EPMLArgument do
+      Raised := True;
+  end;
+  Check(Raised, 'I4FL は描画先にできない');
 
   FillChar(Buf, SizeOf(Buf), 0);
   FillChar(Dst, SizeOf(Dst), 0);
@@ -582,7 +850,10 @@ begin
     TestSizes;
     TestConvert;
     TestBlack;
+    TestAnyDestination;
     TestTexture;
+    TestTexture16;
+    TestPartialPacked;
     TestPitch;
     TestRefusals;
     TestExtras;

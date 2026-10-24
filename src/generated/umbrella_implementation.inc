@@ -12,6 +12,7 @@
 //   PaPiMeLa.Surface
 //   PaPiMeLa.Surface.Blit
 //   PaPiMeLa.Surface.BMP
+//   PaPiMeLa.Surface.Colorspace
 //   PaPiMeLa.Surface.YUV
 //   PaPiMeLa.IO
 //   PaPiMeLa.Video
@@ -296,6 +297,86 @@ begin
   PaPiMeLa.Surface.BMP.PMLSaveBMPFile(APath, ASurface);
 end;
 
+// ---- PaPiMeLa.Surface.Colorspace
+function PMLColorspaceDefaults: TPMLColorspaceOptions;
+begin
+  Result := PaPiMeLa.Surface.Colorspace.PMLColorspaceDefaults;
+end;
+
+function PMLColorspacePrimaries(AColorspace: TPMLColorspace): Integer;
+begin
+  Result := PaPiMeLa.Surface.Colorspace.PMLColorspacePrimaries(AColorspace);
+end;
+
+function PMLColorspaceTransfer(AColorspace: TPMLColorspace): Integer;
+begin
+  Result := PaPiMeLa.Surface.Colorspace.PMLColorspaceTransfer(AColorspace);
+end;
+
+function PMLSRGBToLinear(AValue: Single): Single;
+begin
+  Result := PaPiMeLa.Surface.Colorspace.PMLSRGBToLinear(AValue);
+end;
+
+function PMLSRGBFromLinear(AValue: Single): Single;
+begin
+  Result := PaPiMeLa.Surface.Colorspace.PMLSRGBFromLinear(AValue);
+end;
+
+function PMLPQToNits(AValue: Single): Single;
+begin
+  Result := PaPiMeLa.Surface.Colorspace.PMLPQToNits(AValue);
+end;
+
+function PMLPQFromNits(AValue: Single): Single;
+begin
+  Result := PaPiMeLa.Surface.Colorspace.PMLPQFromNits(AValue);
+end;
+
+function PMLColorPrimariesMatrix(ASrc, ADst: Integer): PSingle;
+begin
+  Result := PaPiMeLa.Surface.Colorspace.PMLColorPrimariesMatrix(ASrc, ADst);
+end;
+
+function PMLDefaultSDRWhitePoint(AColorspace: TPMLColorspace): Single;
+begin
+  Result := PaPiMeLa.Surface.Colorspace.PMLDefaultSDRWhitePoint(AColorspace);
+end;
+
+function PMLDefaultHDRHeadroom(AColorspace: TPMLColorspace): Single;
+begin
+  Result := PaPiMeLa.Surface.Colorspace.PMLDefaultHDRHeadroom(AColorspace);
+end;
+
+procedure PMLConvertPixelsAndColorspace(
+  AWidth, AHeight: Integer;
+  ASrcFormat: TPMLPixelFormat;
+  ASrcColorspace: TPMLColorspace;
+  ASrc: Pointer;
+  ASrcPitch: Integer;
+  ADstFormat: TPMLPixelFormat;
+  ADstColorspace: TPMLColorspace;
+  ADst: Pointer;
+  ADstPitch: Integer);
+begin
+  PaPiMeLa.Surface.Colorspace.PMLConvertPixelsAndColorspace(AWidth, AHeight, ASrcFormat, ASrcColorspace, ASrc, ASrcPitch, ADstFormat, ADstColorspace, ADst, ADstPitch);
+end;
+
+procedure PMLConvertPixelsAndColorspace(
+  AWidth, AHeight: Integer;
+  ASrcFormat: TPMLPixelFormat;
+  ASrcColorspace: TPMLColorspace;
+  ASrc: Pointer;
+  ASrcPitch: Integer;
+  ADstFormat: TPMLPixelFormat;
+  ADstColorspace: TPMLColorspace;
+  ADst: Pointer;
+  ADstPitch: Integer;
+  const AOptions: TPMLColorspaceOptions);
+begin
+  PaPiMeLa.Surface.Colorspace.PMLConvertPixelsAndColorspace(AWidth, AHeight, ASrcFormat, ASrcColorspace, ASrc, ASrcPitch, ADstFormat, ADstColorspace, ADst, ADstPitch, AOptions);
+end;
+
 // ---- PaPiMeLa.Surface.YUV
 function PMLIsYUVFormat(AFormat: TPMLPixelFormat): Boolean;
 begin
@@ -349,6 +430,20 @@ procedure PMLConvertYUV16ToRGB48(
   ADstPitch: Integer);
 begin
   PaPiMeLa.Surface.YUV.PMLConvertYUV16ToRGB48(AWidth, AHeight, AFormat, AColorspace, ASrc, ASrcPitch, ADst, ADstPitch);
+end;
+
+procedure PMLConvertYUVPixels(
+  AWidth, AHeight: Integer;
+  ASrcFormat: TPMLPixelFormat;
+  ASrcColorspace: TPMLColorspace;
+  ASrc: Pointer;
+  ASrcPitch: Integer;
+  ADstFormat: TPMLPixelFormat;
+  ADstColorspace: TPMLColorspace;
+  ADst: Pointer;
+  ADstPitch: Integer);
+begin
+  PaPiMeLa.Surface.YUV.PMLConvertYUVPixels(AWidth, AHeight, ASrcFormat, ASrcColorspace, ASrc, ASrcPitch, ADstFormat, ADstColorspace, ADst, ADstPitch);
 end;
 
 // ---- PaPiMeLa.IO

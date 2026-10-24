@@ -4,6 +4,7 @@
      Z <形式> <w> <h> <大きさ> <ピッチ>                     SDL_CalculateYUVSize
      C <形式> <色空間> <w> <h> <ハッシュ>                    SDL_ConvertPixelsAndColorspace（YUV から ARGB8888 / XBGR2101010）
      T <場面> <色空間> <w> <h> <ハッシュ>                    ソフトウェアのレンダラに描かせた絵（I444 のテクスチャ）
+     Y <場面> <src 形式> <src 色空間> <dst 形式> <dst 色空間> <w> <h> <ハッシュ>   YUV から任意の形式への変換（色空間の変換つき）
      E <場面> <文面>                                         エラー
    8 ビットの値は範囲の内側に収める（範囲の外は SDL のスカラー版が回り込み、papimela は飽和させる。D-62）。
    P010 の出力は SDL の clamp10 が飽和させるので、値は全域から取る。 */
@@ -197,6 +198,77 @@ int main(void)
     free(a);
   }
 
+  /* I0FL / I4FL のテクスチャ（ソフトウェアのレンダラ）。16 ビットの全域の値。色空間は PQ でない 4 つ */
+  {
+    static const struct { const char *n; SDL_Colorspace c; } hs[] = {
+      { "bt601l", SDL_COLORSPACE_BT601_LIMITED }, { "jpeg", SDL_COLORSPACE_JPEG },
+      { "bt709l", SDL_COLORSPACE_BT709_LIMITED }, { "bt709f", SDL_COLORSPACE_BT709_FULL } };
+    static const SDL_PixelFormat hf[2] = { SDL_PIXELFORMAT_I0FL, SDL_PIXELFORMAT_I4FL };
+    static const char *hn[2] = { "I0FL", "I4FL" };
+    for (int f = 0; f < 2; f++) for (int s = 0; s < 4; s++) for (int z = 0; z < 3; z++) {
+      int w = sizes[z][0], h = sizes[z][1];
+      size_t sz, pi;
+      SDL_CalculateYUVSize(hf[f], w, h, &sz, &pi);
+      unsigned char *src = calloc(1, sz);
+      lcg = 500 + f * 100 + s * 10 + z;
+      for (size_t i = 0; i < sz / 2; i++) ((unsigned short *)src)[i] = (unsigned short)(nx() & 0xFFFF);
+      SDL_Texture *t = make_tex(hf[f], hs[s].c, w, h);
+      if (!t) { printf("E create_%s %s\n", hn[f], SDL_GetError()); free(src); continue; }
+      if (SDL_UpdateTexture(t, NULL, src, (int)pi)) printf("T %s_packed %s %d %d %08X\n", hn[f], hs[s].n, w, h, render_hash(t, w, h));
+      else printf("T %s_packed %s %d %d err %s\n", hn[f], hs[s].n, w, h, SDL_GetError());
+      SDL_DestroyTexture(t);
+      t = make_tex(hf[f], hs[s].c, w, h);
+      int cw = (hf[f] == SDL_PIXELFORMAT_I4FL) ? w : (w + 1) / 2, ch = (hf[f] == SDL_PIXELFORMAT_I4FL) ? h : (h + 1) / 2;
+      const unsigned char *pu = src + pi * h, *pv = pu + (size_t)cw * 2 * ch;
+      if (SDL_UpdateYUVTexture(t, NULL, src, (int)pi, pu, cw * 2, pv, cw * 2))
+        printf("T %s_planar %s %d %d %08X\n", hn[f], hs[s].n, w, h, render_hash(t, w, h));
+      else printf("T %s_planar %s %d %d err %s\n", hn[f], hs[s].n, w, h, SDL_GetError());
+      SDL_DestroyTexture(t);
+      t = make_tex(hf[f], hs[s].c, w, h);
+      void *px; int pitch;
+      if (SDL_LockTexture(t, NULL, &px, &pitch)) {
+        memcpy(px, src, sz); SDL_UnlockTexture(t);
+        printf("T %s_lock %s %d %d %d %08X\n", hn[f], hs[s].n, w, h, pitch, render_hash(t, w, h));
+      } else printf("T %s_lock %s %d %d err %s\n", hn[f], hs[s].n, w, h, SDL_GetError());
+      SDL_DestroyTexture(t);
+      free(src);
+    }
+    /* 矩形つきの更新（詰めた画素と平面ごと。偶数・奇数の位置） */
+    for (int f = 0; f < 2; f++) {
+      int w = 16, h = 6; size_t sz, pi;
+      SDL_CalculateYUVSize(hf[f], w, h, &sz, &pi);
+      unsigned char *a = calloc(1, sz), *b = calloc(1, sz);
+      lcg = 900 + f; for (size_t i = 0; i < sz / 2; i++) ((unsigned short *)a)[i] = (unsigned short)(nx() & 0xFFFF);
+      lcg = 910 + f; for (size_t i = 0; i < sz / 2; i++) ((unsigned short *)b)[i] = (unsigned short)(nx() & 0xFFFF);
+      /* 高さは全体: 参照版は部分の更新で 3 つ目の平面を rect->h で測った位置に書く（D-78。3.4.2 は正しい）。
+         高さが全体なら位置が合う */
+      SDL_Rect r = { 3, 0, 9, 6 };
+      SDL_Texture *t = make_tex(hf[f], SDL_COLORSPACE_BT709_LIMITED, w, h);
+      SDL_UpdateTexture(t, NULL, a, (int)pi);
+      if (SDL_UpdateTexture(t, &r, b, (int)pi)) printf("T %s_packed_rect bt709l %d %d %08X\n", hn[f], w, h, render_hash(t, w, h));
+      else printf("T %s_packed_rect bt709l %d %d err %s\n", hn[f], w, h, SDL_GetError());
+      SDL_DestroyTexture(t);
+      t = make_tex(hf[f], SDL_COLORSPACE_BT709_LIMITED, w, h);
+      SDL_UpdateTexture(t, NULL, a, (int)pi);
+      int cw = (hf[f] == SDL_PIXELFORMAT_I4FL) ? w : (w + 1) / 2, ch = (hf[f] == SDL_PIXELFORMAT_I4FL) ? h : (h + 1) / 2;
+      const unsigned char *pu = b + pi * h, *pv = pu + (size_t)cw * 2 * ch;
+      if (SDL_UpdateYUVTexture(t, &r, b, (int)pi, pu, cw * 2, pv, cw * 2)) printf("T %s_planar_rect bt709l %d %d %08X\n", hn[f], w, h, render_hash(t, w, h));
+      else printf("T %s_planar_rect bt709l %d %d err %s\n", hn[f], w, h, SDL_GetError());
+      SDL_DestroyTexture(t);
+      free(a); free(b);
+    }
+    /* 既定の色空間（HDR10）では更新が断られる */
+    { SDL_PropertiesID p = SDL_CreateProperties();
+      SDL_SetNumberProperty(p, SDL_PROP_TEXTURE_CREATE_FORMAT_NUMBER, SDL_PIXELFORMAT_I0FL);
+      SDL_SetNumberProperty(p, SDL_PROP_TEXTURE_CREATE_ACCESS_NUMBER, SDL_TEXTUREACCESS_STREAMING);
+      SDL_SetNumberProperty(p, SDL_PROP_TEXTURE_CREATE_WIDTH_NUMBER, 4);
+      SDL_SetNumberProperty(p, SDL_PROP_TEXTURE_CREATE_HEIGHT_NUMBER, 4);
+      SDL_Texture *t = SDL_CreateTextureWithProperties(rr, p); SDL_DestroyProperties(p);
+      unsigned short buf[64] = { 0 };
+      if (!t) printf("E i0fl_default_cs create %s\n", SDL_GetError());
+      else { if (SDL_UpdateTexture(t, NULL, buf, 8)) printf("E i0fl_default_cs ok\n"); else printf("E i0fl_default_cs %s\n", SDL_GetError()); SDL_DestroyTexture(t); } }
+  }
+
   /* 断るもの */
   { SDL_Texture *t = make_tex(SDL_PIXELFORMAT_P010, SDL_COLORSPACE_BT709_LIMITED, 8, 6);
     if (t) printf("E create_p010 ok\n"); else printf("E create_p010 %s\n", SDL_GetError()); if (t) SDL_DestroyTexture(t); }
@@ -215,6 +287,37 @@ int main(void)
     if (SDL_ConvertPixelsAndColorspace(4, 4, SDL_PIXELFORMAT_P010, SDL_COLORSPACE_BT709_LIMITED, 0, src, 8,
         SDL_PIXELFORMAT_XBGR2101010, SDL_COLORSPACE_BT709_LIMITED, 0, dst, 16)) printf("E p010_to_xbgr ok\n");
     else printf("E p010_to_xbgr %s\n", SDL_GetError()); }
+  /* YUV から任意の形式へ（SDL_ConvertPixels_YUV_to_RGB の後半。色空間の変換を挟む） */
+  {
+    static const SDL_PixelFormat yf[] = { SDL_PIXELFORMAT_I444, SDL_PIXELFORMAT_IYUV, SDL_PIXELFORMAT_NV12, SDL_PIXELFORMAT_YUY2,
+                                          SDL_PIXELFORMAT_P010, SDL_PIXELFORMAT_I0FL, SDL_PIXELFORMAT_I4FL };
+    static const struct { SDL_PixelFormat f; SDL_Colorspace c; } df[] = {
+      { SDL_PIXELFORMAT_ARGB8888, SDL_COLORSPACE_SRGB }, { SDL_PIXELFORMAT_ABGR8888, SDL_COLORSPACE_SRGB },
+      { SDL_PIXELFORMAT_XRGB8888, SDL_COLORSPACE_SRGB }, { SDL_PIXELFORMAT_RGB24, SDL_COLORSPACE_SRGB },
+      { SDL_PIXELFORMAT_RGB565, SDL_COLORSPACE_SRGB }, { SDL_PIXELFORMAT_XBGR2101010, SDL_COLORSPACE_HDR10 },
+      { SDL_PIXELFORMAT_RGB48, SDL_COLORSPACE_SRGB_LINEAR }, { SDL_PIXELFORMAT_RGBA128_FLOAT, SDL_COLORSPACE_SRGB_LINEAR },
+      { SDL_PIXELFORMAT_ARGB2101010, SDL_COLORSPACE_SRGB }, { SDL_PIXELFORMAT_RGB48_FLOAT, SDL_COLORSPACE_HDR10 } };
+    int k = 0;
+    for (int y = 0; y < 7; y++) for (int d = 0; d < 10; d++) {
+      if (((y + d) % 2) != 0 && d != 0 && d != 5 && d != 6) continue;   /* 間引く */
+      int sidx = (k++) % 5;
+      int w = 7, h = 5;
+      size_t sz, pi;
+      SDL_CalculateYUVSize(yf[y], w, h, &sz, &pi);
+      unsigned char *src = calloc(1, sz);
+      int bpp = SDL_BYTESPERPIXEL(df[d].f);
+      unsigned char *dst = calloc(1, (size_t)w * h * bpp);
+      lcg = 300 + k;
+      if (yf[y] == SDL_PIXELFORMAT_P010 || yf[y] == SDL_PIXELFORMAT_I0FL || yf[y] == SDL_PIXELFORMAT_I4FL)
+        for (size_t i = 0; i < sz / 2; i++) ((unsigned short *)src)[i] = (unsigned short)(nx() & 0xFFFF);
+      else
+        for (size_t i = 0; i < sz; i++) src[i] = (unsigned char)(96 + (nx() & 63));
+      if (SDL_ConvertPixelsAndColorspace(w, h, yf[y], spaces[sidx].c, 0, src, (int)pi, df[d].f, df[d].c, 0, dst, w * bpp))
+        printf("Y y%02d %08X %08X %08X %08X %d %d %08X\n", k, yf[y], spaces[sidx].c, df[d].f, df[d].c, w, h, fnv(dst, (size_t)w * h * bpp, 2166136261u));
+      else printf("Y y%02d %08X %08X %08X %08X %d %d err %s\n", k, yf[y], spaces[sidx].c, df[d].f, df[d].c, w, h, SDL_GetError());
+      free(src); free(dst);
+    }
+  }
   /* 黒と白（限定範囲。I0FL の黒は 16 ビットで 16 << 8、白は 235 << 8） */
   {
     unsigned short buf[12];

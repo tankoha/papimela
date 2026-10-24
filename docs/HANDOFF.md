@@ -23,8 +23,12 @@
 > 作れない。Vulkan のドライバが持つときは `SupportsTextureFormat` で答えれば、レンダラの層は変えずに通る）。SDL の不具合 D-76 を見つけた
 > （限定範囲の P010 の黒が黒にならない）。README の上流の不具合にも載せた（持ち主の判断）。表示サーバ無しの 41 本が全部通る。**手元（Pi 5）の対話の確認は残っていない。**
 > **続けて I0FL / I4FL の変換を済ませた**（同日。`PMLConvertYUV16ToRGB48`、T-66。SDL の不具合 D-77。README の上流の不具合にも載せた。持ち主の判断）。
-> **I0FL / I4FL のテクスチャは持たない**: SDL のソフトウェアのレンダラは RGB48 から ARGB8888 へ**色空間の変換**（転送関数・原色）を
-> 挟み、papimela にその仕組みが無い。既定の色空間（HDR10）では SDL でも更新が失敗する。P010 / I0FL / I4FL をほかの形式へ直す道も同じ仕組みが要る。
+> **続けて色空間の変換の仕組みを入れた**（同日。`PaPiMeLa.Surface.Colorspace`、#73、T-67）: 転送関数（sRGB・PQ）、原色の変換行列、トーンマップ、
+> 白点とヘッドルームの既定、`PMLConvertPixelsAndColorspace`。これで **`PMLConvertYUVPixels`（`PaPiMeLa.Surface.YUV`）が、P010 / I0FL / I4FL を含む
+> どの YUV からも任意の形式・色空間へ直せる**（SDL の中継の道と同じ）。**I0FL / I4FL のテクスチャも持った**（レンダラの肩代わり。T-66）。
+> SDL の不具合 D-78（YV12 / IYUV / I0FL の詰めた画素の部分の更新が 3 つ目の平面を誤った位置に書く。参照版の退行で 3.4.2 は正しい。papimela は正しい位置）。
+> README への掲載は持ち主の判断を待つ。表示サーバ無しの 42 本が全部通る。**手元（Pi 5）の対話の確認は残っていない。**
+> **参照版の SDL は積和を融合しない版（`-ffp-contract=off`）で作ったものを期待値に使う**（§2.1）。
 > 次の候補は §3。
 
 ## 1. 今どこにいるか
@@ -33,8 +37,8 @@
 |---|---|
 | リポジトリ | https://github.com/tankoha/papimela（公開、Issues 有効）。手元のセッションは `master` に直接 push、クラウドのセッションは指定のブランチへ push して、手元で早送りマージする |
 | CI | 緑。rawpaco 激辛、checkorigin、アンブレラの古さ（`genumbrella.bb --check`）、図の検査、表示サーバ無しのテスト 32 本、Pong の自己検査、GLES2 と ソフトウェアのドライバの画素比較（llvmpipe）。ジョブ 60 分・GLES2 の手順 5 分の時間制限つき |
-| テスト | 表示サーバ無しの 41 本はすべて成功（2026-10-15 に Pi5 で流した。以前の「件」は数え方が違うので、これからはこの数え方）。PipeWire の T-54 と PulseAudio の T-59 は手元専用で、どちらも Pi5 で通る。PipeWire の T-54 は手元専用（30 件）。手元専用と対話の検査は `docs/TEST-LOG.md` の各行 |
-| 不具合 | 75 件。うち上流 SDL の 27 件は未報告（D-53 は SDL 自身が FIXME で知っている。他の 24 件は報告するかを検討中。方針は `CLAUDE.md`。README の一覧に全件を載せた） |
+| テスト | 表示サーバ無しの 42 本はすべて成功（2026-10-15 に Pi5 で流した。以前の「件」は数え方が違うので、これからはこの数え方）。PipeWire の T-54 と PulseAudio の T-59 は手元専用で、どちらも Pi5 で通る。PipeWire の T-54 は手元専用（30 件）。手元専用と対話の検査は `docs/TEST-LOG.md` の各行 |
+| 不具合 | 76 件。うち上流 SDL の 28 件は未報告（D-53 は SDL 自身が FIXME で知っている。他の 24 件は報告するかを検討中。方針は `CLAUDE.md`。README の一覧に全件を載せた） |
 | 規模 | 手書き 63 ユニット（`src/*.pas`）+ 生成（Wayland プロトコル 21、キーボードの表 2、EGL / GLES2 の定数 2、DebugText の字形 1、音声のチャンネル数の変換と周波数の変換の係数 2、PipeWire の定数 1、アンブレラ 2）。手書きの `src/*.pas` が約 4.0 万行、生成を含めて約 5.5 万行（2026-10-14 に数え直した） |
 
 ### 動いているもの
@@ -149,6 +153,12 @@ D-69（録音で書き換えたバイト数を次の論理デバイスへ持ち�
 - **SDL の内部の関数は、静的に作った参照版にリンクして直接呼べる**（`SDL_CalculateYUVSize` など。`tools/yuv-hd-expect/yuv_cases.c` の `extern`）。
   コードを部分的に読んで「不具合らしい」と思ったら（`SDL_CalculateYUVSize` の I444 の色差の大きさは、読んだ範囲では 4:2:0 の式に見えた）、
   書く前に呼んで確かめる。この件は実測で不具合でなかった（別の枝が 3 平面の大きさを返す）。P010 の輝度のオフセット（D-76）は実測で本物だった
+- **浮動小数の期待値は、積和を融合しない参照版で取る**: aarch64 の gcc は `a * b + c` を既定で融合し、SDL の PQ（`SDL_PQtoNits`）が
+  x86_64 の値と数百 ulp ずれる。`cmake` に `-DCMAKE_C_FLAGS=-ffp-contract=off` を足した参照版（`/home/joerg/claude-work/sdl-ref-build-nofma`、
+  他の引数は §2.1 と同じ）で取ると、papimela（FPC は融合しない）と成分が 100% 一致した。切り分けは、関数を C に写して
+  `-ffp-contract=off` と `=fast` で動かすのが早い（`tools/colorspace-expect/gen.bb` の頭にも書いた）
+- **SDL の内部の関数を静的ライブラリから呼ぶ**（`SDL_sRGBtoLinear`、`SDL_GetColorPrimariesConversionMatrix`、`SDL_CalculateYUVSize` など）と、
+  転送関数や行列を画素の変換を通さずに直接比べられる（`tools/colorspace-expect/cs_cases.c`）
 - **大きさを偽るストリーム**（`Size` を実際より大きく答える）で、data チャンクが宣言より短い場面を作れる。SDL 側は `SDL_OpenIO` で同じ嘘をつくストリームを作る。
   切り詰めのヒントの本丸の経路は、これでしか通らない
 - **変異の検査は、クラッシュと「落ちた」を区別する**。落ちた件数を grep で数えるだけだと、実行時エラーで途中で終わった変異が「0 件」に見える。結論の行の有無も見る
@@ -179,7 +189,7 @@ D-69（録音で書き換えたバイト数を次の論理デバイスへ持ち�
      録音は手元にソースが無いので実機では通していない（T-54 は飛ばす）。PipeWire の既定の変更での移動も実機では見ていない
      （利用者の既定を変えるので）
    - 浮動小数の変換は、範囲の外の値で SDL の SSE2 版とスカラー版の結果が割れる（D-64・D-65）。期待値の入力は範囲の中に置く
-2. 残してあるテクスチャのもの: ~~テクスチャの Lock / Unlock~~ **済んだ（2026-10-16、Pi 5 で。`TPMLTexture.Lock` / `Unlock` / `LockToSurface`、T-64）**。~~I444 / P010~~ **済んだ（2026-10-24、Pi 5 で。T-66。上の冒頭）**、I0FL / I4FL の変換は **済んだ（2026-10-24。`PMLConvertYUV16ToRGB48`）**。残りは **色空間の変換の仕組み**（`SDL_surface.c` / `SDL_blit_slow.c` / `SDL_pixels.c` の転送関数・原色・トーンマップ。大きい）で、それがあれば I0FL / I4FL のテクスチャ（SDL のソフトウェアのレンダラだけが持つ）と、P010 / I0FL / I4FL を XBGR2101010 / RGB48 以外へ直す道が入る、~~サーフェスから作るときのカラーキー~~ **済んだ（2026-10-17、Pi 5 で。`CreateTextureFromSurface` が 17 形式のキー・変調・ブレンドの引き継ぎを SDL と合わせた、T-65）**、~~ソフトウェアのレンダラの Linear が
+2. 残してあるテクスチャのもの: ~~テクスチャの Lock / Unlock~~ **済んだ（2026-10-16、Pi 5 で。`TPMLTexture.Lock` / `Unlock` / `LockToSurface`、T-64）**。~~I444 / P010~~ **済んだ（2026-10-24、Pi 5 で。T-66。上の冒頭）**、I0FL / I4FL は **済んだ（2026-10-24。変換 `PMLConvertYUV16ToRGB48`、色空間の変換 `PaPiMeLa.Surface.Colorspace`、テクスチャ。T-66・T-67）**。P010 は SDL と同じくテクスチャを持たない。残りは、色空間の変換のうち拡大縮小・ブレンド・変調・カラーキー（`SDL_Blit_Slow_Float` の残り）と、サーフェスに色空間を持たせること、~~サーフェスから作るときのカラーキー~~ **済んだ（2026-10-17、Pi 5 で。`CreateTextureFromSurface` が 17 形式のキー・変調・ブレンドの引き継ぎを SDL と合わせた、T-65）**、~~ソフトウェアのレンダラの Linear が
    実は Nearest（`PMLBlitScaled` が方式を使わない。SDL は補間する）~~（**2026-10-17 に持ち主が「そのまま」と決めた。直さない**）
 3. IME の残り: 埋め込み候補（`TextEditingCandidates`）、IBus の ForwardKeyEvent、ibus-anthy など他のエンジンの属性の実測、GNOME / KDE での IBus 直結（§7.5 の要検証）。IBus の検査環境は `tools/ibus-sandbox/`（ibus + ibus-mozc を入れた Ubuntu 24.04 の最小 rootfs を bwrap で隔離。デスクトップの fcitx5 と混ざらない）。実測の結果は `spikes/RESULTS.md` のスパイク 3
 
@@ -228,7 +238,7 @@ Pong もすべて書き換え、今は `uses SysUtils, Math, PaPiMeLa` だけで
 表示サーバ無しで通るもの（CI と同じ）:
 
 ```bash
-for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_render_transform test_render_target test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_drop test_drag_source test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds test_audio_convert test_audio_stream test_audio_mixer test_audio_wave test_audio_device test_pipewire_abi test_pulse_abi test_alsa_abi test_alsa_chmap test_audio_autoselect test_texture_lock test_texture_colorkey test_yuv_hd; do
+for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_render_transform test_render_target test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_drop test_drag_source test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds test_audio_convert test_audio_stream test_audio_mixer test_audio_wave test_audio_device test_pipewire_abi test_pulse_abi test_alsa_abi test_alsa_chmap test_audio_autoselect test_texture_lock test_texture_colorkey test_yuv_hd test_colorspace; do
   fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/$t test/$t.pas && ./test/$t
 done
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -oexamples/pong examples/pong.pas && ./examples/pong --selftest
@@ -256,7 +266,7 @@ env -u WAYLAND_DISPLAY LIBGL_ALWAYS_SOFTWARE=1 ./test/test_render_gles2   # Mesa
 cd papimela && mkdir -p lib
 B='fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib'
 # 0. 表示サーバ無しの分（CI と同じ。手元の新しい Mesa でも通るか）
-for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds test_audio_convert test_audio_stream test_audio_mixer test_audio_wave test_audio_device test_pipewire_abi test_pulse_abi test_alsa_abi test_alsa_chmap test_audio_autoselect test_texture_lock test_texture_colorkey test_yuv_hd; do
+for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds test_audio_convert test_audio_stream test_audio_mixer test_audio_wave test_audio_device test_pipewire_abi test_pulse_abi test_alsa_abi test_alsa_chmap test_audio_autoselect test_texture_lock test_texture_colorkey test_yuv_hd test_colorspace; do
   $B -otest/$t test/$t.pas && ./test/$t | tail -1
 done
 # 1. 実機の Wayland（自動判定。最後の行が「結論」で終わればよい）

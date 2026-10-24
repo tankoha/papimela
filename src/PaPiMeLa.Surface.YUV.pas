@@ -10,14 +10,19 @@
            2x2 ずつの回り方、奇数の幅と高さの端の扱い）、YUV のテクスチャの平面の置き場と
            更新（SDL_SW_CreateYUVTexture、SDL_SW_UpdateYUVTexture、
            SDL_SW_UpdateYUVTexturePlanar、SDL_SW_UpdateNVTexturePlanar）。I444 の置き場・更新・変換
-           （3 平面で色差も輝度と同じ大きさ）と、P010 から XBGR2101010 への変換（yuvp010_xbgr2101010_std）。
+           （3 平面で色差も輝度と同じ大きさ）、P010 から XBGR2101010 への変換（yuvp010_xbgr2101010_std）、
+           I0FL / I4FL の置き場・更新と RGB48 への変換（yuvi0fl_rgb48_std / yuvi4fl_rgb48_std）、
+           任意の形式への変換（SDL_ConvertPixels_YUV_to_RGB の中継の道。色空間の変換は
+           PaPiMeLa.Surface.Colorspace）。
            SDL revision: see docs/ORIGIN.md
   Design : docs/DESIGN.md §11 #68
 
   WHAT:
     YV12 / IYUV / I444 / NV12 / NV21 / YUY2 / UYVY / YVYU の画素を ARGB8888 に直す。P010 は
     XBGR2101010 に直す（PMLConvertP010ToXBGR2101010。テクスチャにはならない）。I0FL / I4FL は RGB48 に直す
-    （PMLConvertYUV16ToRGB48。同じくテクスチャにはならない）。
+    （PMLConvertYUV16ToRGB48）。PMLConvertYUVPixels は、どの YUV からも任意の形式・色空間へ直す。
+    I0FL / I4FL は 1 標本 2 バイトの平面で、レンダラの肩代わりのテクスチャにもなる（既定の色空間
+    HDR10 は変換できないので、BT.601 / BT.709 / BT.2020 の全範囲を明示して作る）。
     TPMLYUVPlanes は YUV のテクスチャの中身（SDL の SDL_SW_YUVTexture）で、
     レンダラの肩代わりの層が持ち、更新のたびに全体を ARGB8888 に直して肩代わりへ写す。
 
@@ -31,6 +36,11 @@
     - スカラー版だけ（設計 §9.5）。SDL は x86 で幅 32 以上の部分を SSE2 で変換する
 
   PORT-NOTE(bug):
+    SDL の参照版（3.4.2 より新しい）は、YV12 / IYUV / I0FL の詰めた画素の部分の更新（SDL_SW_UpdateYUVTexture）で、
+    3 つ目の平面の書き込み先を「矩形の高さ」で測る（正しくはテクスチャの高さ）。矩形が全体より低いと
+    3 つ目の平面の行が 2 つ目の平面に入る（D-78）。papimela は 3.4.2 と同じ正しい位置に書く。
+
+  PORT-NOTE(bug):
     P010 の輝度のオフセット（y_shift）を SDL は 16 ビットの Y から引いてから 6 ビット寄せる（D-76）。
     限定範囲では黒（Y = 64）が (73, 73, 73) になる。papimela は SDL と同じ値にそろえている。
 
@@ -42,10 +52,7 @@
 
   NOT RESOLVED:
     - RGB から YUV・YUV から YUV への変換は無い
-    - P010 を XBGR2101010 以外へ、I0FL / I4FL を RGB48 以外へ直す道は無い（EPMLArgument）。SDL は XBGR2101010 /
-      RGB48 を経由して色空間を変換する。papimela に色空間の変換（転送関数・原色）の仕組みはまだ無い
-    - I0FL / I4FL のテクスチャは持たない。SDL のソフトウェアのレンダラは RGB48 から ARGB8888 へ色空間の変換を
-      挟む（既定の色空間 HDR10 では更新が「Unsupported YUV colorspace」で失敗する）。上の仕組みが先に要る
+    - I0FL の部分の Lock は断る（SDL の断りの一覧に I0FL が抜けている。papimela は I4FL と同じく全体だけ）
     - P010 のテクスチャは持たない。SDL のソフトウェアのレンダラも GLES2 も P010 のテクスチャを作れない
       （Vulkan などの GPU のドライバが持つときは、ドライバが SupportsTextureFormat で答える）
 
@@ -93,7 +100,8 @@ uses
   SysUtils,
   PaPiMeLa.Types,
   PaPiMeLa.Errors,
-  PaPiMeLa.Pixels;
+  PaPiMeLa.Pixels,
+  PaPiMeLa.Surface.Colorspace;
 
 type
   { 変換の種類（SDL の YCbCrType。並びは係数の表と同じ）。 }
@@ -136,8 +144,8 @@ type
     property Pitches[AIndex: Integer]: Integer read GetPitch;
   end;
 
-// このユニットがテクスチャの肩代わりで扱える YUV の形式か（YV12 / IYUV / I444 / NV12 / NV21 / YUY2 / UYVY / YVYU）。
-// P010 は含まない（ARGB8888 の肩代わりでは 10 ビットを表せず、SDL も P010 のテクスチャを肩代わりしない）。
+// このユニットがテクスチャの肩代わりで扱える YUV の形式か（YV12 / IYUV / I444 / NV12 / NV21 / YUY2 / UYVY / YVYU /
+// I0FL / I4FL）。P010 は含まない（ARGB8888 の肩代わりでは 10 ビットを表せず、SDL も P010 のテクスチャを肩代わりしない）。
 function PMLIsYUVFormat(AFormat: TPMLPixelFormat): Boolean;
 
 // 色空間から変換の種類を選ぶ（GetYUVConversionType）。選べなければ False。
@@ -165,6 +173,18 @@ procedure PMLConvertP010ToXBGR2101010(AWidth, AHeight: Integer; AColorspace: TPM
 // 形式が I0FL / I4FL でない、または色空間を変換できなければ EPMLArgument。
 procedure PMLConvertYUV16ToRGB48(AWidth, AHeight: Integer; AFormat: TPMLPixelFormat;
   AColorspace: TPMLColorspace; ASrc: Pointer; ASrcPitch: Integer; ADst: Pointer; ADstPitch: Integer);
+
+{ YUV の画素を、任意の形式・色空間の画素に直す（SDL_ConvertPixels_YUV_to_RGB）。
+  ASrcPitch は Y の行の幅（バイト）、ADstPitch は出力の行の幅（バイト）。色空間が UNKNOWN なら形式の既定。
+  経路は SDL と同じ:
+    8 ビットの YUV  → ARGB8888（sRGB）に直してから、出力の形式・色空間へ
+    P010            → XBGR2101010 に直してから（元の色空間のまま）、出力の形式・色空間へ
+    I0FL / I4FL     → RGB48 に直してから（元の色空間のまま）、出力の形式・色空間へ
+  出力が直接の形式（ARGB8888、XBGR2101010、RGB48）なら中継は要らない。
+  YUV でない形式、変換できない色空間、出力がインデックス・YUV なら EPMLArgument。 }
+procedure PMLConvertYUVPixels(AWidth, AHeight: Integer;
+  ASrcFormat: TPMLPixelFormat; ASrcColorspace: TPMLColorspace; ASrc: Pointer; ASrcPitch: Integer;
+  ADstFormat: TPMLPixelFormat; ADstColorspace: TPMLColorspace; ADst: Pointer; ADstPitch: Integer);
 
 implementation
 
@@ -299,7 +319,8 @@ begin
   Result := (AFormat = PML_PIXELFORMAT_YV12) or (AFormat = PML_PIXELFORMAT_IYUV)
          or (AFormat = PML_PIXELFORMAT_NV12) or (AFormat = PML_PIXELFORMAT_NV21)
          or (AFormat = PML_PIXELFORMAT_YUY2) or (AFormat = PML_PIXELFORMAT_UYVY)
-         or (AFormat = PML_PIXELFORMAT_YVYU) or (AFormat = PML_PIXELFORMAT_I444);
+         or (AFormat = PML_PIXELFORMAT_YVYU) or (AFormat = PML_PIXELFORMAT_I444)
+         or (AFormat = PML_PIXELFORMAT_I0FL) or (AFormat = PML_PIXELFORMAT_I4FL);
 end;
 
 { SDL の GetYUVConversionType。JPEG と BT.601 の全範囲は同じ行列。BT.2020 は全範囲だけ。 }
@@ -462,6 +483,25 @@ begin
         FOffsets[1] := PtrUInt(AWidth) * PtrUInt(AHeight);
         FOffsets[2] := 2 * FOffsets[1];
       end;
+    PML_PIXELFORMAT_I0FL:
+      begin
+        // 1 標本 2 バイト。色差は縦横とも半分（IYUV と同じ並び: Y、U、V）
+        FPitches[0] := 2 * AWidth;
+        FPitches[1] := ((AWidth + 1) div 2) * 2;
+        FPitches[2] := FPitches[1];
+        FOffsets[0] := 0;
+        FOffsets[1] := PtrUInt(FPitches[0]) * PtrUInt(AHeight);
+        FOffsets[2] := FOffsets[1] + PtrUInt(FPitches[1]) * PtrUInt((AHeight + 1) div 2);
+      end;
+    PML_PIXELFORMAT_I4FL:
+      begin
+        FPitches[0] := 2 * AWidth;
+        FPitches[1] := FPitches[0];
+        FPitches[2] := FPitches[0];
+        FOffsets[0] := 0;
+        FOffsets[1] := PtrUInt(FPitches[0]) * PtrUInt(AHeight);
+        FOffsets[2] := 2 * FOffsets[1];
+      end;
   else
     FPitches[0] := ((AWidth + 1) div 2) * 4;
     FOffsets[0] := 0;
@@ -547,6 +587,38 @@ begin
           + 2 * PtrInt((ARect.Y + 1) div 2) * CW + 2 * (ARect.X div 2),
           2 * ((APitch + 1) div 2), 2 * CW, 2 * ((ARect.W + 1) div 2), (ARect.H + 1) div 2);
       end;
+    PML_PIXELFORMAT_I0FL:
+      // 1 標本 2 バイトの IYUV（SDL_SW_UpdateYUVTexture の YV12 / IYUV / I0FL）
+      if (ARect.X = 0) and (ARect.Y = 0) and (ARect.W = FWidth) and (ARect.H = FHeight)
+      and (APitch = FPitches[0]) then
+        Move(APixels^, Base^, FHeight * FWidth * 2 + 2 * CH * CW * 2)
+      else
+      begin
+        UVPitch := (((APitch div 2) + 1) div 2) * 2;
+        CopyRows(PByte(APixels), Base + PtrInt(ARect.Y) * FPitches[0] + ARect.X * 2,
+          APitch, FPitches[0], ARect.W * 2, ARect.H);
+        Src := PByte(APixels) + PtrInt(ARect.H) * APitch;
+        CopyRows(Src, Base + PtrInt(FOffsets[1]) + PtrInt(ARect.Y div 2) * FPitches[1] + (ARect.X div 2) * 2,
+          UVPitch, FPitches[1], ((ARect.W + 1) div 2) * 2, (ARect.H + 1) div 2);
+        Src := PByte(APixels) + PtrInt(ARect.H) * APitch + PtrInt((ARect.H + 1) div 2) * UVPitch;
+        CopyRows(Src, Base + PtrInt(FOffsets[2]) + PtrInt(ARect.Y div 2) * FPitches[2] + (ARect.X div 2) * 2,
+          UVPitch, FPitches[2], ((ARect.W + 1) div 2) * 2, (ARect.H + 1) div 2);
+      end;
+    PML_PIXELFORMAT_I4FL:
+      // 1 標本 2 バイトの I444
+      if (ARect.X = 0) and (ARect.Y = 0) and (ARect.W = FWidth) and (ARect.H = FHeight)
+      and (APitch = FPitches[0]) then
+        Move(APixels^, Base^, 3 * FHeight * APitch)
+      else
+      begin
+        Src := PByte(APixels);
+        for Plane := 0 to 2 do
+        begin
+          CopyRows(Src, Base + PtrInt(FOffsets[Plane]) + PtrInt(ARect.Y) * FPitches[Plane] + ARect.X * 2,
+            APitch, FPitches[Plane], ARect.W * 2, ARect.H);
+          Inc(Src, PtrInt(ARect.H) * APitch);
+        end;
+      end;
     PML_PIXELFORMAT_I444:
       // 色差も Y と同じ大きさ。全体で行の幅が詰まっていれば丸ごと、でなければ 3 平面を続けて読む
       if (ARect.X = 0) and (ARect.Y = 0) and (ARect.W = FWidth) and (ARect.H = FHeight)
@@ -580,6 +652,27 @@ begin
   Base := @FPixels[0];
   CW := (FWidth + 1) div 2;
   CH := (FHeight + 1) div 2;
+  if (FFormat = PML_PIXELFORMAT_I0FL) or (FFormat = PML_PIXELFORMAT_I4FL) then
+  begin
+    // 1 標本 2 バイト
+    CopyRows(PByte(AY), Base + PtrInt(ARect.Y) * FPitches[0] + ARect.X * 2,
+      AYPitch, FPitches[0], ARect.W * 2, ARect.H);
+    if FFormat = PML_PIXELFORMAT_I4FL then
+    begin
+      CopyRows(PByte(AU), Base + PtrInt(FOffsets[1]) + PtrInt(ARect.Y) * FPitches[1] + ARect.X * 2,
+        AUPitch, FPitches[1], ARect.W * 2, ARect.H);
+      CopyRows(PByte(AV), Base + PtrInt(FOffsets[2]) + PtrInt(ARect.Y) * FPitches[2] + ARect.X * 2,
+        AVPitch, FPitches[2], ARect.W * 2, ARect.H);
+    end
+    else
+    begin
+      CopyRows(PByte(AU), Base + PtrInt(FOffsets[1]) + PtrInt(ARect.Y div 2) * FPitches[1] + (ARect.X div 2) * 2,
+        AUPitch, FPitches[1], ((ARect.W + 1) div 2) * 2, (ARect.H + 1) div 2);
+      CopyRows(PByte(AV), Base + PtrInt(FOffsets[2]) + PtrInt(ARect.Y div 2) * FPitches[2] + (ARect.X div 2) * 2,
+        AVPitch, FPitches[2], ((ARect.W + 1) div 2) * 2, (ARect.H + 1) div 2);
+    end;
+    Exit;
+  end;
   CopyRows(PByte(AY), Base + PtrInt(ARect.Y) * FPitches[0] + ARect.X,
     AYPitch, FPitches[0], ARect.W, ARect.H);
   if FFormat = PML_PIXELFORMAT_I444 then
@@ -771,10 +864,96 @@ begin
   end;
 end;
 
+procedure PMLConvertYUVPixels(AWidth, AHeight: Integer;
+  ASrcFormat: TPMLPixelFormat; ASrcColorspace: TPMLColorspace; ASrc: Pointer; ASrcPitch: Integer;
+  ADstFormat: TPMLPixelFormat; ADstColorspace: TPMLColorspace; ADst: Pointer; ADstPitch: Integer);
+var
+  SCS, DCS: TPMLColorspace;
+  Tmp: TBytes;
+  TmpFormat: TPMLPixelFormat;
+  TmpPitch, X, Y: Integer;
+  TmpColorspace: TPMLColorspace;
+begin
+  if not (PMLIsYUVFormat(ASrcFormat) or (ASrcFormat = PML_PIXELFORMAT_P010)
+  or (ASrcFormat = PML_PIXELFORMAT_I0FL) or (ASrcFormat = PML_PIXELFORMAT_I4FL)) then
+    raise EPMLArgument.CreateFmt('%s is not a YUV format the converter knows',
+      [PMLPixelFormatName(ASrcFormat)]);
+  if PMLIsPixelFormatFourCC(ADstFormat) or PMLIsPixelFormatIndexed(ADstFormat)
+  or (ADstFormat = PML_PIXELFORMAT_UNKNOWN) then
+    raise EPMLArgument.CreateFmt('%s cannot be a destination of a YUV conversion',
+      [PMLPixelFormatName(ADstFormat)]);
+  if (AWidth <= 0) or (AHeight <= 0) then
+    Exit;
+  SCS := ASrcColorspace;
+  if SCS = PML_COLORSPACE_UNKNOWN then
+    SCS := PMLDefaultColorspace(ASrcFormat);
+  DCS := ADstColorspace;
+  if DCS = PML_COLORSPACE_UNKNOWN then
+    DCS := PMLDefaultColorspace(ADstFormat);
+
+  if ASrcFormat = PML_PIXELFORMAT_P010 then
+  begin
+    if ADstFormat = PML_PIXELFORMAT_XBGR2101010 then
+    begin
+      PMLConvertP010ToXBGR2101010(AWidth, AHeight, SCS, ASrc, ASrcPitch, ADst, ADstPitch);
+      Exit;
+    end;
+    TmpFormat := PML_PIXELFORMAT_XBGR2101010;
+    TmpPitch := AWidth * 4;
+    TmpColorspace := SCS;
+    SetLength(Tmp, TmpPitch * AHeight);
+    PMLConvertP010ToXBGR2101010(AWidth, AHeight, SCS, ASrc, ASrcPitch, @Tmp[0], TmpPitch);
+  end
+  else if (ASrcFormat = PML_PIXELFORMAT_I0FL) or (ASrcFormat = PML_PIXELFORMAT_I4FL) then
+  begin
+    if ADstFormat = PML_PIXELFORMAT_RGB48 then
+    begin
+      PMLConvertYUV16ToRGB48(AWidth, AHeight, ASrcFormat, SCS, ASrc, ASrcPitch, ADst, ADstPitch);
+      Exit;
+    end;
+    TmpFormat := PML_PIXELFORMAT_RGB48;
+    TmpPitch := AWidth * 6;
+    TmpColorspace := SCS;
+    SetLength(Tmp, TmpPitch * AHeight);
+    PMLConvertYUV16ToRGB48(AWidth, AHeight, ASrcFormat, SCS, ASrc, ASrcPitch, @Tmp[0], TmpPitch);
+  end
+  else
+  begin
+    if ADstFormat = PML_PIXELFORMAT_ARGB8888 then
+    begin
+      PMLConvertYUVToARGB8888(AWidth, AHeight, ASrcFormat, SCS, ASrc, ASrcPitch, ADst, ADstPitch);
+      Exit;
+    end;
+    TmpFormat := PML_PIXELFORMAT_ARGB8888;
+    TmpPitch := AWidth * 4;
+    TmpColorspace := PML_COLORSPACE_SRGB;
+    SetLength(Tmp, TmpPitch * AHeight);
+    PMLConvertYUVToARGB8888(AWidth, AHeight, ASrcFormat, SCS, ASrc, ASrcPitch, @Tmp[0], TmpPitch);
+  end;
+  PMLConvertPixelsAndColorspace(AWidth, AHeight, TmpFormat, TmpColorspace, @Tmp[0], TmpPitch,
+    ADstFormat, DCS, ADst, ADstPitch);
+  // 8 ビットの YUV の直接の変換（yuv_rgb_std）は、X の付く 8888 の X のバイトにも 0xFF を書く
+  // （P010 / I0FL / I4FL の中継を通る道は書かない）
+  if (ASrcFormat <> PML_PIXELFORMAT_I0FL) and (ASrcFormat <> PML_PIXELFORMAT_I4FL)
+  and (ASrcFormat <> PML_PIXELFORMAT_P010) and ((ADstFormat = PML_PIXELFORMAT_XRGB8888) or (ADstFormat = PML_PIXELFORMAT_XBGR8888)
+  or (ADstFormat = PML_PIXELFORMAT_RGBX8888) or (ADstFormat = PML_PIXELFORMAT_BGRX8888)) then
+    for Y := 0 to AHeight - 1 do
+      for X := 0 to AWidth - 1 do
+        if (ADstFormat = PML_PIXELFORMAT_XRGB8888) or (ADstFormat = PML_PIXELFORMAT_XBGR8888) then
+          PByte(ADst)[PtrInt(Y) * ADstPitch + X * 4 + 3] := $FF
+        else
+          PByte(ADst)[PtrInt(Y) * ADstPitch + X * 4] := $FF;
+end;
+
 procedure TPMLYUVPlanes.ConvertToARGB8888(ADst: Pointer; ADstPitch: Integer);
 begin
-  PMLConvertYUVToARGB8888(FWidth, FHeight, FFormat, FColorspace, @FPixels[0], FPitches[0],
-    ADst, ADstPitch);
+  if (FFormat = PML_PIXELFORMAT_I0FL) or (FFormat = PML_PIXELFORMAT_I4FL) then
+    // 16 ビットは RGB48 を経て、色空間を sRGB に直す（SDL_SW_CopyYUVToRGB）
+    PMLConvertYUVPixels(FWidth, FHeight, FFormat, FColorspace, @FPixels[0], FPitches[0],
+      PML_PIXELFORMAT_ARGB8888, PML_COLORSPACE_SRGB, ADst, ADstPitch)
+  else
+    PMLConvertYUVToARGB8888(FWidth, FHeight, FFormat, FColorspace, @FPixels[0], FPitches[0],
+      ADst, ADstPitch);
 end;
 
 end.

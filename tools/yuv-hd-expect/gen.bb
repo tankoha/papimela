@@ -25,7 +25,7 @@
   (when-not (zero? (:exit r)) (fail "コンパイルに失敗:\n" (:err r))))
 (def ^:private out (:out (shell {:out :string :err :string} exe)))
 (when (str/includes? out "INIT-ERR") (fail out))
-(def ^:private rows (filter #(re-find #"^[ZCTEB] " %) (str/split-lines out)))
+(def ^:private rows (filter #(re-find #"^[ZCTEBY] " %) (str/split-lines out)))
 (defn- q [s] (str "'" (str/replace s "'" "''") "'"))
 (spit "test/yuv_hd_expected.inc"
       (str "{ test/yuv_hd_expected.inc — tools/yuv-hd-expect/gen.bb が作る。手で直さない。\n"

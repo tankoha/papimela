@@ -49,6 +49,7 @@
    {:unit "PaPiMeLa.Surface"}
    {:unit "PaPiMeLa.Surface.Blit"}
    {:unit "PaPiMeLa.Surface.BMP"}
+   {:unit "PaPiMeLa.Surface.Colorspace"}
    {:unit "PaPiMeLa.Surface.YUV"}
    {:unit "PaPiMeLa.IO"}
    {:unit "PaPiMeLa.Video"}

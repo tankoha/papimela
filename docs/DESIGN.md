@@ -1323,6 +1323,7 @@ wayland-scanner の Pascal 版。C の `wayland-scanner` が生成する `*-clie
 | 70 | `tools/checkorigin`、テスト基盤（fpcunit、headless 実行スクリプト） | — | 小 | — | P0 | クリーンルーム | Medium | Sonnet | 9.5。`Origin` 行と本表の整合検査、weston headless / ibus-daemon の CI 起動 |
 | 71 | `PaPiMeLa.Platform.DocumentPortal` | `core/linux/SDL_dbus.c` の `SDL_DBus_DocumentsPortalRetrieveFiles` | 小 | 16 | P2 | 一部移植 | Medium | Sonnet | Documents ポータルの FileTransfer。鍵からパスを受け取る（SDL と同じ。D&D の受信の document-portal の枝）と、鍵を作って渡す（SDL に無い。送り側のため）。interface と受け入れ検査（T-43）は Opus |
 | 72 | `PaPiMeLa.Events.Quit` | `events/SDL_quit.c`、`SDL_windowevents.c` の WINDOW_CLOSE_REQUESTED の節、`SDL_events.c` の SDL_LogEvent | 小 | 22 | P1 | 一部移植 | Medium | Sonnet | SIGINT / SIGTERM を Quit にする手続き（Context をまたいで世代で配る）、最後のウィンドウの数え方、イベントのログの絞り方。クリーンルームの Events / Video から呼ぶ（2026-10-13） |
+| 73 | `PaPiMeLa.Surface.Colorspace` | `video/SDL_blit_slow.c` の `SDL_Blit_Slow_Float`（1:1 の経路）と `SDL_Blit_Slow` の 8 ビット成分の読み書き、`video/SDL_pixels.c` の転送関数と原色の変換行列、`video/SDL_surface.c` の白点・ヘッドルームの既定 | 中 | 27, 28 | P3 | 一部移植 | Medium | Opus | **実装済み（2026-10-24、§3 の 2）**: `PMLConvertPixelsAndColorspace`（YUV でもインデックスでもない形式の変換。色空間が同じで 4 バイト以下なら整数、違うか 5 バイト以上なら浮動小数）、転送関数（sRGB・PQ。線形は白点で割る・掛けるだけ。BT.709 などは SDL と同じく何もしない）、原色の変換行列、トーンマップ（chrome・none・倍率）、白点とヘッドルームの既定。`PMLConvertYUVPixels`（`PaPiMeLa.Surface.YUV`）が I0FL / I4FL / P010 などを任意の形式へ直すのに使う。SDL から外れた箇所: powf は Double の `Power` を通す。拡大縮小・ブレンド・変調・カラーキー・インデックス形式の出力は無い。RGB565 の入力は SDL_blit_N と丸めが違う（HANDOFF §8）。T-67 |
 
 ### 11.3 内訳サマリ
 
