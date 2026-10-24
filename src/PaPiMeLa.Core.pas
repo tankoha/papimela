@@ -22,9 +22,10 @@
       PAPIMELA_NO_SIGNAL_HANDLERS が真なら置かない
     - Hints・Properties・Log はサブシステムより先に作り、後に壊す（どのサブシステムも
       作るときからログを書ける）
+    - Joysticks は Joystick を要求したときだけ作る
 
   NOT RESOLVED:
-    - Joysticks は未実装のため常に nil。要求されたら EPMLUnsupported を投げる
+    - Gamepad と Haptic は未実装で、要求されたら EPMLUnsupported を投げる
 
   Copyright (C) 2026 papimela contributors
   （zlib ライセンス本文は papimela.inc を参照）
@@ -46,6 +47,7 @@ uses
   PaPiMeLa.Time,
   PaPiMeLa.Video,
   PaPiMeLa.Audio,
+  PaPiMeLa.Joystick,
   PaPiMeLa.TextInput;
 
 type
@@ -116,6 +118,7 @@ type
     FTimer     : TPMLTimerService;
     FVideo     : TPMLVideoSystem;
     FAudio     : TPMLAudioSystem;
+    FJoysticks : TPMLJoystickSystem;
     FTextInput : TPMLTextInputSystem;
     FSubsystems: TPMLSubsystems;
     FQuitSignals: Boolean;   // PMLInstallQuitSignals を呼んだ（Destroy で取り消す）
@@ -136,6 +139,7 @@ type
     property Timer     : TPMLTimerService    read FTimer;
     property Video     : TPMLVideoSystem     read FVideo;
     property Audio     : TPMLAudioSystem     read FAudio;
+    property Joysticks : TPMLJoystickSystem  read FJoysticks;
     property TextInput : TPMLTextInputSystem read FTextInput;
     property Subsystems: TPMLSubsystems      read FSubsystems;
   end;
@@ -270,10 +274,13 @@ begin
     FAudio := TPMLAudioSystem.Create(Self, Self, FEvents, FHints.GetHint(PML_HINT_AUDIO_DRIVER));
     FLog.Info(PML_LOG_CATEGORY_AUDIO, 'audio backend: ' + FAudio.BackendName);
   end;
-  if (TPMLSubsystem.Joystick in ASubsystems)
-    or (TPMLSubsystem.Gamepad in ASubsystems)
-    or (TPMLSubsystem.Haptic in ASubsystems) then
-    raise EPMLUnsupported.Create('the input subsystems are not implemented yet');
+  if (TPMLSubsystem.Gamepad in ASubsystems) or (TPMLSubsystem.Haptic in ASubsystems) then
+    raise EPMLUnsupported.Create('the gamepad and haptic subsystems are not implemented yet');
+  if TPMLSubsystem.Joystick in ASubsystems then
+  begin
+    FJoysticks := TPMLJoystickSystem.Create(Self, Self, FEvents, FHints);
+    FLog.Info(PML_LOG_CATEGORY_INPUT, 'joystick backends: ' + IntToStr(FJoysticks.BackendCount));
+  end;
 
   if TPMLSubsystem.TextInput in ASubsystems then
   begin
@@ -291,6 +298,7 @@ begin
   if Assigned(FEvents) then
     FEvents.KeyFilter := nil;
   FreeAndNil(FTextInput);
+  FreeAndNil(FJoysticks);
   FreeAndNil(FAudio);
   FreeAndNil(FVideo);
   FreeAndNil(FTimer);

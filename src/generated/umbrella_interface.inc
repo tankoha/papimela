@@ -23,6 +23,9 @@
 //   PaPiMeLa.Audio.Mixer
 //   PaPiMeLa.Audio.Wave
 //   PaPiMeLa.Audio
+//   PaPiMeLa.Joystick.GUID
+//   PaPiMeLa.Joystick.Backend
+//   PaPiMeLa.Joystick
 //   PaPiMeLa.TextInput
 //   PaPiMeLa.Time
 //   PaPiMeLa.Atomic
@@ -59,6 +62,7 @@ type
   TPMLComposition = PaPiMeLa.Types.TPMLComposition;
   TPMLTextEditingData = PaPiMeLa.Types.TPMLTextEditingData;
   TPMLDeleteSurroundingData = PaPiMeLa.Types.TPMLDeleteSurroundingData;
+  TPMLPowerState = PaPiMeLa.Types.TPMLPowerState;
   TPMLSubsystemTagHelper = type helper(PaPiMeLa.Types.TPMLSubsystemTagHelper) for TPMLSubsystemTag end;
 
 // ---- PaPiMeLa.Errors
@@ -105,6 +109,12 @@ type
   TPMLDragEventData = PaPiMeLa.Events.TPMLDragEventData;
   TPMLClipboardEventData = PaPiMeLa.Events.TPMLClipboardEventData;
   TPMLAudioDeviceEventData = PaPiMeLa.Events.TPMLAudioDeviceEventData;
+  TPMLJoystickDeviceEventData = PaPiMeLa.Events.TPMLJoystickDeviceEventData;
+  TPMLJoystickAxisEventData = PaPiMeLa.Events.TPMLJoystickAxisEventData;
+  TPMLJoystickBallEventData = PaPiMeLa.Events.TPMLJoystickBallEventData;
+  TPMLJoystickHatEventData = PaPiMeLa.Events.TPMLJoystickHatEventData;
+  TPMLJoystickButtonEventData = PaPiMeLa.Events.TPMLJoystickButtonEventData;
+  TPMLJoystickBatteryEventData = PaPiMeLa.Events.TPMLJoystickBatteryEventData;
   TPMLUserEventData = PaPiMeLa.Events.TPMLUserEventData;
   TPMLEvent = PaPiMeLa.Events.TPMLEvent;
   IPMLEventPumpSource = PaPiMeLa.Events.IPMLEventPumpSource;
@@ -865,6 +875,87 @@ type
   TPMLAudioSystem = PaPiMeLa.Audio.TPMLAudioSystem;
 procedure PMLMixFloat32Audio(ADst, ASrc: PSingle; ALen: Integer); inline;
 
+// ---- PaPiMeLa.Joystick.GUID
+type
+  TPMLGUID = PaPiMeLa.Joystick.GUID.TPMLGUID;
+const
+  PML_HARDWARE_BUS_UNKNOWN = PaPiMeLa.Joystick.GUID.PML_HARDWARE_BUS_UNKNOWN;
+  PML_HARDWARE_BUS_USB = PaPiMeLa.Joystick.GUID.PML_HARDWARE_BUS_USB;
+  PML_HARDWARE_BUS_BLUETOOTH = PaPiMeLa.Joystick.GUID.PML_HARDWARE_BUS_BLUETOOTH;
+  PML_HARDWARE_BUS_VIRTUAL = PaPiMeLa.Joystick.GUID.PML_HARDWARE_BUS_VIRTUAL;
+function PMLCRC16(ACRC: Word; AData: Pointer; ALength: PtrInt): Word; inline; overload;
+function PMLCRC16(ACRC: Word; const AText: String): Word; inline; overload;
+function PMLCreateJoystickGUID(
+  ABus, AVendor, AProduct, AVersion: Word;
+  const AVendorName, AProductName: String;
+  ADriverSignature, ADriverData: Byte): TPMLGUID; inline;
+function PMLCreateJoystickGUIDForName(const AName: String): TPMLGUID; inline;
+procedure PMLGetJoystickGUIDInfo(
+  const AGUID: TPMLGUID;
+  out AVendor, AProduct, AVersion, ACRC: Word); inline;
+procedure PMLSetJoystickGUIDVendor(var AGUID: TPMLGUID; AVendor: Word); inline;
+procedure PMLSetJoystickGUIDProduct(var AGUID: TPMLGUID; AProduct: Word); inline;
+procedure PMLSetJoystickGUIDVersion(var AGUID: TPMLGUID; AVersion: Word); inline;
+procedure PMLSetJoystickGUIDCRC(var AGUID: TPMLGUID; ACRC: Word); inline;
+function PMLIsJoystickVirtualGUID(const AGUID: TPMLGUID): Boolean; inline;
+function PMLIsJoystickHIDAPIGUID(const AGUID: TPMLGUID): Boolean; inline;
+function PMLIsJoystickXInputGUID(const AGUID: TPMLGUID): Boolean; inline;
+function PMLGUIDToString(const AGUID: TPMLGUID): String; inline;
+function PMLStringToGUID(const AText: String): TPMLGUID; inline;
+function PMLSameGUID(const A, B: TPMLGUID): Boolean; inline;
+function PMLZeroGUID: TPMLGUID; inline;
+
+// ---- PaPiMeLa.Joystick.Backend
+type
+  TPMLJoystickID = PaPiMeLa.Joystick.Backend.TPMLJoystickID;
+  TPMLJoystickIDs = PaPiMeLa.Joystick.Backend.TPMLJoystickIDs;
+  TPMLJoystickType = PaPiMeLa.Joystick.Backend.TPMLJoystickType;
+  TPMLJoystickConnectionState = PaPiMeLa.Joystick.Backend.TPMLJoystickConnectionState;
+  TPMLGamepadButton = PaPiMeLa.Joystick.Backend.TPMLGamepadButton;
+  TPMLGamepadAxis = PaPiMeLa.Joystick.Backend.TPMLGamepadAxis;
+  TPMLMappingKind = PaPiMeLa.Joystick.Backend.TPMLMappingKind;
+  TPMLInputMapping = PaPiMeLa.Joystick.Backend.TPMLInputMapping;
+  TPMLGamepadMapping = PaPiMeLa.Joystick.Backend.TPMLGamepadMapping;
+  TPMLJoystickCapability = PaPiMeLa.Joystick.Backend.TPMLJoystickCapability;
+  TPMLJoystickCapabilities = PaPiMeLa.Joystick.Backend.TPMLJoystickCapabilities;
+  TPMLJoystickCore = PaPiMeLa.Joystick.Backend.TPMLJoystickCore;
+  TPMLJoystickAxisInfo = PaPiMeLa.Joystick.Backend.TPMLJoystickAxisInfo;
+  TPMLJoystickBallData = PaPiMeLa.Joystick.Backend.TPMLJoystickBallData;
+  TPMLJoystick = PaPiMeLa.Joystick.Backend.TPMLJoystick;
+  TPMLJoystickBackend = PaPiMeLa.Joystick.Backend.TPMLJoystickBackend;
+  TPMLVirtualUpdateEvent = PaPiMeLa.Joystick.Backend.TPMLVirtualUpdateEvent;
+  TPMLVirtualPlayerIndexEvent = PaPiMeLa.Joystick.Backend.TPMLVirtualPlayerIndexEvent;
+  TPMLVirtualRumbleEvent = PaPiMeLa.Joystick.Backend.TPMLVirtualRumbleEvent;
+  TPMLVirtualLEDEvent = PaPiMeLa.Joystick.Backend.TPMLVirtualLEDEvent;
+  TPMLVirtualEffectEvent = PaPiMeLa.Joystick.Backend.TPMLVirtualEffectEvent;
+  TPMLVirtualSensorsEvent = PaPiMeLa.Joystick.Backend.TPMLVirtualSensorsEvent;
+  TPMLVirtualCleanupEvent = PaPiMeLa.Joystick.Backend.TPMLVirtualCleanupEvent;
+  TPMLVirtualJoystickDesc = PaPiMeLa.Joystick.Backend.TPMLVirtualJoystickDesc;
+  IPMLVirtualJoystickBackend = PaPiMeLa.Joystick.Backend.IPMLVirtualJoystickBackend;
+  TPMLJoystickBackendFactory = PaPiMeLa.Joystick.Backend.TPMLJoystickBackendFactory;
+const
+  PML_HAT_CENTERED = PaPiMeLa.Joystick.Backend.PML_HAT_CENTERED;
+  PML_HAT_UP = PaPiMeLa.Joystick.Backend.PML_HAT_UP;
+  PML_HAT_RIGHT = PaPiMeLa.Joystick.Backend.PML_HAT_RIGHT;
+  PML_HAT_DOWN = PaPiMeLa.Joystick.Backend.PML_HAT_DOWN;
+  PML_HAT_LEFT = PaPiMeLa.Joystick.Backend.PML_HAT_LEFT;
+  PML_HAT_RIGHTUP = PaPiMeLa.Joystick.Backend.PML_HAT_RIGHTUP;
+  PML_HAT_RIGHTDOWN = PaPiMeLa.Joystick.Backend.PML_HAT_RIGHTDOWN;
+  PML_HAT_LEFTUP = PaPiMeLa.Joystick.Backend.PML_HAT_LEFTUP;
+  PML_HAT_LEFTDOWN = PaPiMeLa.Joystick.Backend.PML_HAT_LEFTDOWN;
+  PML_JOYSTICK_AXIS_MIN = PaPiMeLa.Joystick.Backend.PML_JOYSTICK_AXIS_MIN;
+  PML_JOYSTICK_AXIS_MAX = PaPiMeLa.Joystick.Backend.PML_JOYSTICK_AXIS_MAX;
+  PML_MAX_RUMBLE_DURATION_MS = PaPiMeLa.Joystick.Backend.PML_MAX_RUMBLE_DURATION_MS;
+  PML_RUMBLE_RESEND_MS = PaPiMeLa.Joystick.Backend.PML_RUMBLE_RESEND_MS;
+  PML_LED_MIN_REPEAT_MS = PaPiMeLa.Joystick.Backend.PML_LED_MIN_REPEAT_MS;
+function PMLJoystickBackendNames: TStringArray; inline;
+function PMLEmptyGamepadMapping: TPMLGamepadMapping; inline;
+
+// ---- PaPiMeLa.Joystick
+type
+  TPMLJoystickBackgroundGuard = PaPiMeLa.Joystick.TPMLJoystickBackgroundGuard;
+  TPMLJoystickSystem = PaPiMeLa.Joystick.TPMLJoystickSystem;
+
 // ---- PaPiMeLa.TextInput
 type
   TPMLTextInputCapability = PaPiMeLa.TextInput.TPMLTextInputCapability;
@@ -980,6 +1071,28 @@ const
   PML_HINT_QUIT_ON_LAST_WINDOW_CLOSE = PaPiMeLa.Properties.PML_HINT_QUIT_ON_LAST_WINDOW_CLOSE;
   PML_HINT_NO_SIGNAL_HANDLERS = PaPiMeLa.Properties.PML_HINT_NO_SIGNAL_HANDLERS;
   PML_HINT_EVENT_LOGGING = PaPiMeLa.Properties.PML_HINT_EVENT_LOGGING;
+  PML_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS = PaPiMeLa.Properties.PML_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS;
+  PML_HINT_JOYSTICK_ARCADESTICK_DEVICES = PaPiMeLa.Properties.PML_HINT_JOYSTICK_ARCADESTICK_DEVICES;
+  PML_HINT_JOYSTICK_ARCADESTICK_DEVICES_EXCLUDED = PaPiMeLa.Properties.PML_HINT_JOYSTICK_ARCADESTICK_DEVICES_EXCLUDED;
+  PML_HINT_JOYSTICK_BLACKLIST_DEVICES = PaPiMeLa.Properties.PML_HINT_JOYSTICK_BLACKLIST_DEVICES;
+  PML_HINT_JOYSTICK_BLACKLIST_DEVICES_EXCLUDED = PaPiMeLa.Properties.PML_HINT_JOYSTICK_BLACKLIST_DEVICES_EXCLUDED;
+  PML_HINT_JOYSTICK_DRUM_DEVICES = PaPiMeLa.Properties.PML_HINT_JOYSTICK_DRUM_DEVICES;
+  PML_HINT_JOYSTICK_FLIGHTSTICK_DEVICES = PaPiMeLa.Properties.PML_HINT_JOYSTICK_FLIGHTSTICK_DEVICES;
+  PML_HINT_JOYSTICK_FLIGHTSTICK_DEVICES_EXCLUDED = PaPiMeLa.Properties.PML_HINT_JOYSTICK_FLIGHTSTICK_DEVICES_EXCLUDED;
+  PML_HINT_JOYSTICK_GAMECUBE_DEVICES = PaPiMeLa.Properties.PML_HINT_JOYSTICK_GAMECUBE_DEVICES;
+  PML_HINT_JOYSTICK_GAMECUBE_DEVICES_EXCLUDED = PaPiMeLa.Properties.PML_HINT_JOYSTICK_GAMECUBE_DEVICES_EXCLUDED;
+  PML_HINT_JOYSTICK_GUITAR_DEVICES = PaPiMeLa.Properties.PML_HINT_JOYSTICK_GUITAR_DEVICES;
+  PML_HINT_JOYSTICK_ROG_CHAKRAM = PaPiMeLa.Properties.PML_HINT_JOYSTICK_ROG_CHAKRAM;
+  PML_HINT_ROG_GAMEPAD_MICE = PaPiMeLa.Properties.PML_HINT_ROG_GAMEPAD_MICE;
+  PML_HINT_ROG_GAMEPAD_MICE_EXCLUDED = PaPiMeLa.Properties.PML_HINT_ROG_GAMEPAD_MICE_EXCLUDED;
+  PML_HINT_JOYSTICK_THROTTLE_DEVICES = PaPiMeLa.Properties.PML_HINT_JOYSTICK_THROTTLE_DEVICES;
+  PML_HINT_JOYSTICK_THROTTLE_DEVICES_EXCLUDED = PaPiMeLa.Properties.PML_HINT_JOYSTICK_THROTTLE_DEVICES_EXCLUDED;
+  PML_HINT_JOYSTICK_WHEEL_DEVICES = PaPiMeLa.Properties.PML_HINT_JOYSTICK_WHEEL_DEVICES;
+  PML_HINT_JOYSTICK_WHEEL_DEVICES_EXCLUDED = PaPiMeLa.Properties.PML_HINT_JOYSTICK_WHEEL_DEVICES_EXCLUDED;
+  PML_HINT_JOYSTICK_ZERO_CENTERED_DEVICES = PaPiMeLa.Properties.PML_HINT_JOYSTICK_ZERO_CENTERED_DEVICES;
+  PML_HINT_JOYSTICK_OLD_XBOXONE_CONTROLLERS = PaPiMeLa.Properties.PML_HINT_JOYSTICK_OLD_XBOXONE_CONTROLLERS;
+  PML_HINT_JOYSTICK_OLD_XBOXONE_CONTROLLERS_EXCLUDED = PaPiMeLa.Properties.PML_HINT_JOYSTICK_OLD_XBOXONE_CONTROLLERS_EXCLUDED;
+  PML_HINT_GAMEPAD_TYPE = PaPiMeLa.Properties.PML_HINT_GAMEPAD_TYPE;
 function PMLGetEnvironment(const AName: String; out AValue: String): Boolean; inline;
 function PMLStringBoolean(const AValue: String; ADefault: Boolean): Boolean; inline;
 function PMLStringInteger(const AValue: String; ADefault: Integer): Integer; inline;

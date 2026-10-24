@@ -71,8 +71,8 @@ type
     TextEditing, TextInput, TextEditingCandidates,
     TextInputDeleteSurrounding,          // papimela 独自（§7.3）
     MouseMotion, MouseButtonDown, MouseButtonUp, MouseWheel, MouseAdded, MouseRemoved,
-    JoystickAxisMotion, JoystickHatMotion, JoystickButtonDown, JoystickButtonUp,
-    JoystickAdded, JoystickRemoved, JoystickBatteryUpdated,
+    JoystickAxisMotion, JoystickBallMotion, JoystickHatMotion, JoystickButtonDown, JoystickButtonUp,
+    JoystickAdded, JoystickRemoved, JoystickBatteryUpdated, JoystickUpdateComplete,
     GamepadAxisMotion, GamepadButtonDown, GamepadButtonUp, GamepadAdded,
     GamepadRemoved, GamepadRemapped,
     FingerDown, FingerUp, FingerMotion, FingerCanceled,
@@ -180,6 +180,41 @@ type
     Recording: Boolean;        // True = 録音のデバイス
   end;
 
+  { JoystickAdded / JoystickRemoved / JoystickUpdateComplete の付随情報（SDL_JoyDeviceEvent）。 }
+  TPMLJoystickDeviceEventData = record
+    Which: LongWord;          // ジョイスティックの ID（TPMLJoystickID の値）
+  end;
+
+  TPMLJoystickAxisEventData = record
+    Which: LongWord;
+    Axis : Byte;
+    Value: SmallInt;          // -32768..32767
+  end;
+
+  TPMLJoystickBallEventData = record
+    Which: LongWord;
+    Ball : Byte;
+    XRel, YRel: SmallInt;
+  end;
+
+  TPMLJoystickHatEventData = record
+    Which: LongWord;
+    Hat  : Byte;
+    Value: Byte;              // PML_HAT_xxx のビットの和
+  end;
+
+  TPMLJoystickButtonEventData = record
+    Which : LongWord;
+    Button: Byte;
+    Down  : Boolean;
+  end;
+
+  TPMLJoystickBatteryEventData = record
+    Which  : LongWord;
+    State  : TPMLPowerState;
+    Percent: Integer;         // 0..100。分からなければ -1
+  end;
+
   TPMLUserEventData = record
     Code        : Int32;
     Data1, Data2: Pointer;
@@ -209,6 +244,12 @@ type
       10: (Drop            : TPMLDropEventData);
       11: (Drag            : TPMLDragEventData);
       12: (AudioDevice     : TPMLAudioDeviceEventData);
+      13: (JDevice         : TPMLJoystickDeviceEventData);
+      14: (JAxis           : TPMLJoystickAxisEventData);
+      15: (JBall           : TPMLJoystickBallEventData);
+      16: (JHat            : TPMLJoystickHatEventData);
+      17: (JButton         : TPMLJoystickButtonEventData);
+      18: (JBattery        : TPMLJoystickBatteryEventData);
       // Display / JAxis / GAxis / Finger ... は各サブシステム着手時に追加する。
       // 可変部への追加は既存コードに影響しない。
   end;
@@ -1503,6 +1544,39 @@ begin
     begin
       Add('which', IntToStr(AEvent.AudioDevice.Which));
       Add('recording', BoolToStr(AEvent.AudioDevice.Recording, True));
+    end;
+    // SDL_EventLogging の jaxis / jball / jhat / jbutton / jdevice。
+    TPMLEventKind.JoystickAxisMotion:
+    begin
+      Add('which', IntToStr(AEvent.JAxis.Which));
+      Add('axis', IntToStr(AEvent.JAxis.Axis));
+      Add('value', IntToStr(AEvent.JAxis.Value));
+    end;
+    TPMLEventKind.JoystickBallMotion:
+    begin
+      Add('which', IntToStr(AEvent.JBall.Which));
+      Add('ball', IntToStr(AEvent.JBall.Ball));
+      Add('xrel', IntToStr(AEvent.JBall.XRel));
+      Add('yrel', IntToStr(AEvent.JBall.YRel));
+    end;
+    TPMLEventKind.JoystickHatMotion:
+    begin
+      Add('which', IntToStr(AEvent.JHat.Which));
+      Add('hat', IntToStr(AEvent.JHat.Hat));
+      Add('value', IntToStr(AEvent.JHat.Value));
+    end;
+    TPMLEventKind.JoystickButtonDown, TPMLEventKind.JoystickButtonUp:
+    begin
+      Add('which', IntToStr(AEvent.JButton.Which));
+      Add('button', IntToStr(AEvent.JButton.Button));
+    end;
+    TPMLEventKind.JoystickAdded, TPMLEventKind.JoystickRemoved, TPMLEventKind.JoystickUpdateComplete:
+      Add('which', IntToStr(AEvent.JDevice.Which));
+    TPMLEventKind.JoystickBatteryUpdated:
+    begin
+      Add('which', IntToStr(AEvent.JBattery.Which));
+      Add('state', IntToStr(Ord(AEvent.JBattery.State)));
+      Add('percent', IntToStr(AEvent.JBattery.Percent));
     end;
   end;
   Result := GetEnumName(TypeInfo(TPMLEventKind), Ord(AEvent.Kind)) + ' (' + Details + ')';

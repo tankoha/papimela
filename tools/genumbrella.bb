@@ -60,6 +60,9 @@
    {:unit "PaPiMeLa.Audio.Mixer"}
    {:unit "PaPiMeLa.Audio.Wave"}
    {:unit "PaPiMeLa.Audio"}
+   {:unit "PaPiMeLa.Joystick.GUID"}
+   {:unit "PaPiMeLa.Joystick.Backend"}
+   {:unit "PaPiMeLa.Joystick"}
    {:unit "PaPiMeLa.TextInput"}
    {:unit "PaPiMeLa.Time"}
    {:unit "PaPiMeLa.Atomic"}

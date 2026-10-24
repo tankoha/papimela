@@ -23,6 +23,9 @@
 //   PaPiMeLa.Audio.Mixer
 //   PaPiMeLa.Audio.Wave
 //   PaPiMeLa.Audio
+//   PaPiMeLa.Joystick.GUID
+//   PaPiMeLa.Joystick.Backend
+//   PaPiMeLa.Joystick
 //   PaPiMeLa.TextInput
 //   PaPiMeLa.Time
 //   PaPiMeLa.Atomic
@@ -750,6 +753,103 @@ end;
 procedure PMLMixFloat32Audio(ADst, ASrc: PSingle; ALen: Integer);
 begin
   PaPiMeLa.Audio.PMLMixFloat32Audio(ADst, ASrc, ALen);
+end;
+
+// ---- PaPiMeLa.Joystick.GUID
+function PMLCRC16(ACRC: Word; AData: Pointer; ALength: PtrInt): Word;
+begin
+  Result := PaPiMeLa.Joystick.GUID.PMLCRC16(ACRC, AData, ALength);
+end;
+
+function PMLCRC16(ACRC: Word; const AText: String): Word;
+begin
+  Result := PaPiMeLa.Joystick.GUID.PMLCRC16(ACRC, AText);
+end;
+
+function PMLCreateJoystickGUID(
+  ABus, AVendor, AProduct, AVersion: Word;
+  const AVendorName, AProductName: String;
+  ADriverSignature, ADriverData: Byte): TPMLGUID;
+begin
+  Result := PaPiMeLa.Joystick.GUID.PMLCreateJoystickGUID(ABus, AVendor, AProduct, AVersion, AVendorName, AProductName, ADriverSignature, ADriverData);
+end;
+
+function PMLCreateJoystickGUIDForName(const AName: String): TPMLGUID;
+begin
+  Result := PaPiMeLa.Joystick.GUID.PMLCreateJoystickGUIDForName(AName);
+end;
+
+procedure PMLGetJoystickGUIDInfo(
+  const AGUID: TPMLGUID;
+  out AVendor, AProduct, AVersion, ACRC: Word);
+begin
+  PaPiMeLa.Joystick.GUID.PMLGetJoystickGUIDInfo(AGUID, AVendor, AProduct, AVersion, ACRC);
+end;
+
+procedure PMLSetJoystickGUIDVendor(var AGUID: TPMLGUID; AVendor: Word);
+begin
+  PaPiMeLa.Joystick.GUID.PMLSetJoystickGUIDVendor(AGUID, AVendor);
+end;
+
+procedure PMLSetJoystickGUIDProduct(var AGUID: TPMLGUID; AProduct: Word);
+begin
+  PaPiMeLa.Joystick.GUID.PMLSetJoystickGUIDProduct(AGUID, AProduct);
+end;
+
+procedure PMLSetJoystickGUIDVersion(var AGUID: TPMLGUID; AVersion: Word);
+begin
+  PaPiMeLa.Joystick.GUID.PMLSetJoystickGUIDVersion(AGUID, AVersion);
+end;
+
+procedure PMLSetJoystickGUIDCRC(var AGUID: TPMLGUID; ACRC: Word);
+begin
+  PaPiMeLa.Joystick.GUID.PMLSetJoystickGUIDCRC(AGUID, ACRC);
+end;
+
+function PMLIsJoystickVirtualGUID(const AGUID: TPMLGUID): Boolean;
+begin
+  Result := PaPiMeLa.Joystick.GUID.PMLIsJoystickVirtualGUID(AGUID);
+end;
+
+function PMLIsJoystickHIDAPIGUID(const AGUID: TPMLGUID): Boolean;
+begin
+  Result := PaPiMeLa.Joystick.GUID.PMLIsJoystickHIDAPIGUID(AGUID);
+end;
+
+function PMLIsJoystickXInputGUID(const AGUID: TPMLGUID): Boolean;
+begin
+  Result := PaPiMeLa.Joystick.GUID.PMLIsJoystickXInputGUID(AGUID);
+end;
+
+function PMLGUIDToString(const AGUID: TPMLGUID): String;
+begin
+  Result := PaPiMeLa.Joystick.GUID.PMLGUIDToString(AGUID);
+end;
+
+function PMLStringToGUID(const AText: String): TPMLGUID;
+begin
+  Result := PaPiMeLa.Joystick.GUID.PMLStringToGUID(AText);
+end;
+
+function PMLSameGUID(const A, B: TPMLGUID): Boolean;
+begin
+  Result := PaPiMeLa.Joystick.GUID.PMLSameGUID(A, B);
+end;
+
+function PMLZeroGUID: TPMLGUID;
+begin
+  Result := PaPiMeLa.Joystick.GUID.PMLZeroGUID;
+end;
+
+// ---- PaPiMeLa.Joystick.Backend
+function PMLJoystickBackendNames: TStringArray;
+begin
+  Result := PaPiMeLa.Joystick.Backend.PMLJoystickBackendNames;
+end;
+
+function PMLEmptyGamepadMapping: TPMLGamepadMapping;
+begin
+  Result := PaPiMeLa.Joystick.Backend.PMLEmptyGamepadMapping;
 end;
 
 // ---- PaPiMeLa.Time

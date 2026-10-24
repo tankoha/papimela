@@ -33,6 +33,7 @@ uses
   PaPiMeLa.Audio.PipeWire,      // オーディオ 'pipewire'
   PaPiMeLa.Audio.Pulse,         // オーディオ 'pulseaudio'（PipeWire の次）
   PaPiMeLa.Audio.Alsa,          // オーディオ 'alsa'（PulseAudio の次）
+  PaPiMeLa.Joystick.Virtual,    // ジョイスティック 'virtual'（仮想。アプリが足す機器）
   PaPiMeLa.TextInput.IBus,      // IME 'ibus'（fcitx5 が IBus を装っているときは断る）
   PaPiMeLa.TextInput.Fcitx,     // IME 'fcitx'
   PaPiMeLa.TextInput.WaylandTI,  // IME 'wayland'（text-input-v3。Fcitx に繋がらないとき）

@@ -158,6 +158,9 @@ type
     BeforeChars, AfterChars: Integer;
   end;
 
+  { 電源の状態（SDL_PowerState）。ジョイスティックのバッテリーが使う。Error は SDL の -1。 }
+  TPMLPowerState = (Error, Unknown, OnBattery, NoBattery, Charging, Charged);
+
   TPMLSubsystemTagHelper = type helper for TPMLSubsystemTag
     function ToString: String;
   end;

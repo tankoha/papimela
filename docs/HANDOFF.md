@@ -29,6 +29,19 @@
 > SDL の不具合 D-78（YV12 / IYUV / I0FL の詰めた画素の部分の更新が 3 つ目の平面を誤った位置に書く。参照版の退行で 3.4.2 は正しい。papimela は正しい位置）。
 > README の上流の不具合にも載せた（持ち主の判断）。表示サーバ無しの 42 本が全部通る。**手元（Pi 5）の対話の確認は残っていない。**
 > **参照版の SDL は積和を融合しない版（`-ffp-contract=off`）で作ったものを期待値に使う**（§2.1）。
+> **続けてジョイスティックの 1 段目を済ませた**（2026-10-24。#59 のコアと #61 の仮想。T-68。SDL の不具合 D-79）。
+> ジョイスティックとゲームパッドは 3 段で進める（オーディオと同じ）:
+> - **1 段目（済み）**: `PaPiMeLa.Joystick.Backend`（バックエンドの抽象・開いたジョイスティック `TPMLJoystick`・コアの口）、`PaPiMeLa.Joystick`
+>   （`Ctx.Joysticks`: 一覧・ID・player index・開く閉じる・状態の送り込み・更新・種類の判定）、`.Joystick.GUID`、`.Joystick.Tables`（VID/PID の表 11 個と
+>   Valve の 608 件。`tools/genjoystick.bb` が作る）、`.Joystick.Virtual`（仮想。**Haiku が実装**、こちらが検査と見直し）。イベントは JoystickAdded など 9 種を足した。
+>   Context は `[TPMLSubsystem.Joystick]` で `Joysticks` を作る。SDL の参照版は `/home/joerg/claude-work/sdl-ref-build-joy`（`-DSDL_HIDAPI=ON -DSDL_HIDAPI_JOYSTICK=OFF`
+>   でないと仮想ジョイスティックが作られない）。
+> - **2 段目（次）**: ゲームパッド（#62）。`SDL_gamepad.c` 4448 行: マッピング文字列の読み書き、外部 DB（`gamecontrollerdb.txt` 互換）、ボタン・軸の割り当て、
+>   `IsGamepad` / `GamepadAdded` など、`TPMLGamepad`（Joystick 上のビュー）、`controller_type` による種類。**`SDL_PrivateJoystickGetAutoGamepadMapping`
+>   など内部の関数は静的ライブラリから直接呼べる**ので、仮想ジョイスティックの自動マッピングも SDL と突き合わせられる。仮想の `GamepadMapping` は Haiku が写してあるが
+>   まだ検査していない（ゲームパッドの種類は IsGamepad が入ってから）。
+> - **3 段目**: Linux の実機（#18 evdev の能力判定、#19 udev、#60 `Joystick.Linux`、ランブルの `ff_effect`）。`/dev/input/event*` はこの端末では `input` グループが要る
+>   （`joerg` は入っていない。`/dev/uinput` も root のみ）ので、実機の検査には権限が要る。evdev の ioctl 番号と定数は `genpipewire.bb` のように C で作る。
 > 次の候補は §3。
 
 ## 1. 今どこにいるか
@@ -37,8 +50,8 @@
 |---|---|
 | リポジトリ | https://github.com/tankoha/papimela（公開、Issues 有効）。手元のセッションは `master` に直接 push、クラウドのセッションは指定のブランチへ push して、手元で早送りマージする |
 | CI | 緑。rawpaco 激辛、checkorigin、アンブレラの古さ（`genumbrella.bb --check`）、図の検査、表示サーバ無しのテスト 32 本、Pong の自己検査、GLES2 と ソフトウェアのドライバの画素比較（llvmpipe）。ジョブ 60 分・GLES2 の手順 5 分の時間制限つき |
-| テスト | 表示サーバ無しの 42 本はすべて成功（2026-10-15 に Pi5 で流した。以前の「件」は数え方が違うので、これからはこの数え方）。PipeWire の T-54 と PulseAudio の T-59 は手元専用で、どちらも Pi5 で通る。PipeWire の T-54 は手元専用（30 件）。手元専用と対話の検査は `docs/TEST-LOG.md` の各行 |
-| 不具合 | 76 件。うち上流 SDL の 28 件は未報告（D-53 は SDL 自身が FIXME で知っている。他の 24 件は報告するかを検討中。方針は `CLAUDE.md`。README の一覧に全件を載せた） |
+| テスト | 表示サーバ無しの 43 本はすべて成功（2026-10-15 に Pi5 で流した。以前の「件」は数え方が違うので、これからはこの数え方）。PipeWire の T-54 と PulseAudio の T-59 は手元専用で、どちらも Pi5 で通る。PipeWire の T-54 は手元専用（30 件）。手元専用と対話の検査は `docs/TEST-LOG.md` の各行 |
+| 不具合 | 77 件。うち上流 SDL の 29 件は未報告（D-53 は SDL 自身が FIXME で知っている。他の 24 件は報告するかを検討中。方針は `CLAUDE.md`。README の一覧に全件を載せた） |
 | 規模 | 手書き 63 ユニット（`src/*.pas`）+ 生成（Wayland プロトコル 21、キーボードの表 2、EGL / GLES2 の定数 2、DebugText の字形 1、音声のチャンネル数の変換と周波数の変換の係数 2、PipeWire の定数 1、アンブレラ 2）。手書きの `src/*.pas` が約 4.0 万行、生成を含めて約 5.5 万行（2026-10-14 に数え直した） |
 
 ### 動いているもの
@@ -63,7 +76,7 @@ EGL の GL コンテキスト（スワップ間隔はコンテキストごと）
 #21、#45、#46、#47、#48、#49、#50、#51、#52、#53（`.Audio.Mixer` は F32 の分だけ）、#55、#56、#64、#68（YUV から ARGB8888 への変換、I444 のテクスチャ、P010 から XBGR2101010 への変換、I0FL / I4FL から RGB48 への変換）、#70、#71。
 
 未着手: #11、#18–21、#23、#30、#40、#44、
-#54、#57–63（WAV、PulseAudio・ALSA、ジョイスティック、ゲームパッド、ハプティクス）、#65–67、#69。
+#18–19、#60、#62–63（evdev・udev・Linux のジョイスティック、ゲームパッド、ハプティクス。#59 と #61 は済み）、#65–67、#69。
 
 ## 2. 前のセッション（2026-10-14、手元）でしたこと
 
@@ -238,7 +251,7 @@ Pong もすべて書き換え、今は `uses SysUtils, Math, PaPiMeLa` だけで
 表示サーバ無しで通るもの（CI と同じ）:
 
 ```bash
-for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_render_transform test_render_target test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_drop test_drag_source test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds test_audio_convert test_audio_stream test_audio_mixer test_audio_wave test_audio_device test_pipewire_abi test_pulse_abi test_alsa_abi test_alsa_chmap test_audio_autoselect test_texture_lock test_texture_colorkey test_yuv_hd test_colorspace; do
+for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_render_transform test_render_target test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_drop test_drag_source test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds test_audio_convert test_audio_stream test_audio_mixer test_audio_wave test_audio_device test_pipewire_abi test_pulse_abi test_alsa_abi test_alsa_chmap test_audio_autoselect test_texture_lock test_texture_colorkey test_yuv_hd test_colorspace test_joystick; do
   fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/$t test/$t.pas && ./test/$t
 done
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -oexamples/pong examples/pong.pas && ./examples/pong --selftest
@@ -266,7 +279,7 @@ env -u WAYLAND_DISPLAY LIBGL_ALWAYS_SOFTWARE=1 ./test/test_render_gles2   # Mesa
 cd papimela && mkdir -p lib
 B='fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib'
 # 0. 表示サーバ無しの分（CI と同じ。手元の新しい Mesa でも通るか）
-for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds test_audio_convert test_audio_stream test_audio_mixer test_audio_wave test_audio_device test_pipewire_abi test_pulse_abi test_alsa_abi test_alsa_chmap test_audio_autoselect test_texture_lock test_texture_colorkey test_yuv_hd test_colorspace; do
+for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds test_audio_convert test_audio_stream test_audio_mixer test_audio_wave test_audio_device test_pipewire_abi test_pulse_abi test_alsa_abi test_alsa_chmap test_audio_autoselect test_texture_lock test_texture_colorkey test_yuv_hd test_colorspace test_joystick; do
   $B -otest/$t test/$t.pas && ./test/$t | tail -1
 done
 # 1. 実機の Wayland（自動判定。最後の行が「結論」で終わればよい）
