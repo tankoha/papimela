@@ -36,9 +36,10 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y fpc
-          # GPU のドライバ（GLES2）の検査に、Mesa のソフトウェア実装（llvmpipe）と
+          # GPU のドライバ（GLES2 とデスクトップ GL）の検査に、Mesa のソフトウェア実装（llvmpipe）と
           # 窓の無い EGL（surfaceless）を使う。
-          sudo apt-get install -y libegl1 libgles2 libegl-mesa0 libgl1-mesa-dri libwayland-client0
+          # libgl1 はデスクトップ GL（libGL.so.1。関数は dlsym で引く）。
+          sudo apt-get install -y libegl1 libgles2 libegl-mesa0 libgl1-mesa-dri libgl1 libwayland-client0
 
       - name: Build rawpaco
         working-directory: .rawpaco
@@ -122,6 +123,18 @@ jobs:
           set -eu
           fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_render_gles2 test/test_render_gles2.pas
           LIBGL_ALWAYS_SOFTWARE=1 ./test/test_render_gles2
+
+      # デスクトップ GL（互換プロファイル 2.1。EGL の surfaceless 経由）のドライバとシェーダ。同じく llvmpipe で描く。
+      # シェーダの層は GLSL の 13 本のコンパイルと uniform を見て、ドライバはソフトウェアのドライバと画素で比べる
+      # （NPOT・矩形テクスチャ・2 の冪乗・シェーダ無しの 4 通り）。ウィンドウの区間は Wayland が無いので飛ばされる。
+      - name: Compare the OpenGL render driver with the software one (llvmpipe)
+        timeout-minutes: 5
+        run: |
+          set -eu
+          fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_render_gl_shaders test/test_render_gl_shaders.pas
+          LIBGL_ALWAYS_SOFTWARE=1 ./test/test_render_gl_shaders
+          fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_render_gl test/test_render_gl.pas
+          LIBGL_ALWAYS_SOFTWARE=1 ./test/test_render_gl
 
       # 図と実装の乖離検査。英日の Mermaid ブロックの同一性と、図に出てくる型が
       # 実装に存在することを確認する。速いので lint より先に置く。

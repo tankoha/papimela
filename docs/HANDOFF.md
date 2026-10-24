@@ -4,7 +4,9 @@
 
 >   1. **ゲームパッドは接続されていた**（2026-10-25 に確認。GameSir-K1 Controller for Xbox、`event11` + `js0`、`input` グループで読める）。T-71〜T-73 の実機の確認は済み（一覧・ゲームパッド判定・軸 6・ハット 1・ボタン 16・入力が読める。TEST-LOG の先頭）。**ただしこの機器は FF（EV_FF）を出さない**ので、ランブルは FALSE（カーネルの力覚の経路が無い）。力覚（ランブル・Haptic）の実機の確認は、FF を持つ機器（xpad で動く Xbox 系、FF 付きハンドルなど）がつながったときに残る。
 >   2. **Haptic（#63）を済ませた**（2026-10-25。Sonnet 5.5 の手元のセッション）: `PaPiMeLa.Haptic.Backend`（効果の型 `TPMLHapticEffect`・抽象バックエンド・開いた機器 `TPMLHaptic`）、`PaPiMeLa.Haptic`（`Ctx.Haptics` = `TPMLHapticSystem`。一覧・開く・マウス・ジョイスティックから）、`PaPiMeLa.Haptic.Linux`（evdev の FF。`PMLHapticToFFEffect` は SDL の `SDL_SYS_ToFFEffect` と 735 場面で全バイト一致）。`Platform.Evdev` に FF の共用体（一定・傾斜・条件）・`EVIOCGEFFECTS`・FF の定数を足し（`tools/genevdev.bb`）、`TPMLEvdevNode` に `WriteFF` / `GetEffectCount` を足した。ヒントは `PAPIMELA_JOYSTICK_HAPTIC_AXES` と `PAPIMELA_HAPTIC_GAIN_MAX`。Context は `[TPMLSubsystem.Haptic]` で `Haptics` を作る（ジョイスティックの後・先に壊す）。T-76（201 件）。**検査を実装の後に書いた**ので、変異 56 通りで歯を確かめた（TEST-LOG の T-76）。SDL の不具合 D-84〜D-86 を見つけた（偽の FF 機器に SDL のコードを通して確かめた。`tools/haptic-expect/haptic_suspects.c`）。**README の上流の不具合に D-84〜D-86 を載せるかは持ち主の判断待ち**。
->   3. 次の仕事は、おすすめの順に libdecor（#69）、タブレット/ペン（#66）、Render.GL（#44）。作業の木は T-76 まで commit する（CI が緑かは push の後に見る）。
+>   3. **Render.GL（#44）を済ませた**（同日。計画は `~/.claude/plans/precious-puzzling-lamport.md`。持ち主の決定: **GL 2.1 の互換プロファイル（SDL どおり）で、コア 3.x は将来の別件。自動選択は `opengl` を `gles2` より先にし、作れなければ次へ進む**）。段 0 はスパイク 5（EGL でデスクトップ GL が作れる。V3D は GL 3.1 まで、コア 3.3 は作れない）、段 1 は `PaPiMeLa.Platform.GL`（`tools/gengl.bb` が GL ヘッダから生成。T-77）、段 2 は `Video.EGL` のコンテキストごとの API と、デスクトップ GL の関数を libGL の dlsym で引く道（`eglGetProcAddress` は存在しない名前にも非 nil を返す。T-78）、段 3 は T-22 の場面を `test/render_scenes.inc` に括り出して GLES2 と GL で共有（`AdjustTolerance` でドライバごとに許容を持つ。GLES2 は既定のまま）と、`Platform.EGL.Surfaceless`（窓の無い EGL ディスプレイの共有の参照カウント）、段 4 は `PaPiMeLa.Render.GL`（本体。私が書いた）と `.Render.GL.Shaders`（Sonnet のサブエージェント。SDL の GLSL を機械的に写し、C の文字列と全文を突き合わせた）。T-79（ドライバ。オフスクリーン 145 件 + 手元のウィンドウ）、T-80（シェーダ。82 件）。**SDL から外した所は DESIGN #44 の行**（最近傍の境目の補正、YUV の変換結果を挟む、NPOT の奇数の YUV の余白、NPOT でないときは INDEX8・I444・ピクセルアートを持たない、シザーを「ビューポート ∩ クリップ」にする、行の長さを戻す）。**CI と同じ Ubuntu 24.04（arm64、Mesa 25.2.8）の隔離環境**を `/home/joerg/claude-work/ubuntu2404-arm64/run.sh` に作った（リポジトリの外。使い方は run.sh の頭。`apt-get install` のあと `dpkg -r --force-depends man-db` と `dpkg --configure -a` が要った）。
+>   4. **SDL の疑い（読んだだけ・papimela の写しで確かめた。不具合一覧には載せていない）**: `shaders_gl.c` の検証リストに `glUniform4fARB` が無い（無いときに NULL を呼ぶ。実機では起きない）。リンクの成否を見ない（`glGetError` だけ）。`GL_PACK_ROW_LENGTH` と `GL_UNPACK_ROW_LENGTH` を設定して戻さない（アプリ自身の GL に残る）。NPOT でない道（矩形テクスチャ・2 の冪乗への切り上げ）で、パレットの検索（`/256.0` の正規化のまま）・I444（UVCoordScale 0.5）・ピクセルアートと線形パレットの `texel_size` が合わない（実機の GL 2.0 以上は NPOT なので通らない道。papimela は検査用のフックでこの道を通して確かめた）。`GL_CreateRenderer` のエラー経路で確保済みのメモリを解放しない。YUV のシェーダが変換結果を 0..1 に挟まずに色を掛ける（飽和した色に色の変調と合成を掛けると、ソフトウェアのレンダラと 1 成分 35 割れる。SDL のレンダラ同士の不一致）。参照版の SDL を `-DSDL_OPENGL=ON` で作って実物と突き合わせる足場は、時間が無くて作っていない（計画の段 3 の「任意」）。
+>   5. 次の仕事は、おすすめの順に libdecor（#69）、タブレット/ペン（#66）、Vulkan（#67。Vulkan 型の宣言を papimela が持つか外部に委ねるかの判断が要る）。作業の木は T-80 まで commit する（CI が緑かは push の後に見る）。
  **2026-10-14 の手元のセッションで**: §3 の 3b（パレット、INDEX8）と 3c（YUV。YV12 / IYUV / NV12 / NV21 / YUY2 / UYVY / YVYU）を
 > 済ませ、テクスチャの種類（§3 の 1）は終わった。README の上流の不具合に D-58〜D-61 を載せた（持ち主の判断）。SDL の不具合を
 > 4 つ見つけた（D-60〜D-63）。表示サーバ無しの 28 本（1243 件）と T-22（llvmpipe・radeonsi・窓）は全部通る。
@@ -62,7 +64,7 @@
 > **再開時の最初にやること（2026-10-25 時点）**:
 >   1. FF を持つ機器がつながったら、`Ctx.Haptics`（一覧・`Open`・`InitRumble` / `PlayRumble`）とジョイスティック経由の `OpenFromJoystick` で実機の力覚を確かめ、TEST-LOG に書く（今の GameSir-K1 は FF が無い）。偽物の検査が見られない所: 実機の `EVIOCGEFFECTS` の値、`FF_GAIN` / `FF_AUTOCENTER` の write の受け入れ、効果のアップロードの受け入れ。
 >   2. README の「上流の不具合」に D-84〜D-86 を載せるかは持ち主の判断待ち（コード側の確認は済み）。
->   3. 作業の木は T-76 の commit を push した後に、CI が緑かを見る。
+>   3. 作業の木は T-80 まで commit した後、push して CI が緑かを見る。デスクトップ GL の実機（radeonsi）での T-79 は、手元の端末が Pi 5（V3D）なので、別の機械で流したら TEST-LOG に書く。
 > 次の候補は §3。
 
 ## 1. 今どこにいるか
@@ -73,7 +75,7 @@
 | CI | 緑。rawpaco 激辛、checkorigin、アンブレラの古さ（`genumbrella.bb --check`）、図の検査、表示サーバ無しのテスト 32 本、Pong の自己検査、GLES2 と ソフトウェアのドライバの画素比較（llvmpipe）。ジョブ 60 分・GLES2 の手順 5 分の時間制限つき |
 | テスト | 表示サーバ無しの 46 本はすべて成功（2026-10-15 に Pi5 で流した。以前の「件」は数え方が違うので、これからはこの数え方）。PipeWire の T-54 と PulseAudio の T-59 は手元専用で、どちらも Pi5 で通る。PipeWire の T-54 は手元専用（30 件）。手元専用と対話の検査は `docs/TEST-LOG.md` の各行 |
 | 不具合 | 83 件（D-81 は papimela 自身の不具合、D-82〜D-86 は上流 SDL）。うち上流 SDL の 34 件は未報告（D-53 は SDL 自身が FIXME で知っている。他の 25 件は報告するかを検討中。方針は `CLAUDE.md`。README の一覧に全件を載せた） |
-| 規模 | 手書き 66 ユニット（`src/*.pas`）+ 生成（Wayland プロトコル 21、キーボードの表 2、EGL / GLES2 の定数 2、DebugText の字形 1、音声のチャンネル数の変換と周波数の変換の係数 2、PipeWire の定数 1、アンブレラ 2）。手書きの `src/*.pas` が約 4.0 万行、生成を含めて約 5.5 万行（2026-10-14 に数え直した） |
+| 規模 | 手書き 71 ユニット（`src/*.pas`）+ 生成（Wayland プロトコル 21、キーボードの表 2、EGL / GLES2 の定数 2、DebugText の字形 1、音声のチャンネル数の変換と周波数の変換の係数 2、PipeWire の定数 1、アンブレラ 2）。手書きの `src/*.pas` が約 4.0 万行、生成を含めて約 5.5 万行（2026-10-14 に数え直した） |
 
 ### 動いているもの
 
@@ -97,7 +99,7 @@ EGL の GL コンテキスト（スワップ間隔はコンテキストごと）
 #21、#45、#46、#47、#48、#49、#50、#51、#52、#53（`.Audio.Mixer` は F32 の分だけ）、#55、#56、#64、#68（YUV から ARGB8888 への変換、I444 のテクスチャ、P010 から XBGR2101010 への変換、I0FL / I4FL から RGB48 への変換）、#70、#71。
 
 未着手: #11、#18–21、#23、#30、#40、#44、
-#18–19、#66–67、#69（#59–63・#65 は済み）。
+#18–19、#66–67、#69（#44・#59–63・#65 は済み）。
 
 ## 2. 前のセッション（2026-10-14、手元）でしたこと
 

@@ -797,6 +797,67 @@ begin
   R.RenderTexture(T, FR(0, 0, 0, 0), FR(32, 42, 24, 18));
 end;
 
+{ 作ったばかりのテクスチャ（中身は 0 = 透明な黒）を、一部だけ更新して全体を描く。更新していない部分が 0 のまま描かれる
+  （SDL は未定義。ソフトウェアのドライバと同じ絵にするため、GPU でも 0 で始める）。合成なしで描いて、アルファも見る。 }
+procedure SceneTextureFresh(R: TPMLRenderer);
+var
+  T: TPMLTexture;
+  P: array[0..3] of TPMLColor;
+  I: Integer;
+begin
+  Background(R);
+  T := R.CreateTexture(PML_PIXELFORMAT_ARGB8888, TPMLTextureAccess.Static, 8, 8);
+  for I := 0 to 3 do
+    P[I] := TPMLColor.Make(250, 120, 30, 255);
+  T.Update(TPMLRect.Make(2, 3, 2, 2), @P[0], 8);
+  T.BlendMode := TPMLBlendMode.None;
+  R.RenderTexture(T, FR(0, 0, 0, 0), FR(4, 4, 32, 32));
+end;
+
+{ 半透明の描画先へ、合成モードごとに描いて、アルファの成分まで比べる。背景は不透明なので、通常の場面では
+  アルファの係数の違い（Add の出力アルファなど）が見えない。描画先を透明に近い色で始め、その描画先を
+  合成なしで画面へ写して、アルファも画面に残す。 }
+procedure SceneBlendAlpha(R: TPMLRenderer);
+var
+  T: TPMLTexture;
+  I: Integer;
+  Modes: array[0..3] of TPMLBlendMode;
+begin
+  Modes[0] := TPMLBlendMode.Blend;
+  Modes[1] := TPMLBlendMode.Add;
+  Modes[2] := TPMLBlendMode.Modulate;
+  Modes[3] := TPMLBlendMode.Multiply;
+  Background(R);
+  T := R.CreateTexture(PML_PIXELFORMAT_ARGB8888, TPMLTextureAccess.Target, 32, 16);
+  R.RenderTarget := T;
+  R.BlendMode := TPMLBlendMode.None;
+  R.DrawColor := TPMLColor.Make(50, 100, 150, 100);
+  R.Clear;
+  for I := 0 to 3 do
+  begin
+    R.BlendMode := Modes[I];
+    R.DrawColor := TPMLColor.Make(200, 100, 50, 160);
+    R.FillRect(FR(I * 8, 0, 8, 16));
+  end;
+  R.RenderTarget := nil;
+  T.BlendMode := TPMLBlendMode.None;
+  R.RenderTexture(T, FR(0, 0, 0, 0), FR(0, 0, 32, 16));
+end;
+
+{ クリップ矩形を張ったままの Clear は、クリップを無視して描画先全体を塗る（SDL と同じ）。 }
+procedure SceneClearIgnoresClip(R: TPMLRenderer);
+begin
+  Background(R);
+  R.ClipRect := TPMLRect.Make(10, 10, 20, 20);
+  R.DrawColor := TPMLColor.Make(0, 0, 255, 255);
+  R.FillRect(FR(12, 12, 4, 4));       // クリップの中を 1 度描く（シザーを有効にしておく）
+  R.DrawColor := TPMLColor.Make(0, 255, 0, 255);
+  R.Clear;
+  R.DrawColor := TPMLColor.Make(255, 0, 0, 255);
+  R.FillRect(FR(0, 0, 64, 12));       // クリップの外は塗れない
+  R.ClipRect := TPMLRect.Make(0, 0, 0, 0);
+end;
+
 { ---- ドライバが INDEX8 と YUV を自分で持つこと（GLES2 と GL で共通） ---- }
 
 { GPU だけの確かめ。ドライバが INDEX8 を自分で持つこと（レンダラの肩代わりでないこと）と、
@@ -998,5 +1059,8 @@ begin
   CompareA('パレット（INDEX8。拡大・合成・変調・回転・色の変更・部分更新・BGRA32 の描画先）', @ScenePalette, 2);
   CompareA('YUV（7 形式・5 つの色空間・奇数・拡大・変調・回転・平面ごとと部分の更新）', @SceneYUV, 3);
   CompareA('YUV の I444（5 つの色空間・奇数・拡大・変調・回転・平面ごとと部分の更新・BGRA の描画先）', @SceneYUV444, 3);
+  CompareA('半透明の描画先への合成 4 種（アルファの成分まで）', @SceneBlendAlpha, 2);
+  CompareA('作ったばかりのテクスチャの一部更新（残りは 0）', @SceneTextureFresh, 0);
+  CompareA('クリップを張ったままの Clear（クリップを無視する）', @SceneClearIgnoresClip, 0);
   CompareA('Lock / Unlock / LockToSurface（ARGB・INDEX8・IYUV・NV12・YUY2・サーフェス。全体と部分）', @SceneLock, 2);
 end;

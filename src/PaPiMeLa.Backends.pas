@@ -39,6 +39,7 @@ uses
   PaPiMeLa.TextInput.IBus,      // IME 'ibus'（fcitx5 が IBus を装っているときは断る）
   PaPiMeLa.TextInput.Fcitx,     // IME 'fcitx'
   PaPiMeLa.TextInput.WaylandTI,  // IME 'wayland'（text-input-v3。Fcitx に繋がらないとき）
+  PaPiMeLa.Render.GL,           // レンダラ 'opengl'（デスクトップ GL。GLES2 より先に選ぶ）
   PaPiMeLa.Render.GLES2;        // レンダラ 'gles2'
 
 implementation

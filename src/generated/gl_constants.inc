@@ -1,5 +1,5 @@
 { src/generated/gl_constants.inc — tools/gengl.bb が作る。手で直さない。
-  SDL の render/opengl が使う GL の定数（85 件）。値は GL/gl.h と GL/glext.h から。 }
+  SDL の render/opengl が使う GL の定数（88 件）。値は GL/gl.h と GL/glext.h から。 }
   GL_BGRA = $80E1;
   GL_BLEND = $0BE2;
   GL_CLAMP_TO_EDGE = $812F;
@@ -85,3 +85,6 @@
   GL_VERTEX_ARRAY = $8074;
   GL_VERTEX_SHADER_ARB = $8B31;
   GL_ZERO = 0;
+  GL_EXTENSIONS = $1F03;
+  GL_RENDERER = $1F01;
+  GL_VENDOR = $1F00;

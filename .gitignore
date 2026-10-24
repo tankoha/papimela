@@ -96,3 +96,5 @@ test/test_haptic
 spikes/spike5_egl_desktop_gl
 test/test_platform_gl
 test/test_gl_desktop_window
+test/test_render_gl
+test/test_render_gl_shaders

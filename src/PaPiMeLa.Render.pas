@@ -1543,9 +1543,20 @@ begin
   begin
     // 自動。登録されたドライバのうち選ぶと答えた最初のもの。GL で作った
     // ウィンドウには GPU のドライバを選ぶ（SDL も既定では GPU を優先する）。
+    // PORT-NOTE: SDL は作れなかったら次の登録のドライバへ進む（SDL_CreateRenderer の既定の道）。
+    // 先のドライバが作れない環境（例: GL 2.1 の互換プロファイルが出ない GPU）でも、次の GPU のドライバや
+    // ソフトウェアのドライバで動くように、作れなかった EPMLError は飲んで次へ進む。
+    Services := AWindow.ContextServices;
     for I := 0 to High(RenderDriverRegistry) do
       if RenderDriverRegistry[I].Prefers(AWindow) then
-        Exit(RenderDriverRegistry[I].Factory(AWindow));
+        try
+          Exit(RenderDriverRegistry[I].Factory(AWindow));
+        except
+          on E: EPMLError do
+            if (Services <> nil) and (Services.Log <> nil) then
+              Services.Log.Warn(PML_LOG_CATEGORY_RENDER,
+                Format('Couldn''t create renderer %s: %s', [RenderDriverRegistry[I].Name, E.Message]));
+        end;
     Exit(TPMLWindowSoftwareRenderDriver.Create(AWindow));
   end;
 
