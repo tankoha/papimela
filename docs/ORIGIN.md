@@ -79,11 +79,11 @@ tools/gengl.bb /tmp/glroot/usr/include
 （`src/generated/vulkan_*.inc`）。システムの Vulkan ヘッダは使わない（版が `reference/SDL` と揃う。GL と違って取り直しの手順が増えない）。
 どの名前を取るかは、`tools/genvulkan.bb` の中の一覧（SDL の 4 ファイル `render/vulkan/SDL_render_vulkan.c`・`SDL_shaders_vulkan.c`・
 `video/SDL_vulkan_utils.c`・`video/wayland/SDL_waylandvulkan.c` が使う名前から、Android と KHR display を除いたもの）。
-Khronos のヘッダは Apache-2.0 または MIT（ヘッダの先頭の SPDX 行）。生成物は API の名前と値と並びだけで、CI は `--check` で古さを見る。
+Khronos のヘッダは Apache-2.0 または MIT（ヘッダの先頭の SPDX 行）。生成物は API の名前と値と並びだけで、古さの検査 `--check` は手元で行う（`reference/SDL` は gitignore なので CI には無い）。
 
 ```bash
 tools/genvulkan.bb            # 生成物を作る
-tools/genvulkan.bb --check    # 古さの検査（CI）
+tools/genvulkan.bb --check    # 古さの検査（手元。CI には reference/SDL が無い）
 tools/genvulkan.bb --layout   # gcc で配置の期待値 test/vulkan_layout.inc を作る（gcc が要る）
 ```
 

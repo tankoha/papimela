@@ -78,10 +78,6 @@ jobs:
       - name: Check umbrella is up to date
         run: ./tools/genumbrella.bb --check
 
-      # Vulkan の型・定数・関数表（src/generated/vulkan_*.inc）は SDL 同梱の Khronos ヘッダから生成する。
-      - name: Check Vulkan tables are up to date
-        run: ./tools/genvulkan.bb --check
-
       # Origin 行と設計書 第11章の由来列の突き合わせ。移植部分に SDL の著作権表示が
       # あるか、クリーンルーム部分に紛れ込んでいないかもここで見る。
       - name: Check origins
