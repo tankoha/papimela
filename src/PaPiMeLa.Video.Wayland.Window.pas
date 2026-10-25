@@ -68,6 +68,8 @@ uses
   PaPiMeLa.Video.Wayland.Shm,
   PaPiMeLa.Platform.Wayland.Client,
   PaPiMeLa.Platform.Wayland.EGL,
+  PaPiMeLa.Platform.LibDecor,
+  PaPiMeLa.Video.Wayland.LibDecor,
   PaPiMeLa.Platform.Wayland.Protocols.Wayland,
   PaPiMeLa.Platform.Wayland.Protocols.XdgShell,
   PaPiMeLa.Platform.Wayland.Protocols.XdgDecorationUnstableV1;
@@ -112,6 +114,20 @@ type
     FXsFwd     : TPMLXdgSurfaceForwarder;
     FTlFwd     : TPMLXdgToplevelForwarder;
 
+    // libdecor（クライアントサイド装飾）。FLibDecor が nil でなければ、xdg_surface / xdg_toplevel は
+    // libdecor のフレームが持つ（FXdgSurface / FToplevel / FDecoration は使わない）。
+    FLibDecor  : TPMLWaylandLibDecor;
+    FFrame     : Plibdecor_frame;
+    FResizable : Boolean;
+    FBorderless: Boolean;
+    FTitle     : String;
+    FAppID     : String;
+    FMinW, FMinH, FMaxW, FMaxH: Integer;
+    // 最大化・全画面でないときの大きさ。コンポジタが「大きさは任せる」（0 x 0）と言ってきたとき（最大化を戻すとき）に
+    // これへ戻す（SDL の window->floating）
+    FFloatW, FFloatH: Integer;
+    FWasFloating: Boolean;
+
     FWidth, FHeight: Integer;
     FConfigured  : Boolean;
     FVisible     : Boolean;
@@ -147,7 +163,13 @@ type
     function  AcquireShmBuffer: TPMLWaylandShmBuffer;
     procedure PresentBacking(AWaitForFrame: Boolean);
     procedure PresentFirstFrame;
+    procedure CreateFrame;
+    procedure ApplyConfiguredSize(AWidth, AHeight: Integer);
+    function  GetUsesLibDecor: Boolean;
+    function  GetHasFrame: Boolean;
   private
+    procedure HandleLibDecorConfigure(AFrame: Plibdecor_frame; AConfiguration: Plibdecor_configuration);
+    procedure HandleDecorCommit;
     procedure HandleSurfaceConfigure(ASerial: LongWord);
     procedure HandleToplevelConfigure(AWidth, AHeight: Integer; AStates: Pwl_array);
     procedure HandleClose;
@@ -156,7 +178,8 @@ type
     constructor Create(AContextRef: TObject; AOwner: TPMLObject;
       AConn: TPMLWaylandConnection; ASink: IPMLVideoSink;
       AWindowID: TPMLWindowID; const ATitle: String;
-      AWidth, AHeight: Integer; AFlags: TPMLWindowFlags);
+      AWidth, AHeight: Integer; AFlags: TPMLWindowFlags;
+      ALibDecor: TPMLWaylandLibDecor = nil);
     destructor Destroy; override;
 
     procedure SetTitle(const ATitle: String); override;
@@ -187,6 +210,10 @@ type
     // commit が有効にするので、eglSwapBuffers より前に呼ぶ。
     procedure RequestFrame;
 
+    // libdecor のフレームで動いているか（クライアントサイド装飾）。
+    property UsesLibDecor: Boolean read GetUsesLibDecor;
+    // libdecor のフレームが今あるか（Hide で壊し、Show で作り直す）。
+    property HasFrame: Boolean read GetHasFrame;
     property Configured: Boolean read FConfigured;
     // 表示中か（Show 済みで Hide されていない）。
     property Visible: Boolean read FVisible;
@@ -250,15 +277,48 @@ begin
   FOwner.HandleFrameDone(AProxy);
 end;
 
+{ libdecor のコールバック（C から呼ばれる。user_data はウィンドウのバックエンド）}
+
+var
+  GFrameInterface: TLibDecorFrameInterface;
+
+procedure DecorFrameConfigure(AFrame: Plibdecor_frame; AConfiguration: Plibdecor_configuration;
+  AUserData: Pointer); cdecl;
+begin
+  TPMLWaylandWindowBackend(AUserData).HandleLibDecorConfigure(AFrame, AConfiguration);
+end;
+
+procedure DecorFrameClose(AFrame: Plibdecor_frame; AUserData: Pointer); cdecl;
+begin
+  TPMLWaylandWindowBackend(AUserData).HandleClose;
+end;
+
+procedure DecorFrameCommit(AFrame: Plibdecor_frame; AUserData: Pointer); cdecl;
+begin
+  // libdecor の装飾のサブサーフェスは同期なので、主のサーフェスを commit すると装飾も更新される。
+  // 絵を出し直す必要は無いので、再描画を頼むだけ（SDL は EXPOSED を送る）
+  TPMLWaylandWindowBackend(AUserData).HandleDecorCommit;
+end;
+
+procedure DecorDismissPopup(AFrame: Plibdecor_frame; ASeatName: PAnsiChar; AUserData: Pointer); cdecl;
+begin
+  // 何もしない（ポップアップのメニューは扱わない）
+end;
+
 { TPMLWaylandWindowBackend }
 
 constructor TPMLWaylandWindowBackend.Create(AContextRef: TObject; AOwner: TPMLObject;
   AConn: TPMLWaylandConnection; ASink: IPMLVideoSink; AWindowID: TPMLWindowID;
-  const ATitle: String; AWidth, AHeight: Integer; AFlags: TPMLWindowFlags);
+  const ATitle: String; AWidth, AHeight: Integer; AFlags: TPMLWindowFlags;
+  ALibDecor: TPMLWaylandLibDecor);
 var
   AppID: String;
 begin
   inherited Create(AContextRef, AOwner);
+  FLibDecor := ALibDecor;
+  FResizable := TPMLWindowFlag.Resizable in AFlags;
+  FBorderless := TPMLWindowFlag.Borderless in AFlags;
+  FTitle := ATitle;
   FConn := AConn;
   FSink := ASink;
   FWindowID := AWindowID;
@@ -268,6 +328,9 @@ begin
   FIsGL := (TPMLWindowFlag.OpenGL in AFlags) or (TPMLWindowFlag.Vulkan in AFlags);
   if FWidth <= 0 then FWidth := 640;
   if FHeight <= 0 then FHeight := 480;
+  FFloatW := FWidth;
+  FFloatH := FHeight;
+  FWasFloating := True;
 
   FSurface := wl_compositor_create_surface(FConn.Compositor);
   if FSurface = nil then
@@ -284,6 +347,21 @@ begin
   wl_proxy_set_queue(Pwl_proxy(FSurfaceWrapper), FQueue);
   FFrameFwd := TPMLFrameCallbackForwarder.Create(Self);
 
+  // app_id は作った時点の値を 1 度だけ読む（SDL も作成時に控える）。Context が無ければ実行ファイルの名前。
+  if ContextServices <> nil then
+    AppID := ContextServices.AppID
+  else
+    AppID := ApplicationName;
+  FAppID := AppID;
+
+  if FLibDecor <> nil then
+  begin
+    // クライアントサイド装飾: xdg_surface / xdg_toplevel は libdecor が作る
+    CreateFrame;
+    wl_display_flush(FConn.Display);
+    Exit;
+  end;
+
   FXdgSurface := xdg_wm_base_get_xdg_surface(FConn.WmBase, FSurface);
   FXsFwd := TPMLXdgSurfaceForwarder.Create(Self);
   xdg_surface_add_listener_object(FXdgSurface, FXsFwd);
@@ -293,14 +371,9 @@ begin
   xdg_toplevel_add_listener_object(FToplevel, FTlFwd);
 
   xdg_toplevel_set_title(FToplevel, PAnsiChar(ATitle));
-  // app_id は作った時点の値を 1 度だけ読む（SDL も作成時に控える）。Context が無ければ実行ファイルの名前。
-  if ContextServices <> nil then
-    AppID := ContextServices.AppID
-  else
-    AppID := ApplicationName;
   xdg_toplevel_set_app_id(FToplevel, PAnsiChar(AppID));
 
-  // サーバサイド装飾があれば使う（無ければ装飾なしで妥協。libdecor は #69）。
+  // サーバサイド装飾があれば使う（無ければ libdecor、それも無ければ装飾なし）。
   if FConn.DecorationMgr <> nil then
   begin
     FDecoration := zxdg_decoration_manager_v1_get_toplevel_decoration(
@@ -328,6 +401,10 @@ begin
   FFrameCallback := nil;
   if FSurfaceWrapper <> nil then
     wl_proxy_wrapper_destroy(FSurfaceWrapper);
+  // libdecor のフレームは、サーフェスより先に壊す（xdg の役割も一緒に消える）
+  if FFrame <> nil then
+    libdecor_frame_unref(FFrame);
+  FFrame := nil;
   if FDecoration <> nil then
     zxdg_toplevel_decoration_v1_destroy(FDecoration);
   if FToplevel <> nil then
@@ -363,30 +440,32 @@ begin
     FSink.WindowExposed(FWindowID);
 end;
 
+{ configure で決まった大きさを取り込む（変わっていれば、GL の面と通知を更新する）。 }
+procedure TPMLWaylandWindowBackend.ApplyConfiguredSize(AWidth, AHeight: Integer);
+begin
+  if (AWidth <= 0) or (AHeight <= 0) or ((AWidth = FWidth) and (AHeight = FHeight)) then
+    Exit;
+  FWidth := AWidth;
+  FHeight := AHeight;
+  // GL の面の大きさは wl_egl_window が決める。SDL も configure の中で
+  // wl_egl_window_resize を呼ぶ（SDL_waylandwindow.c の幾何の更新）。
+  if FEGLWindow <> nil then
+    wl_egl_window_resize(FEGLWindow, FWidth, FHeight, 0, 0);
+  if Assigned(FSink) then
+  begin
+    FSink.WindowResized(FWindowID, FWidth, FHeight);
+    FSink.WindowPixelSizeChanged(FWindowID, FWidth, FHeight);
+  end;
+end;
+
 procedure TPMLWaylandWindowBackend.HandleToplevelConfigure(AWidth, AHeight: Integer;
   AStates: Pwl_array);
 var
   P: PLongWord;
   I: Integer;
   NewStates: TPMLWindowFlags;
+  Floating: Boolean;
 begin
-  // 0x0 は「サイズはアプリが決めてよい」の意味なので要求サイズを維持する。
-  if (AWidth > 0) and (AHeight > 0)
-    and ((AWidth <> FWidth) or (AHeight <> FHeight)) then
-  begin
-    FWidth := AWidth;
-    FHeight := AHeight;
-    // GL の面の大きさは wl_egl_window が決める。SDL も configure の中で
-    // wl_egl_window_resize を呼ぶ（SDL_waylandwindow.c の幾何の更新）。
-    if FEGLWindow <> nil then
-      wl_egl_window_resize(FEGLWindow, FWidth, FHeight, 0, 0);
-    if Assigned(FSink) then
-    begin
-      FSink.WindowResized(FWindowID, FWidth, FHeight);
-      FSink.WindowPixelSizeChanged(FWindowID, FWidth, FHeight);
-    end;
-  end;
-
   NewStates := [];
   if (AStates <> nil) and (AStates^.data <> nil) then
   begin
@@ -400,12 +479,148 @@ begin
       end;
     end;
   end;
+  // 0x0 は「サイズはアプリが決めてよい」の意味。最大化・全画面でなければ、浮いていたときの大きさへ戻す
+  // （最大化を戻すと 0x0 が来る）。最大化・全画面のときは今の大きさを保つ。
+  Floating := not ((TPMLWindowFlag.Maximized in NewStates) or (TPMLWindowFlag.Fullscreen in NewStates));
+  if Floating and not FWasFloating then
+    // 最大化・全画面から浮いた状態へ戻るとき: コンポジタ（labwc など）は、最大化の大きさのまま configure を
+    // 送ってくることがある。浮いていたときの大きさへ戻す（SDL の「restored from a non-floating state」）
+    ApplyConfiguredSize(FFloatW, FFloatH)
+  else if (AWidth > 0) and (AHeight > 0) then
+  begin
+    ApplyConfiguredSize(AWidth, AHeight);
+    if Floating then
+    begin
+      FFloatW := AWidth;
+      FFloatH := AHeight;
+    end;
+  end
+  else if Floating then
+    ApplyConfiguredSize(FFloatW, FFloatH);
+  FWasFloating := Floating;
   if NewStates <> FStates then
   begin
     FStates := NewStates;
     if Assigned(FSink) then
       FSink.WindowStateChanged(FWindowID, NewStates);
   end;
+end;
+
+function TPMLWaylandWindowBackend.GetUsesLibDecor: Boolean;
+begin
+  Result := FLibDecor <> nil;
+end;
+
+function TPMLWaylandWindowBackend.GetHasFrame: Boolean;
+begin
+  Result := FFrame <> nil;
+end;
+
+{ libdecor のフレームを作って、マップする（SDL の Wayland_ShowWindow の libdecor の枝）。
+  タイトルと app_id を渡し、サイズを変えられない窓は RESIZE の機能を外す。 }
+procedure TPMLWaylandWindowBackend.CreateFrame;
+begin
+  FFrame := libdecor_decorate(FLibDecor.Context, FSurface, @GFrameInterface, Self);
+  if FFrame = nil then
+    raise EPMLVideoError.CreateNative('libdecor_decorate failed', 0, 'wayland');
+  libdecor_frame_set_app_id(FFrame, PAnsiChar(FAppID));
+  libdecor_frame_set_title(FFrame, PAnsiChar(FTitle));
+  if not FResizable then
+    libdecor_frame_unset_capabilities(FFrame, LIBDECOR_ACTION_RESIZE)
+  else
+  begin
+    if (FMinW > 0) or (FMinH > 0) then
+      libdecor_frame_set_min_content_size(FFrame, FMinW, FMinH);
+    if (FMaxW > 0) or (FMaxH > 0) then
+      libdecor_frame_set_max_content_size(FFrame, FMaxW, FMaxH);
+  end;
+  libdecor_frame_map(FFrame);
+  // 枠なしの窓は装飾を隠す。（マップの直後に「見せる」を呼ぶと libdecor の Cairo のプラグインが落ちるので、
+  // 隠す向きだけ呼ぶ。SDL と同じ）
+  if FBorderless then
+    libdecor_frame_set_visibility(FFrame, False);
+end;
+
+{ libdecor の configure。SDL の decoration_frame_configure の骨格:
+  状態（最大化・全画面・アクティブ）を読み、内容の大きさを読んで、新しい状態を libdecor_frame_commit で返す。
+
+  PORT-NOTE: SDL は、トップレベルの境界・タイル・リサイズ中の軸・装飾の大きさの cairo の不具合の回避（
+  libdecor の issue 34）を細かく扱う。papimela は、大きさを変えられない窓（最大化・全画面でないとき）は
+  要求の大きさのまま、変えられる窓は libdecor の内容の大きさに従う。内容の大きさが無い（0 / 取れない）
+  ときは今の大きさを保つ。 }
+procedure TPMLWaylandWindowBackend.HandleLibDecorConfigure(AFrame: Plibdecor_frame;
+  AConfiguration: Plibdecor_configuration);
+var
+  StateBits: LongInt;
+  NewStates: TPMLWindowFlags;
+  W, H: LongInt;
+  First, Maximized, Fullscreen, Floating: Boolean;
+  State: Plibdecor_state;
+begin
+  First := not FConfigured;
+  NewStates := [];
+  Maximized := False;
+  Fullscreen := False;
+  StateBits := 0;
+  if libdecor_configuration_get_window_state(AConfiguration, @StateBits) then
+  begin
+    Fullscreen := (StateBits and LIBDECOR_WINDOW_STATE_FULLSCREEN) <> 0;
+    Maximized := (StateBits and LIBDECOR_WINDOW_STATE_MAXIMIZED) <> 0;
+    if Fullscreen then
+      Include(NewStates, TPMLWindowFlag.Fullscreen);
+    // SDL: 全画面のときは最大化を送らない
+    if Maximized and not Fullscreen then
+      Include(NewStates, TPMLWindowFlag.Maximized);
+    if (StateBits and LIBDECOR_WINDOW_STATE_ACTIVE) <> 0 then
+      Include(NewStates, TPMLWindowFlag.InputFocus);
+  end;
+
+  W := 0;
+  H := 0;
+  Floating := not (Maximized or Fullscreen);
+  if Floating and not FWasFloating then
+    // 最大化・全画面から浮いた状態へ戻るとき: libdecor が渡す内容の大きさは、直前に commit した（最大化の）
+    // 大きさのまま返ってくることがある（libdecor の issue 34 の仲間。SDL も無視する）ので、使わずに、
+    // 浮いていたときの大きさへ戻す
+    ApplyConfiguredSize(FFloatW, FFloatH)
+  else if (FResizable or Maximized or Fullscreen)
+    and libdecor_configuration_get_content_size(AConfiguration, AFrame, @W, @H)
+    and (W > 0) and (H > 0) then
+  begin
+    ApplyConfiguredSize(W, H);
+    if Floating then
+    begin
+      FFloatW := W;
+      FFloatH := H;
+    end;
+  end
+  else if Floating then
+    // 内容の大きさが無い（大きさを変えられない窓）: 浮いていたときの大きさのまま
+    ApplyConfiguredSize(FFloatW, FFloatH);
+  FWasFloating := Floating;
+
+  // 新しい状態を libdecor に返す（返さないと、装飾が configure を受け付けたことにならない）
+  State := libdecor_state_new(FWidth, FHeight);
+  libdecor_frame_commit(AFrame, State, AConfiguration);
+  libdecor_state_free(State);
+
+  FConfigured := True;
+  if First then
+    PresentFirstFrame;
+  if NewStates <> FStates then
+  begin
+    FStates := NewStates;
+    if Assigned(FSink) then
+      FSink.WindowStateChanged(FWindowID, NewStates);
+  end;
+  if Assigned(FSink) then
+    FSink.WindowExposed(FWindowID);
+end;
+
+procedure TPMLWaylandWindowBackend.HandleDecorCommit;
+begin
+  if FConfigured and FVisible and Assigned(FSink) then
+    FSink.WindowExposed(FWindowID);
 end;
 
 procedure TPMLWaylandWindowBackend.HandleClose;
@@ -670,7 +885,11 @@ end;
 
 procedure TPMLWaylandWindowBackend.SetTitle(const ATitle: String);
 begin
-  xdg_toplevel_set_title(FToplevel, PAnsiChar(ATitle));
+  FTitle := ATitle;
+  if FFrame <> nil then
+    libdecor_frame_set_title(FFrame, PAnsiChar(ATitle))
+  else if FToplevel <> nil then
+    xdg_toplevel_set_title(FToplevel, PAnsiChar(ATitle));
   wl_display_flush(FConn.Display);
 end;
 
@@ -680,6 +899,11 @@ begin
   // ウィンドウのサイズになるので、次の更新で反映される。
   FWidth := AWidth;
   FHeight := AHeight;
+  if not ((TPMLWindowFlag.Maximized in FStates) or (TPMLWindowFlag.Fullscreen in FStates)) then
+  begin
+    FFloatW := AWidth;
+    FFloatH := AHeight;
+  end;
   if FEGLWindow <> nil then
     wl_egl_window_resize(FEGLWindow, FWidth, FHeight, 0, 0);
   if Assigned(FSink) then
@@ -688,17 +912,37 @@ end;
 
 procedure TPMLWaylandWindowBackend.SetMinimumSize(AWidth, AHeight: Integer);
 begin
-  xdg_toplevel_set_min_size(FToplevel, AWidth, AHeight);
+  FMinW := AWidth;
+  FMinH := AHeight;
+  if FFrame <> nil then
+  begin
+    // libdecor は、RESIZE の機能がある窓の限界だけを受け取る（SDL と同じ）
+    if libdecor_frame_has_capability(FFrame, LIBDECOR_ACTION_RESIZE) then
+      libdecor_frame_set_min_content_size(FFrame, AWidth, AHeight);
+  end
+  else if FToplevel <> nil then
+    xdg_toplevel_set_min_size(FToplevel, AWidth, AHeight);
 end;
 
 procedure TPMLWaylandWindowBackend.SetMaximumSize(AWidth, AHeight: Integer);
 begin
-  xdg_toplevel_set_max_size(FToplevel, AWidth, AHeight);
+  FMaxW := AWidth;
+  FMaxH := AHeight;
+  if FFrame <> nil then
+  begin
+    if libdecor_frame_has_capability(FFrame, LIBDECOR_ACTION_RESIZE) then
+      libdecor_frame_set_max_content_size(FFrame, AWidth, AHeight);
+  end
+  else if FToplevel <> nil then
+    xdg_toplevel_set_max_size(FToplevel, AWidth, AHeight);
 end;
 
 procedure TPMLWaylandWindowBackend.Show;
 begin
   FVisible := True;
+  // libdecor は Hide でフレームを壊すので、見せるときに作り直す
+  if (FLibDecor <> nil) and (FFrame = nil) then
+    CreateFrame;
   // 既に configure を受けているならこの場で 1 枚出す。まだなら
   // HandleSurfaceConfigure が出す。
   if FConfigured then
@@ -725,6 +969,12 @@ begin
   // コンポジタが "xdg_surface has never been configured" で接続を切る）。
   // Show がその commit を出し、新しい configure が FConfigured を立て直す。
   FConfigured := False;
+  // libdecor は、フレームを壊してアンマップする（SDL の Wayland_HideWindow の libdecor の枝）
+  if FFrame <> nil then
+  begin
+    libdecor_frame_unref(FFrame);
+    FFrame := nil;
+  end;
   wl_surface_attach(FSurface, nil, 0, 0);
   wl_surface_commit(FSurface);
   wl_display_flush(FConn.Display);
@@ -732,20 +982,29 @@ end;
 
 procedure TPMLWaylandWindowBackend.Maximize;
 begin
-  xdg_toplevel_set_maximized(FToplevel);
+  if FFrame <> nil then
+    libdecor_frame_set_maximized(FFrame)
+  else if FToplevel <> nil then
+    xdg_toplevel_set_maximized(FToplevel);
   wl_display_flush(FConn.Display);
 end;
 
 procedure TPMLWaylandWindowBackend.Minimize;
 begin
-  xdg_toplevel_set_minimized(FToplevel);
+  if FFrame <> nil then
+    libdecor_frame_set_minimized(FFrame)
+  else if FToplevel <> nil then
+    xdg_toplevel_set_minimized(FToplevel);
   wl_display_flush(FConn.Display);
 end;
 
 { xdg-shell には最小化を解く要求が無いので、最大化を解くだけ（SDL も同じ）。 }
 procedure TPMLWaylandWindowBackend.Restore;
 begin
-  xdg_toplevel_unset_maximized(FToplevel);
+  if FFrame <> nil then
+    libdecor_frame_unset_maximized(FFrame)
+  else if FToplevel <> nil then
+    xdg_toplevel_unset_maximized(FToplevel);
   wl_display_flush(FConn.Display);
 end;
 
@@ -788,9 +1047,24 @@ begin
   FillChar(Result, SizeOf(Result), 0);
   Result.WaylandDisplay := FConn.Display;
   Result.WaylandSurface := FSurface;
-  Result.WaylandXdgSurface := FXdgSurface;
-  Result.WaylandXdgToplevel := FToplevel;
+  if FFrame <> nil then
+  begin
+    Result.WaylandXdgSurface := libdecor_frame_get_xdg_surface(FFrame);
+    Result.WaylandXdgToplevel := libdecor_frame_get_xdg_toplevel(FFrame);
+  end
+  else
+  begin
+    Result.WaylandXdgSurface := FXdgSurface;
+    Result.WaylandXdgToplevel := FToplevel;
+  end;
   Result.WaylandEGLWindow := FEGLWindow;
 end;
+
+initialization
+  FillChar(GFrameInterface, SizeOf(GFrameInterface), 0);
+  GFrameInterface.configure := @DecorFrameConfigure;
+  GFrameInterface.close := @DecorFrameClose;
+  GFrameInterface.commit := @DecorFrameCommit;
+  GFrameInterface.dismiss_popup := @DecorDismissPopup;
 
 end.

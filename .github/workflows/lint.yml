@@ -39,8 +39,9 @@ jobs:
           # GPU のドライバ（GLES2 とデスクトップ GL）の検査に、Mesa のソフトウェア実装（llvmpipe）と
           # 窓の無い EGL（surfaceless）を使う。
           # libgl1 はデスクトップ GL（libGL.so.1。関数は dlsym で引く）。
+          # libdecor-0-0 は libdecor（test_platform_libdecor の読み込みの区間）。
           # libvulkan1 は Vulkan のローダ、mesa-vulkan-drivers は lavapipe（CPU の ICD。test_vulkan_loader のインスタンスの区間）。
-          sudo apt-get install -y libegl1 libgles2 libegl-mesa0 libgl1-mesa-dri libgl1 libvulkan1 mesa-vulkan-drivers libwayland-client0
+          sudo apt-get install -y libegl1 libgles2 libegl-mesa0 libgl1-mesa-dri libgl1 libvulkan1 mesa-vulkan-drivers libdecor-0-0 libwayland-client0
 
       - name: Build rawpaco
         working-directory: .rawpaco
@@ -94,7 +95,7 @@ jobs:
           PAPIMELA_PIPEWIRE_OPTIONAL: "1"
         run: |
           set -eu
-          for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_render_transform test_render_target test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_drop test_drag_source test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds test_audio_convert test_audio_stream test_audio_mixer test_audio_wave test_audio_device test_pipewire_abi test_pulse_abi test_alsa_abi test_alsa_chmap test_audio_autoselect test_texture_lock test_texture_colorkey test_yuv_hd test_colorspace test_joystick test_gamepad_mapping test_gamepad test_evdev test_udev test_joystick_linux test_filesystem test_messagebox test_haptic test_platform_gl test_platform_vulkan test_vulkan_loader; do
+          for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_render_transform test_render_target test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_drop test_drag_source test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds test_audio_convert test_audio_stream test_audio_mixer test_audio_wave test_audio_device test_pipewire_abi test_pulse_abi test_alsa_abi test_alsa_chmap test_audio_autoselect test_texture_lock test_texture_colorkey test_yuv_hd test_colorspace test_joystick test_gamepad_mapping test_gamepad test_evdev test_udev test_joystick_linux test_filesystem test_messagebox test_haptic test_platform_gl test_platform_vulkan test_vulkan_loader test_platform_libdecor; do
             fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/$t test/$t.pas
             ./test/$t
           done

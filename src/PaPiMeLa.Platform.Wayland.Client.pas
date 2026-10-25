@@ -209,13 +209,17 @@ begin
     Inc(GRefCount);
     Exit(True);
   end;
-  try
-    GLib := TPMLDynLib.Create(LIBWAYLAND_NAMES);
-  except
-    on E: EPMLPlatformLibrary do
-    begin
-      GLib := nil;
-      Exit(False);
+  // 手放したあとの 2 回目の読み込みは、閉じていないライブラリをそのまま使う（下の PMLWaylandClientUnload）
+  if GLib = nil then
+  begin
+    try
+      GLib := TPMLDynLib.Create(LIBWAYLAND_NAMES);
+    except
+      on E: EPMLPlatformLibrary do
+      begin
+        GLib := nil;
+        Exit(False);
+      end;
     end;
   end;
   LoadAll;
@@ -230,8 +234,10 @@ begin
   Dec(GRefCount);
   if GRefCount > 0 then
     Exit;
-  FreeAndNil(GLib);
-  wl_proxy_marshal_flags := nil;
+  // ライブラリは閉じない。生成したプロトコルのユニットが持つ wl_interface の記述子は、最初の読み込みで
+  // 引いた libwayland の中の記述子（wl_surface_interface など）を指したまま残る。閉じて開き直すと
+  // 別の番地に載って、2 つ目の Context が "interface '(null)' has no event 0" で止まる（D-87）。
+  // 関数の表は残す（読み込み直しの LoadAll が上書きする）。
 end;
 
 function PMLWaylandClientLoaded: Boolean;

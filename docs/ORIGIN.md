@@ -89,6 +89,21 @@ tools/genvulkan.bb --layout   # gcc で配置の期待値 test/vulkan_layout.inc
 
 `reference/SDL` を進めたら、生成物と `--layout` の差分を読む。SDL が使う名前が増えていたら、一覧に足す。
 
+## libdecor のヘッダ（`Platform.LibDecor` の配置の値）
+
+`PaPiMeLa.Platform.LibDecor` の構造体（`libdecor_interface` 88 バイト、`libdecor_frame_interface` 112 バイト）と列挙の値は、
+libdecor.h（0.2.x）を gcc で測った値を `test/test_platform_libdecor.pas` に手で書いてある。ビルドと CI はヘッダを要らない。
+測り直すときだけ要る（libdecor-0-dev と libwayland-dev のヘッダを展開して、`sizeof` / `offsetof` / 列挙を printf する）:
+
+```bash
+apt-get download libdecor-0-dev libwayland-dev
+for d in libdecor-0-dev_*.deb libwayland-dev_*.deb; do dpkg-deb -x $d /tmp/ldroot; done
+gcc -I/tmp/ldroot/usr/include/libdecor-0 -I/tmp/ldroot/usr/include -o /tmp/ldsz ldsz.c && /tmp/ldsz
+```
+
+2026-10-26 に測った版: libdecor 0.2.x（ヘッダの `libdecor_frame_interface` は configure / close / commit / dismiss_popup と予約 10 個。
+0.3 は予約の 1 つを bounds に使うが、nil のままなら 0.2 と同じに動く）。
+
 ## 版を上げるとき
 
 1. `reference/SDL` を新しいコミットへ進め、この表のコミットと日付を書き換える

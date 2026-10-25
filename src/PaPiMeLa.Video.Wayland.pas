@@ -54,6 +54,7 @@ uses
   PaPiMeLa.Video.Wayland.Data,
   PaPiMeLa.Video.Wayland.EGL,
   PaPiMeLa.Video.Wayland.Vulkan,
+  PaPiMeLa.Video.Wayland.LibDecor,
   PaPiMeLa.Events,
   PaPiMeLa.Platform.XKB,
   PaPiMeLa.Platform.DynLib,
@@ -78,6 +79,8 @@ type
     FConn : TPMLWaylandConnection;
     FQueue: TPMLEventQueue;
     FSeats: TPMLWaylandSeats;
+    FLibDecor: TPMLWaylandLibDecor;     // nil = クライアントサイド装飾を使わない
+    FLibDecorError: String;
     procedure CheckConnectionAlive;
     procedure HandleSeatBound(ASeat: Pwl_seat);
     procedure HandleGrabsChanged(AWindowID: TPMLWindowID);
@@ -105,6 +108,10 @@ type
     property Connection: TPMLWaylandConnection read FConn;
     // テストと診断用。拘束の状態はシートが持つ。
     property Seats: TPMLWaylandSeats read FSeats;
+    // libdecor（クライアントサイド装飾）を使っているか。
+    property LibDecor: TPMLWaylandLibDecor read FLibDecor;
+    // libdecor を使うはずだったのに文脈を作れなかったときの理由（使っていれば空）。
+    property LibDecorError: String read FLibDecorError;
   end;
 
 implementation
@@ -234,12 +241,29 @@ begin
     FVulkan := TPMLWaylandVulkan.Create(ContextRef, Self, FConn);
     Include(FCapabilities, TPMLVideoCapability.Vulkan);
   end;
+
+  // クライアントサイド装飾（libdecor）。xdg-decoration の無いコンポジタ（GNOME など）か、ヒントで頼まれたとき。
+  // 文脈を作れなければ、枠なしのまま動く（理由は LibDecorError に残す）。
+  FLibDecorError := '';
+  if TPMLWaylandLibDecor.ShouldUse(ContextServices, FConn) then
+  begin
+    try
+      FLibDecor := TPMLWaylandLibDecor.Create(ContextRef, Self, FConn);
+    except
+      on E: EPMLUnsupported do
+      begin
+        FLibDecor := nil;
+        FLibDecorError := E.Message;
+      end;
+    end;
+  end;
 end;
 
 procedure TPMLWaylandVideoBackend.Disconnect;
 begin
   // GL の部品は wl_display を借りている（eglTerminate が接続を使う）ので、
   // 接続を切る前に捨てる。ウィンドウはこの時点で既に無い。
+  FreeAndNil(FLibDecor);
   FreeAndNil(FGL);
   FreeAndNil(FVulkan);
   // クリップボードの部品とカーソル部品はシートを触るので、シートより先に捨てる。
@@ -307,7 +331,7 @@ function TPMLWaylandVideoBackend.CreateWindowBackend(AWindowID: TPMLWindowID;
   AFlags: TPMLWindowFlags): TPMLWindowBackend;
 begin
   Result := TPMLWaylandWindowBackend.Create(ContextRef, Self, FConn, FSink,
-    AWindowID, ATitle, AWidth, AHeight, AFlags);
+    AWindowID, ATitle, AWidth, AHeight, AFlags, FLibDecor);
 end;
 
 procedure TPMLWaylandVideoBackend.CheckConnectionAlive;
@@ -380,6 +404,9 @@ begin
     wl_display_cancel_read(FConn.Display);
 
   wl_display_dispatch_pending(FConn.Display);
+  // libdecor のイベント（configure・close など）。接続の読み込みの後に配る
+  if FLibDecor <> nil then
+    FLibDecor.Dispatch;
 
   // 期限の来たキーリピートを発火させる。
   for I := 0 to High(FSeats) do
