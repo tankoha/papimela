@@ -72,6 +72,23 @@ tools/gengl.bb /tmp/glroot/usr/include
 
 2026-10-25 に作った版: libgl-dev 1.7.0-3 と mesa-common-dev 26.0.3-1ubuntu1（arm64。ヘッダは版が同じなら amd64 と同じ）。
 
+## Vulkan のヘッダ（`tools/genvulkan.bb`）
+
+`PaPiMeLa.Platform.Vulkan`（Video.Wayland.Vulkan と Render.Vulkan 用）の型・定数・関数表は、`tools/genvulkan.bb` が
+**`reference/SDL` が同梱する Khronos ヘッダ**（`src/video/khronos/vulkan/vulkan_core.h` と `vulkan_wayland.h`）を読んで生成する
+（`src/generated/vulkan_*.inc`）。システムの Vulkan ヘッダは使わない（版が `reference/SDL` と揃う。GL と違って取り直しの手順が増えない）。
+どの名前を取るかは、`tools/genvulkan.bb` の中の一覧（SDL の 4 ファイル `render/vulkan/SDL_render_vulkan.c`・`SDL_shaders_vulkan.c`・
+`video/SDL_vulkan_utils.c`・`video/wayland/SDL_waylandvulkan.c` が使う名前から、Android と KHR display を除いたもの）。
+Khronos のヘッダは Apache-2.0 または MIT（ヘッダの先頭の SPDX 行）。生成物は API の名前と値と並びだけで、CI は `--check` で古さを見る。
+
+```bash
+tools/genvulkan.bb            # 生成物を作る
+tools/genvulkan.bb --check    # 古さの検査（CI）
+tools/genvulkan.bb --layout   # gcc で配置の期待値 test/vulkan_layout.inc を作る（gcc が要る）
+```
+
+`reference/SDL` を進めたら、生成物と `--layout` の差分を読む。SDL が使う名前が増えていたら、一覧に足す。
+
 ## 版を上げるとき
 
 1. `reference/SDL` を新しいコミットへ進め、この表のコミットと日付を書き換える

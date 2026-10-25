@@ -1,0 +1,21 @@
+{ src/generated/vulkan_bind_instance.inc — tools/genvulkan.bb が作る。手で直さない。 }
+  Bind(AFuncs.vkCreateDevice, 'vkCreateDevice');
+  Bind(AFuncs.vkCreateWaylandSurfaceKHR, 'vkCreateWaylandSurfaceKHR');
+  Bind(AFuncs.vkDestroyInstance, 'vkDestroyInstance');
+  Bind(AFuncs.vkDestroySurfaceKHR, 'vkDestroySurfaceKHR');
+  Bind(AFuncs.vkEnumerateDeviceExtensionProperties, 'vkEnumerateDeviceExtensionProperties');
+  Bind(AFuncs.vkEnumeratePhysicalDevices, 'vkEnumeratePhysicalDevices');
+  Bind(AFuncs.vkGetDeviceProcAddr, 'vkGetDeviceProcAddr');
+  Bind(AFuncs.vkGetPhysicalDeviceFeatures, 'vkGetPhysicalDeviceFeatures');
+  Bind(AFuncs.vkGetPhysicalDeviceFeatures2KHR, 'vkGetPhysicalDeviceFeatures2KHR');
+  Bind(AFuncs.vkGetPhysicalDeviceImageFormatProperties, 'vkGetPhysicalDeviceImageFormatProperties');
+  Bind(AFuncs.vkGetPhysicalDeviceMemoryProperties, 'vkGetPhysicalDeviceMemoryProperties');
+  Bind(AFuncs.vkGetPhysicalDeviceMemoryProperties2KHR, 'vkGetPhysicalDeviceMemoryProperties2KHR');
+  Bind(AFuncs.vkGetPhysicalDeviceProperties, 'vkGetPhysicalDeviceProperties');
+  Bind(AFuncs.vkGetPhysicalDeviceProperties2KHR, 'vkGetPhysicalDeviceProperties2KHR');
+  Bind(AFuncs.vkGetPhysicalDeviceQueueFamilyProperties, 'vkGetPhysicalDeviceQueueFamilyProperties');
+  Bind(AFuncs.vkGetPhysicalDeviceSurfaceCapabilitiesKHR, 'vkGetPhysicalDeviceSurfaceCapabilitiesKHR');
+  Bind(AFuncs.vkGetPhysicalDeviceSurfaceFormatsKHR, 'vkGetPhysicalDeviceSurfaceFormatsKHR');
+  Bind(AFuncs.vkGetPhysicalDeviceSurfacePresentModesKHR, 'vkGetPhysicalDeviceSurfacePresentModesKHR');
+  Bind(AFuncs.vkGetPhysicalDeviceSurfaceSupportKHR, 'vkGetPhysicalDeviceSurfaceSupportKHR');
+  Bind(AFuncs.vkGetPhysicalDeviceWaylandPresentationSupportKHR, 'vkGetPhysicalDeviceWaylandPresentationSupportKHR');
