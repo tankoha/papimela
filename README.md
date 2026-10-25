@@ -310,7 +310,7 @@ compares that argument with itself, so a validation that *looks* like a
 validation always succeeds. It is in `docs/DEFECTS.md`. It has not been
 reported.
 
-It is not the only one. Twenty-five more are in `docs/DEFECTS.md`, each confirmed
+It is not the only one. Twenty-eight more are in `docs/DEFECTS.md`, each confirmed
 by running SDL's own code rather than by reading alone (one only in part, as
 noted), and none of them reported either:
 
@@ -460,6 +460,27 @@ noted), and none of them reported either:
   `$HOME/.local/share` fallback is skipped, a byte before the string is read
   (`envr[len - 1]` with len = 0), and `SDL_GetPrefPath` tries to create
   `/Org/App/` directly under the root. XDG says empty means unset.
+- **D-84**, `EV_IsMouse` and `SDL_SYS_HapticMouse` in `haptic/linux/SDL_syshaptic.c`:
+  `EV_IsMouse` checks `BTN_MOUSE` and then returns `true` on both branches, so
+  `SDL_IsMouseHaptic` is true as soon as any force-feedback device exists, mouse
+  or not (a gamepad, say). When the device cannot be opened, `SDL_SYS_HapticMouse`
+  returns `SDL_SetError(...)`, which is `false`, that is device index 0, so
+  `SDL_IsMouseHaptic` is true even then. Measured with a fake FF device: one
+  rumble-only device without `BTN_MOUSE` gives `SDL_IsMouseHaptic() == true`,
+  also when its open is made to fail. The code is the same in 3.4.2.
+- **D-85**, `SDL_OpenHapticFromMouse` in `haptic/SDL_haptic.c`: it passes a device
+  *index* to `SDL_OpenHaptic`, which takes an instance *ID* (starting at 1), so
+  index 0 is looked up as ID 0 and the call always fails with "Haptic device 0 not
+  found"; with more devices, index 1 and up can open whichever device happens to
+  have that ID. Measured with one device (ID 1): `SDL_OpenHapticFromMouse()` is
+  NULL, `SDL_OpenHaptic(1)` opens it.
+- **D-86**, `SDL_RunHapticEffect` / `SDL_StopHapticEffect` in `haptic/SDL_haptic.c`
+  and the Linux backend: `ValidEffect` checks only the range of the effect number,
+  and `SDL_SYS_HapticRunEffect` / `StopEffect` read
+  `effect->hweffect->effect.id`, but `hweffect` is NULL until the effect is
+  created. Running or stopping an effect number that was never created crashes
+  with SIGSEGV (`SDL_UpdateHapticEffect` does not, it compares the effect type
+  first). Measured: both calls on never-created effect 0 die with SIGSEGV.
 
 One more is different in kind. **D-53**: SDL documents the swap interval as
 belonging to "the current OpenGL context", but keeps a single value for the
@@ -496,7 +517,7 @@ SDL は AI 生成物の貢献を受け付けない方針を明示している。
 比較しているため、**検証の形をしたまま必ず成功する**。`docs/DEFECTS.md` に
 記録してある。報告はしていない。
 
-これだけではない。`docs/DEFECTS.md` にはあと 25 件ある。どれも読んだだけでなく
+これだけではない。`docs/DEFECTS.md` にはあと 28 件ある。どれも読んだだけでなく
 SDL のコードを実際に動かして確かめたもので（1 件は一部だけ。その旨を書いた）、どれも報告していない。
 
 - **D-36**、`imKStoUCS.c` の 312 行目: 範囲の判定が表の先頭より 6 つ手前から
@@ -594,6 +615,20 @@ SDL のコードを実際に動かして確かめたもので（1 件は一部�
 - **D-83**、`filesystem/unix/SDL_sysfilesystem.c` の `SDL_SYS_GetPrefPath`: `XDG_DATA_HOME` が空の文字列で
   設定されていると NULL ではないのでそのまま使われ、`$HOME/.local/share` へ行かず、文字列の前の 1 バイトを読み
   （`envr[len - 1]`、len = 0）、ルート直下の `/Org/App/` を作ろうとする。XDG では空は設定していないのと同じ
+- **D-84**、`haptic/linux/SDL_syshaptic.c` の `EV_IsMouse` と `SDL_SYS_HapticMouse`: `EV_IsMouse` は `BTN_MOUSE` を
+  調べたあと、どちらの枝でも `true` を返す。力覚（FF）を持つ機器が 1 台でもあれば、マウスでなくても（ゲームパッドでも）
+  `SDL_IsMouseHaptic` が真になる。機器が開けないとき `SDL_SYS_HapticMouse` は `SDL_SetError(...)` を返すが、
+  それは `false`、つまり機器の添字 0 なので、そのときも真になる。偽の FF 機器で測った: `BTN_MOUSE` の無い、
+  ランブルだけの機器が 1 台で `SDL_IsMouseHaptic()` は真。開くのを失敗させても真。3.4.2 もコードは同じ
+- **D-85**、`haptic/SDL_haptic.c` の `SDL_OpenHapticFromMouse`: 機器の**添字**を、インスタンス **ID**（1 から）を取る
+  `SDL_OpenHaptic` に渡す。添字 0 は ID 0 として探されて、必ず "Haptic device 0 not found" で失敗する。機器が
+  複数あると、添字 1 以降はたまたま同じ ID の別の機器が開く。機器 1 台（ID 1）で測った:
+  `SDL_OpenHapticFromMouse()` は NULL、`SDL_OpenHaptic(1)` は開く
+- **D-86**、`haptic/SDL_haptic.c` の `SDL_RunHapticEffect` / `SDL_StopHapticEffect` と Linux のバックエンド:
+  `ValidEffect` は効果の番号の範囲しか見ないが、`SDL_SYS_HapticRunEffect` / `StopEffect` は
+  `effect->hweffect->effect.id` を読む。`hweffect` は効果を作るまで NULL。作っていない番号を再生・停止すると
+  SIGSEGV で落ちる（`SDL_UpdateHapticEffect` は先に効果の型を比べるので落ちない）。測った: 作っていない番号 0 への
+  両方の呼び出しが SIGSEGV
 
 もう 1 件は種類が違う。**D-53**: SDL はスワップ間隔を「現在の OpenGL コンテキストの」
 ものとして説明しているが、値はビデオの装置全体で 1 つしか持たず、コンテキストを
