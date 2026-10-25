@@ -165,6 +165,17 @@ ibus 1.5.29 と ibus-mozc 2.28.4715.102 を入れ、bwrap で隔離して動か�
 - **未確認**: 窓つき（Wayland）での「GL の作成に失敗 → 同じ窓で ES」の順。窓の面の config は最初の `CreateContext` で決まるので、段 2 で `test_gl_window` に足して確かめる。Ubuntu 24.04（Mesa 25.2.8 / LLVM 20）の差（D-40）は、CI の結果と、この端末が aarch64 なので arm64 の ubuntu-base での再現で確かめる（`docs/HANDOFF.md` §5 の手順は amd64）
 - `eglInitialize` が返した版が 0.0 と表示された（Mesa の surfaceless の癖か、呼び出しの癖かは追っていない。動作には関係しない）
 
+## スパイク 6: Vulkan のローダ・ICD・Wayland の面（2026-10-25、Raspberry Pi 5）
+
+`spikes/spike6_vulkan.pas`。構造体は手書きの最小限（段 1 で生成器に替える）。実行: `fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -ospikes/spike6_vulkan spikes/spike6_vulkan.pas && spikes/spike6_vulkan`。
+
+- `libvulkan.so.1` の dlopen と `vkGetInstanceProcAddr`、インスタンス無しの `vkCreateInstance` の取得: 通る（浮動小数点の例外は先に止める。D-40）
+- インスタンス（`VK_KHR_surface` + `VK_KHR_wayland_surface`、API 1.1 要求）: 通る。物理デバイスは **V3DV（1.3、type 1 = 統合 GPU）と llvmpipe（lavapipe、1.4、type 4 = CPU）** の 2 つ。`VK_ICD_FILENAMES` で lavapipe だけにもできる
+- 役割の無い `wl_surface`（`wl_compositor_create_surface` しただけ）から `vkCreateWaylandSurfaceKHR`: 通る。この面で能力・形式（V3D 14、lvp 20）・present モード（`1 2 0` = MAILBOX / FIFO / IMMEDIATE）・`vkGetPhysicalDeviceWaylandPresentationSupportKHR` が引ける。`currentExtent` は 0xFFFFFFFF（窓が大きさを決める）、`maxImageCount` は 0（上限なし）
+- `VK_KHR_swapchain` 付きの論理デバイス: 両方で通る。キューファミリは両方とも 1 個（グラフィックス兼用）
+- **CI 相当（arm64 の Ubuntu 24.04、Mesa 25.2.8 / LLVM 20.1.2、bwrap）**: Wayland のコンポジタが無い（`WAYLAND_DISPLAY` なし）ので面の区間は飛ばされるが、ローダ → インスタンス → lavapipe → 論理デバイスまで通る。**CI で面は作れない**ので、窓つきの検査は手元専用（GL の T-21 と同じ扱い）、CI はオフスクリーンの描画比較だけ
+- **未確認**: 実際のスワップチェーンの作成と present（`xdg_toplevel` の役割が要る。段 2 で `Video.Wayland.Window` の面を借りて確かめる）、描画して読み戻すオフスクリーン（段 4）
+
 ## 優先順位への影響
 
 設計書は IBus バックエンドを先に実装する前提だったが、**Fcitx5 バックエンドを先に実装するほうが合理的**。
