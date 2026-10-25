@@ -40,7 +40,8 @@ uses
   PaPiMeLa.TextInput.Fcitx,     // IME 'fcitx'
   PaPiMeLa.TextInput.WaylandTI,  // IME 'wayland'（text-input-v3。Fcitx に繋がらないとき）
   PaPiMeLa.Render.GL,           // レンダラ 'opengl'（デスクトップ GL。GLES2 より先に選ぶ）
-  PaPiMeLa.Render.GLES2;        // レンダラ 'gles2'
+  PaPiMeLa.Render.GLES2,        // レンダラ 'gles2'
+  PaPiMeLa.Render.Vulkan;       // レンダラ 'vulkan'（TPMLWindowOptions.Vulkan のウィンドウだけが選ぶ）
 
 implementation
 

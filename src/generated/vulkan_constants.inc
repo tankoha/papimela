@@ -1,5 +1,5 @@
 { src/generated/vulkan_constants.inc — tools/genvulkan.bb が作る。手で直さない。
-  SDL が使う VK_ の定数（246 件）。値は vulkan_core.h と vulkan_wayland.h から。 }
+  SDL が使う VK_ の定数（247 件）。値は vulkan_core.h と vulkan_wayland.h から。 }
   VK_ACCESS_COLOR_ATTACHMENT_READ_BIT = 128;
   VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT = 256;
   VK_ACCESS_NONE = 0;
@@ -45,6 +45,7 @@
   VK_COMMAND_BUFFER_LEVEL_PRIMARY = 0;
   VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT = 2;
   VK_COMPONENT_SWIZZLE_IDENTITY = 0;
+  VK_COMPONENT_SWIZZLE_ONE = 2;
   VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR = 8;
   VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR = 1;
   VK_CULL_MODE_NONE = 0;

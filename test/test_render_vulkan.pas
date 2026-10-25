@@ -52,9 +52,16 @@ begin
   Result := TPMLRenderer.Create(TPMLVulkanRenderDriver.CreateOffscreen(W, H));
 end;
 
-// Vulkan の点と線は三角形に直す（既定）ので、GLES2 と同じ。許容は実測してここに書く（理由を添える）
+// 許容は実測してここに書く（理由を添える）。V3D と llvmpipe で同じ結果だった
 procedure AdjustTolerance(const AName: String; var ATolerance, AMaxBad: Integer);
 begin
+  // 斜めの線: Vulkan の線の規則はブレゼンハム（ソフトウェアのドライバ）と違い、33〜34 画素ずれる（GL は 12 画素以内）
+  if Pos('斜めの線', AName) = 1 then
+    AMaxBad := 40;
+  // YUV: SDL の Vulkan のシェーダ（SPIR-V。変えられない）は変換結果を 0..1 に挟まない。範囲の外へ出る色
+  // （輝度が下限より低いなど）は、先に ARGB8888 へ直して挟むソフトウェアのドライバと違う（最大差 69、80 画素以内）
+  if Pos('YUV', AName) = 1 then
+    AMaxBad := 100;
 end;
 
 { ---- Vulkan だけの確かめ ---- }
@@ -75,10 +82,10 @@ begin
       and G.Driver.SupportsTextureFormat(PML_PIXELFORMAT_NV12)
       and G.Driver.SupportsTextureFormat(PML_PIXELFORMAT_NV21),
       'YV12 / IYUV / I444 / NV12 / NV21 を持てる（SDL の yuvFormats。YCbCr 変換のサンプラ）');
-    Check(not G.Driver.SupportsTextureFormat(PML_PIXELFORMAT_XRGB8888)
-      and not G.Driver.SupportsTextureFormat(PML_PIXELFORMAT_XBGR8888)
+    Check(G.Driver.SupportsTextureFormat(PML_PIXELFORMAT_XRGB8888)
+      and G.Driver.SupportsTextureFormat(PML_PIXELFORMAT_XBGR8888)
       and not G.Driver.SupportsTextureFormat(PML_PIXELFORMAT_RGB24),
-      'XRGB8888 / XBGR8888 / RGB24 は持たない（SDL の vk_format_map に無い）');
+      'XRGB8888 / XBGR8888 は持ち（アルファ 1 のビュー。SDL との違い）、RGB24 は持たない');
     Check(not G.Driver.SupportsTextureFormat(PML_PIXELFORMAT_YUY2)
       and not G.Driver.SupportsTextureFormat(PML_PIXELFORMAT_UYVY)
       and not G.Driver.SupportsTextureFormat(PML_PIXELFORMAT_YVYU),
@@ -114,6 +121,45 @@ begin
     finally
       S.Free;
     end;
+  end;
+end;
+
+{ YUV の平面ごとの部分の更新を、そのあとに全体を更新し直さずに描く。色差の置き場は (x / 2, y / 2)。
+  IYUV と NV12 の 8x6 のテクスチャの (2, 2, 4, 2) だけを別の値で更新する。 }
+procedure SceneYUVPartial(R: TPMLRenderer);
+var
+  T: TPMLTexture;
+  Y: array[0..7] of Byte;
+  U: array[0..3] of Byte;
+  V: array[0..3] of Byte;
+  UV: array[0..7] of Byte;
+  I, K: Integer;
+begin
+  Background(R);
+  for K := 0 to 1 do
+  begin
+    if K = 0 then
+      T := NewYUVTexture(R, PML_PIXELFORMAT_IYUV, PML_COLORSPACE_UNKNOWN, 8, 6, 77)
+    else
+      T := NewYUVTexture(R, PML_PIXELFORMAT_NV12, PML_COLORSPACE_UNKNOWN, 8, 6, 91);
+    for I := 0 to 7 do
+      Y[I] := 40 + I * 25;
+    for I := 0 to 3 do
+    begin
+      U[I] := 60 + I * 50;
+      V[I] := 220 - I * 50;
+    end;
+    for I := 0 to 3 do
+    begin
+      UV[I * 2] := U[I];
+      UV[I * 2 + 1] := V[I];
+    end;
+    if K = 0 then
+      T.UpdateYUV(TPMLRect.Make(2, 2, 4, 2), @Y[0], 4, @U[0], 2, @V[0], 2)
+    else
+      T.UpdateNV(TPMLRect.Make(2, 2, 4, 2), @Y[0], 4, @UV[0], 4);
+    T.ScaleMode := TPMLScaleMode.Nearest;
+    R.RenderTexture(T, FR(0, 0, 0, 0), FR(2 + K * 31, 2, 28, 21));
   end;
 end;
 
@@ -233,6 +279,7 @@ begin
   CheckVulkanFormats;
   RunCommonScenes;
   CompareA('16 ビットの形式（持てれば持ったまま、持てなければ ARGB8888 へ変換）', @SceneSmallFormats, 2);
+  CompareA('YUV の平面ごとの部分の更新だけ（全体を更新し直さない。色差の置き場は x / 2、y / 2）', @SceneYUVPartial, 3);
   CheckPaletteNative;
   CheckPixelArt;
   CheckRecreate;
@@ -398,7 +445,10 @@ begin
     R.VSync := 0;
     Fps0 := Fps(1500);
     WriteLn(Format('  [INFO] 画面 %.1f Hz、VSync 1: %.1f fps、0: %.1f fps', [Refresh, Fps1, Fps0]));
-    Check(Fps1 < Fps0 * 0.5, 'VSync 1 は待つので、VSync 0 より遅い');
+    // Mesa の Wayland の WSI は、IMMEDIATE / MAILBOX もコンポジタのフレームコールバックのペースへ寄せることがあり、
+    // VSync 0 が 1 の何倍も速いとは限らない（GL の swap interval 0 と違う）。待つ側（FIFO）が出力のリフレッシュを
+    // 超えないことと、待たない側が待つ側より極端に遅くないことだけを見る
+    Check(Fps0 * 1.25 >= Fps1, 'VSync 0 は VSync 1 より極端には遅くない');
     Check(Fps1 < Refresh * 1.1, 'VSync 1 は画面のリフレッシュを超えない');
     R.VSync := 1;
 

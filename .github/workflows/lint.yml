@@ -137,6 +137,17 @@ jobs:
           fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_render_gl test/test_render_gl.pas
           LIBGL_ALWAYS_SOFTWARE=1 ./test/test_render_gl
 
+      # Vulkan のドライバ（面の無いオフスクリーン）をソフトウェアのドライバと画素で比べる。lavapipe（CPU の ICD）で描く。
+      # ウィンドウの区間は Wayland が無いので飛ばされる。物理デバイスは名前で lavapipe（llvmpipe）に絞る。
+      - name: Compare the Vulkan render driver with the software one (lavapipe)
+        timeout-minutes: 5
+        env:
+          PAPIMELA_VULKAN_DEVICE: llvmpipe
+        run: |
+          set -eu
+          fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_render_vulkan test/test_render_vulkan.pas
+          ./test/test_render_vulkan
+
       # 図と実装の乖離検査。英日の Mermaid ブロックの同一性と、図に出てくる型が
       # 実装に存在することを確認する。速いので lint より先に置く。
       - name: Check diagrams
