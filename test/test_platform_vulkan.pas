@@ -185,6 +185,18 @@ begin
     and (VK_API_VERSION_MINOR(V) = 1023) and (VK_API_VERSION_PATCH(V) = 4095), '各欄の上限が隣へ漏れない');
 end;
 
+procedure ResultSection;
+begin
+  WriteLn('3b. VkResult の名前');
+  Check(PMLVulkanResultString(VK_SUCCESS) = 'VK_SUCCESS', 'VK_SUCCESS');
+  Check(PMLVulkanResultString(VK_ERROR_OUT_OF_DATE_KHR) = 'VK_ERROR_OUT_OF_DATE_KHR', '負の値（OUT_OF_DATE）');
+  Check(PMLVulkanResultString(VK_SUBOPTIMAL_KHR) = 'VK_SUBOPTIMAL_KHR', '拡張の正の値（SUBOPTIMAL）');
+  Check(PMLVulkanResultString(VK_ERROR_SURFACE_LOST_KHR) = 'VK_ERROR_SURFACE_LOST_KHR', 'SURFACE_LOST');
+  Check(PMLVulkanResultString(VK_PIPELINE_COMPILE_REQUIRED_EXT) = 'VK_PIPELINE_COMPILE_REQUIRED_EXT', 'COMPILE_REQUIRED');
+  Check(PMLVulkanResultString(-123456) = 'VK_ERROR_<Unknown>', '知らない負の値');
+  Check(PMLVulkanResultString(123456) = 'VK_<Unknown>', '知らない正の値');
+end;
+
 procedure TablesSection;
 var
   G: TPMLVulkanGlobalFunctions;
@@ -270,6 +282,7 @@ begin
     LayoutSection;
     ConstantsSection;
     MacrosSection;
+    ResultSection;
     TablesSection;
     LoaderSection;
   finally

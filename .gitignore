@@ -97,6 +97,8 @@ spikes/spike5_egl_desktop_gl
 spikes/spike6_vulkan
 test/test_platform_gl
 test/test_platform_vulkan
+test/test_vulkan_loader
+test/test_vulkan_window
 test/test_gl_desktop_window
 test/test_render_gl
 test/test_render_gl_shaders

@@ -520,6 +520,23 @@ VK_THREAD_DONE_KHR VK_THREAD_IDLE_KHR VK_TIMEOUT VK_TRUE VK_VERTEX_INPUT_RATE_VE
     (str "{ src/generated/vulkan_bind_" (name level) ".inc — tools/genvulkan.bb が作る。手で直さない。 }\n"
          (apply str (for [f fs] (format "  Bind(AFuncs.%s, '%s');\n" f f))))))
 
+;; ---- VkResult の名前（SDL_Vulkan_GetResultString。video/SDL_vulkan_utils.c の case 一覧から）
+
+(def ^:private result-cases
+  (let [src (slurp "reference/SDL/src/video/SDL_vulkan_utils.c")
+        pairs (re-seq #"case (VK_\w+):\s*return \"(VK_\w+)\";" src)
+        ;; #if VK_HEADER_VERSION >= 135 && VK_HEADER_VERSION < 162 の枝。同梱ヘッダの版では無効
+        skipped #{"VK_ERROR_INCOMPATIBLE_VERSION_KHR"}]
+    (vec (for [[_ c s] pairs :when (not (skipped c))]
+           (do (when-not (= c s) (fail "case の名前と返す文字列が違う: " c " / " s))
+               (when-not (some #{c} root-constants) (fail "result の case が定数の一覧に無い: " c))
+               c)))))
+
+(def ^:private result-text
+  (str "{ src/generated/vulkan_result_strings.inc — tools/genvulkan.bb が作る。手で直さない。\n"
+       "  SDL_Vulkan_GetResultString の case 一覧（" (count result-cases) " 件）。 }\n"
+       (apply str (for [c result-cases] (format "    %s: Result := '%s';\n" c c)))))
+
 (def ^:private files
   {"vulkan_types.inc" types-text
    "vulkan_constants.inc" constants-text
@@ -528,7 +545,8 @@ VK_THREAD_DONE_KHR VK_THREAD_IDLE_KHR VK_TIMEOUT VK_TRUE VK_VERTEX_INPUT_RATE_VE
    "vulkan_functions_device.inc" (functions-text :device "vkGetDeviceProcAddr で引く関数")
    "vulkan_bind_global.inc" (bind-text :global)
    "vulkan_bind_instance.inc" (bind-text :instance)
-   "vulkan_bind_device.inc" (bind-text :device)})
+   "vulkan_bind_device.inc" (bind-text :device)
+   "vulkan_result_strings.inc" result-text})
 
 ;; 件数を本文から数え直して確かめる
 (when-not (= (count (re-seq #"(?m)^  VK_[A-Z0-9_]+ = (?:-?[0-9]+|'[^']*');$" constants-text)) (count root-constants))

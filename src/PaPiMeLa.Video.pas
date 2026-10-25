@@ -21,7 +21,7 @@
       TPMLVideoSystem の破棄に任せてもよい
 
   NOT RESOLVED:
-    - GL / Vulkan / Clipboard は未実装（#33、#39、#38）。カーソルはシステム
+    - Clipboard は実装済み（#38）。GL（#33、#39）と Vulkan（#77）は能力で判定する。カーソルはシステム
       カーソルの選択と表示切り替えだけ
     - フルスクリーン、ウィンドウ位置、不透明度、ヒットテストは
       対応する能力と一緒に追加する
@@ -45,6 +45,7 @@ uses
   PaPiMeLa.Events,
   PaPiMeLa.Pixels,
   PaPiMeLa.Video.Backend,
+  PaPiMeLa.Platform.Vulkan,
   PaPiMeLa.Clipboard;
 
 type
@@ -76,6 +77,12 @@ type
     { GL で描くウィンドウにする（SDL_WINDOW_OPENGL）。CreateGLContext に必要。
       Wayland では最初の絵を GL が出すので、ソフトウェアの最初の 1 枚を出さない。 }
     function OpenGL: TPMLWindowOptions;
+    { Vulkan で描くウィンドウにする（SDL_WINDOW_VULKAN）。CreateWindow が Vulkan のローダを読み（数える）、
+      ウィンドウを壊すと手放す。VulkanCreateSurface に必要。能力 Vulkan が無ければ CreateWindow が EPMLUnsupported。
+      Wayland では最初の絵を Vulkan が出すので、ソフトウェアの最初の 1 枚を出さない。
+      SDL は、このフラグの無いウィンドウでも CreateSurface のときに Vulkan のウィンドウへ切り替えるが、
+      papimela は作るときに決める（GL と同じ。最初の 1 枚を出すかどうかが作るときに決まるため）。 }
+    function Vulkan: TPMLWindowOptions;
   end;
 
   TPMLGLContext = class;
@@ -116,6 +123,7 @@ type
     FMouseRect      : TPMLRect;
     FDependents     : array of IPMLWindowDependent;
     FGL             : TPMLGLBackend;    // 借りている。ビデオのバックエンドが持つ
+    FVulkan         : TPMLVulkanBackend; // 借りている。ビデオのバックエンドが持つ
     procedure SetTitle(const AValue: String);
     procedure SetMouseGrab(AValue: Boolean);
     procedure SetRelativeMouseMode(AValue: Boolean);
@@ -172,6 +180,12 @@ type
     function  CreateGLContext(const AAttrs: TPMLGLAttributes): TPMLGLContext; overload;
     // 描いた絵を画面へ出す。待つかどうかは TPMLGLContext.SwapInterval に従う。
     procedure SwapGL;
+
+    // Vulkan の面（SDL_Vulkan_CreateSurface）。TPMLWindowOptions.Vulkan で作ったウィンドウと、
+    // 拡張（TPMLVideoSystem.VulkanInstanceExtensions）つきで作った AInstance が要る。
+    // 失敗は EPMLVideoError。面はアプリが TPMLVideoSystem.VulkanDestroySurface で、ウィンドウより先に壊す。
+    function  VulkanCreateSurface(AInstance: VkInstance;
+      AAllocator: PVkAllocationCallbacks = nil): VkSurfaceKHR;
 
     function  NativeHandles: TPMLNativeWindowHandles;
 
@@ -281,6 +295,23 @@ type
     function  CreateWindow(const AOptions: TPMLWindowOptions): TPMLWindow;
     // GL の関数の番地（SDL_GL_GetProcAddress）。能力 OpenGLES が要る。無ければ nil。
     function  GLGetProcAddress(const AName: String): Pointer;
+
+    // Vulkan（SDL_Vulkan_*）。能力 Vulkan が要る。無ければ EPMLUnsupported。
+    // ローダは数えて読む: VulkanLoadLibrary を呼んだ回数だけ VulkanUnloadLibrary を呼ぶ。
+    // TPMLWindowOptions.Vulkan のウィンドウは、作るときに 1 回読み、壊すときに 1 回手放す。
+    // APath が空ならヒント PAPIMELA_VULKAN_LIBRARY、それも無ければ libvulkan.so.1。読めなければ EPMLVideoError。
+    procedure VulkanLoadLibrary(const APath: String = '');
+    procedure VulkanUnloadLibrary;
+    // ローダの vkGetInstanceProcAddr（SDL_Vulkan_GetVkGetInstanceProcAddr）。読んでいなければ EPMLVideoError。
+    function  VulkanGetInstanceProcAddr: PFN_vkGetInstanceProcAddr;
+    // vkCreateInstance に渡す拡張の名前（SDL_Vulkan_GetInstanceExtensions）。
+    function  VulkanInstanceExtensions: TPMLVulkanExtensionNames;
+    // このキューファミリが、このビデオの面へ出せるか（SDL_Vulkan_GetPresentationSupport）。
+    function  VulkanGetPresentationSupport(AInstance: VkInstance; APhysicalDevice: VkPhysicalDevice;
+      AQueueFamilyIndex: LongWord): Boolean;
+    procedure VulkanDestroySurface(AInstance: VkInstance; ASurface: VkSurfaceKHR;
+      AAllocator: PVkAllocationCallbacks = nil);
+
     function  WindowFromID(AID: TPMLWindowID): TPMLWindow;
     function  PrimaryDisplay: TPMLDisplay;
     procedure Require(ACapability: TPMLVideoCapability; const AWhat: String);
@@ -349,6 +380,12 @@ function TPMLWindowOptions.OpenGL: TPMLWindowOptions;
 begin
   Result := Self;
   Include(Result.Flags, TPMLWindowFlag.OpenGL);
+end;
+
+function TPMLWindowOptions.Vulkan: TPMLWindowOptions;
+begin
+  Result := Self;
+  Include(Result.Flags, TPMLWindowFlag.Vulkan);
 end;
 
 function TPMLWindowOptions.Borderless: TPMLWindowOptions;
@@ -424,6 +461,7 @@ begin
   FHeight := AOptions.Height;
   FFlags := AOptions.Flags;
   FGL := ASystem.Backend.GL;
+  FVulkan := ASystem.Backend.Vulkan;
 end;
 
 destructor TPMLWindow.Destroy;
@@ -445,6 +483,10 @@ begin
   if Assigned(FSystem) then
     FSystem.RemoveWindow(Self);
   FreeAndNil(FBackend);
+  // Vulkan のローダは、ウィンドウ（wl_surface）を壊したあとに手放す（SDL_DestroyWindow の順）。
+  // ビデオのバックエンドが先に消えていたら、バックエンドが手放している。
+  if (TPMLWindowFlag.Vulkan in FFlags) and Assigned(FSystem) and (FVulkan <> nil) then
+    FVulkan.UnloadLibrary;
   inherited Destroy;
 end;
 
@@ -708,6 +750,21 @@ begin
   Result := FBackend.GL.GetProcAddress(AName);
 end;
 
+function TPMLWindow.VulkanCreateSurface(AInstance: VkInstance;
+  AAllocator: PVkAllocationCallbacks): VkSurfaceKHR;
+begin
+  FSystem.Require(TPMLVideoCapability.Vulkan, 'Vulkan');
+  if AInstance = nil then
+    raise EPMLVideoError.CreateNative('invalid parameter: instance', 0, FSystem.BackendName);
+  if not (TPMLWindowFlag.Vulkan in FFlags) then
+    raise EPMLVideoError.CreateNative(
+      'the window was not created with TPMLWindowOptions.Vulkan', 0, FSystem.BackendName);
+  Result := 0;
+  if not FVulkan.CreateSurface(FBackend, AInstance, AAllocator, Result) then
+    raise EPMLVideoError.CreateNative('failed to create a Vulkan surface: ' + FVulkan.LastError,
+      0, FSystem.BackendName);
+end;
+
 { TPMLGLContext }
 
 constructor TPMLGLContext.Create(AWindow: TPMLWindow; AGL: TPMLGLBackend;
@@ -915,6 +972,53 @@ begin
     Result := [];
 end;
 
+procedure TPMLVideoSystem.VulkanLoadLibrary(const APath: String);
+begin
+  Require(TPMLVideoCapability.Vulkan, 'Vulkan');
+  if not FBackend.Vulkan.LoadLibrary(APath) then
+    raise EPMLVideoError.CreateNative('failed to load Vulkan: ' + FBackend.Vulkan.LastError, 0, FSelectedName);
+end;
+
+procedure TPMLVideoSystem.VulkanUnloadLibrary;
+begin
+  Require(TPMLVideoCapability.Vulkan, 'Vulkan');
+  FBackend.Vulkan.UnloadLibrary;
+end;
+
+function TPMLVideoSystem.VulkanGetInstanceProcAddr: PFN_vkGetInstanceProcAddr;
+begin
+  Require(TPMLVideoCapability.Vulkan, 'Vulkan');
+  Result := FBackend.Vulkan.GetInstanceProcAddr;
+  if not Assigned(Result) then
+    raise EPMLVideoError.CreateNative(FBackend.Vulkan.LastError, 0, FSelectedName);
+end;
+
+function TPMLVideoSystem.VulkanInstanceExtensions: TPMLVulkanExtensionNames;
+begin
+  Require(TPMLVideoCapability.Vulkan, 'Vulkan');
+  Result := FBackend.Vulkan.GetInstanceExtensions;
+end;
+
+function TPMLVideoSystem.VulkanGetPresentationSupport(AInstance: VkInstance;
+  APhysicalDevice: VkPhysicalDevice; AQueueFamilyIndex: LongWord): Boolean;
+begin
+  Require(TPMLVideoCapability.Vulkan, 'Vulkan');
+  if AInstance = nil then
+    raise EPMLVideoError.CreateNative('invalid parameter: instance', 0, FSelectedName);
+  if APhysicalDevice = nil then
+    raise EPMLVideoError.CreateNative('invalid parameter: physicalDevice', 0, FSelectedName);
+  Result := FBackend.Vulkan.GetPresentationSupport(AInstance, APhysicalDevice, AQueueFamilyIndex);
+end;
+
+procedure TPMLVideoSystem.VulkanDestroySurface(AInstance: VkInstance; ASurface: VkSurfaceKHR;
+  AAllocator: PVkAllocationCallbacks);
+begin
+  // SDL_Vulkan_DestroySurface: 何かが nil / 0 なら何もしない
+  if (FBackend = nil) or (FBackend.Vulkan = nil) or (AInstance = nil) or (ASurface = 0) then
+    Exit;
+  FBackend.Vulkan.DestroySurface(AInstance, ASurface, AAllocator);
+end;
+
 procedure TPMLVideoSystem.Require(ACapability: TPMLVideoCapability;
   const AWhat: String);
 begin
@@ -951,11 +1055,22 @@ var
   ID: TPMLWindowID;
 begin
   CheckMainThread;
+  // SDL_CreateWindow: Vulkan のウィンドウは、作る前にローダを読む（失敗なら作らない）。
+  // 能力が無ければ EPMLUnsupported（SDL_ContextNotSupported）
+  if TPMLWindowFlag.Vulkan in AOptions.Flags then
+    VulkanLoadLibrary;
   ID := FNextWindowID;
   Inc(FNextWindowID);
-  WB := FBackend.CreateWindowBackend(ID, AOptions.Title,
-    AOptions.Width, AOptions.Height, AOptions.Flags);
-  Result := TPMLWindow.Create(Self, ID, WB, AOptions);
+  try
+    WB := FBackend.CreateWindowBackend(ID, AOptions.Title,
+      AOptions.Width, AOptions.Height, AOptions.Flags);
+    Result := TPMLWindow.Create(Self, ID, WB, AOptions);
+  except
+    // 作れなかったウィンドウのために読んだローダは、手放して例外を渡す
+    if TPMLWindowFlag.Vulkan in AOptions.Flags then
+      FBackend.Vulkan.UnloadLibrary;
+    raise;
+  end;
   SetLength(FWindows, Length(FWindows) + 1);
   FWindows[High(FWindows)] := Result;
   if not (TPMLWindowFlag.Hidden in AOptions.Flags) then

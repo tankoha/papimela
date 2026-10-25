@@ -24,7 +24,7 @@
 
   NOT RESOLVED:
     - シートはキーボード / ポインタ / タッチを実装済み。タブレット（tablet-v2）は未対応
-    - Vulkan の部品は nil のまま。クリップボードの部品（#38）は wl_data_device_manager か
+    - クリップボードの部品（#38）は wl_data_device_manager か
       primary selection のマネージャがあり、シートがあるときに作る（ドラッグ＆ドロップは
       未実装）。GL の部品は
       libEGL と libwayland-egl があれば作る（#33、#39。読み込みは最初のコンテキストまで遅らせる）。
@@ -53,6 +53,7 @@ uses
   PaPiMeLa.Video.Wayland.Cursor,
   PaPiMeLa.Video.Wayland.Data,
   PaPiMeLa.Video.Wayland.EGL,
+  PaPiMeLa.Video.Wayland.Vulkan,
   PaPiMeLa.Events,
   PaPiMeLa.Platform.XKB,
   PaPiMeLa.Platform.DynLib,
@@ -164,6 +165,7 @@ begin
   FreeAndNil(FClipboard);
   FreeAndNil(FCursors);
   FreeAndNil(FGL);
+  FreeAndNil(FVulkan);
   DestroySeats;
   FreeAndNil(FConn);
   inherited Destroy;
@@ -224,6 +226,14 @@ begin
     if TPMLDynLib.IsAvailable(['libGL.so.1', 'libOpenGL.so.0', 'libGL.so']) then
       Include(FCapabilities, TPMLVideoCapability.OpenGL);
   end;
+
+  // Vulkan の部品。ローダ（libvulkan.so.1）が開ければ能力 Vulkan を出す。開くのは確認だけで、
+  // 読み込みは最初の LoadLibrary（TPMLWindowOptions.Vulkan のウィンドウか VulkanLoadLibrary）まで遅らせる。
+  if TPMLDynLib.IsAvailable(['libvulkan.so.1']) then
+  begin
+    FVulkan := TPMLWaylandVulkan.Create(ContextRef, Self, FConn);
+    Include(FCapabilities, TPMLVideoCapability.Vulkan);
+  end;
 end;
 
 procedure TPMLWaylandVideoBackend.Disconnect;
@@ -231,6 +241,7 @@ begin
   // GL の部品は wl_display を借りている（eglTerminate が接続を使う）ので、
   // 接続を切る前に捨てる。ウィンドウはこの時点で既に無い。
   FreeAndNil(FGL);
+  FreeAndNil(FVulkan);
   // クリップボードの部品とカーソル部品はシートを触るので、シートより先に捨てる。
   FreeAndNil(FClipboard);
   FreeAndNil(FCursors);

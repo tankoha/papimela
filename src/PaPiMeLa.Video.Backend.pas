@@ -24,8 +24,8 @@
     - Wayland は拡張の有無で能力が変わるため Capabilities は Connect 後に確定する
 
   NOT RESOLVED:
-    - 部品のうち実装済みは Cursors（#37）と GL（#33、#39）。Vulkan / Clipboard /
-      ScreenSaver / MessageBox / SystemMenu / ScreenKeyboard は未実装（#38、#40、#67 など）
+    - 部品のうち実装済みは Cursors（#37）、GL（#33、#39）、Vulkan（#77）。Clipboard /
+      ScreenSaver / MessageBox / SystemMenu / ScreenKeyboard は未実装（#38、#40 など）
 
   Copyright (C) 2026 papimela contributors
   （zlib ライセンス本文は papimela.inc を参照）
@@ -42,7 +42,8 @@ uses
   PaPiMeLa.Errors,
   PaPiMeLa.Core.Base,
   PaPiMeLa.Pixels,
-  PaPiMeLa.Events;
+  PaPiMeLa.Events,
+  PaPiMeLa.Platform.Vulkan;
 
 type
   TPMLVideoCapability = (
@@ -336,6 +337,44 @@ type
     property  LastError: String read FLastError;
   end;
 
+  TPMLVulkanExtensionNames = array of String;
+
+  { Vulkan の部品。TPMLVideoBackend.Vulkan が nil でなければ使える（能力 Vulkan）。
+
+    SDL_VideoDevice の Vulkan 6 個（LoadLibrary / UnloadLibrary / GetInstanceExtensions / CreateSurface /
+    DestroySurface / GetPresentationSupport）に対応する。ローダ（libvulkan.so.1）は数えて読む:
+    LoadLibrary を呼んだ回数だけ UnloadLibrary を呼ぶと手放す（SDL_video.c の loader_loaded）。
+
+    RESOLVED:
+      - 例外は投げず、失敗は False / nil と LastError で返す。公開層が EPMLVideoError に変える
+      - 呼び出し側は C のドライバを呼ぶので、浮動小数点の例外を止めること（LoadLibrary が呼んだスレッドで止める。D-40）
+      - ウィンドウが VkSurfaceKHR を持つ間は、ウィンドウもローダも生かしておくのは呼び出し側の責任
+        （SDL と同じ。面はアプリが DestroySurface で壊す） }
+  TPMLVulkanBackend = class abstract(TPMLSystemObject)
+  strict protected
+    FLastError: String;
+  public
+    { ローダを読む（数える）。APath が空ならヒント PAPIMELA_VULKAN_LIBRARY、それも無ければ libvulkan.so.1。
+      読み込み済みで APath が違う名前なら失敗する。必要な拡張（VK_KHR_surface など）が無くても失敗する。 }
+    function  LoadLibrary(const APath: String): Boolean; virtual; abstract;
+    { 読んだ回数を 1 減らし、0 になったら手放す。読んでいなければ何もしない。 }
+    procedure UnloadLibrary; virtual; abstract;
+    { ローダの vkGetInstanceProcAddr。読んでいなければ nil。 }
+    function  GetInstanceProcAddr: PFN_vkGetInstanceProcAddr; virtual; abstract;
+    { vkCreateInstance に渡す拡張の名前（VK_KHR_surface と、プラットフォームの面の拡張）。 }
+    function  GetInstanceExtensions: TPMLVulkanExtensionNames; virtual; abstract;
+    { AWindow の wl_surface などから VkSurfaceKHR を作る。AInstance は拡張つきで作ったもの。 }
+    function  CreateSurface(AWindow: TPMLWindowBackend; AInstance: VkInstance;
+      AAllocator: PVkAllocationCallbacks; out ASurface: VkSurfaceKHR): Boolean; virtual; abstract;
+    procedure DestroySurface(AInstance: VkInstance; ASurface: VkSurfaceKHR;
+      AAllocator: PVkAllocationCallbacks); virtual; abstract;
+    { このキューファミリが、このプラットフォームの面へ出せるか。 }
+    function  GetPresentationSupport(AInstance: VkInstance; APhysicalDevice: VkPhysicalDevice;
+      AQueueFamilyIndex: LongWord): Boolean; virtual; abstract;
+    { 直近の失敗の説明。 }
+    property  LastError: String read FLastError;
+  end;
+
   TPMLDisplayBackend = class abstract(TPMLSystemObject)
   public
     function  GetName: String; virtual; abstract;
@@ -355,6 +394,7 @@ type
     FCapabilities: TPMLVideoCapabilities;
     FCursors     : TPMLCursorBackend;
     FGL          : TPMLGLBackend;
+    FVulkan      : TPMLVulkanBackend;
     FClipboard   : TPMLClipboardBackend;
   public
     function  BackendName: String; virtual; abstract;
@@ -374,6 +414,7 @@ type
     // 部品（nil = 未搭載。能力で判定する）。所有はバックエンド。
     property Cursors     : TPMLCursorBackend read FCursors;
     property GL          : TPMLGLBackend read FGL;
+    property Vulkan      : TPMLVulkanBackend read FVulkan;
     property Clipboard   : TPMLClipboardBackend read FClipboard;
     property Capabilities: TPMLVideoCapabilities read FCapabilities;
   end;

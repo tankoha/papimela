@@ -70,6 +70,10 @@ function VK_API_VERSION_MAJOR(AVersion: LongWord): LongWord;
 function VK_API_VERSION_MINOR(AVersion: LongWord): LongWord;
 function VK_API_VERSION_PATCH(AVersion: LongWord): LongWord;
 
+{ VkResult の名前（SDL_Vulkan_GetResultString）。知らない値は、負なら 'VK_ERROR_<Unknown>'、
+  そうでなければ 'VK_<Unknown>'。 }
+function PMLVulkanResultString(AResult: VkResult): String;
+
 { ローダの vkGetInstanceProcAddr で、インスタンス無しの関数表を埋める。 }
 function PMLVulkanLoadGlobalFunctions(AGetProc: PFN_vkGetInstanceProcAddr;
   out AFuncs: TPMLVulkanGlobalFunctions): String;
@@ -107,6 +111,18 @@ end;
 function VK_API_VERSION_PATCH(AVersion: LongWord): LongWord;
 begin
   Result := AVersion and $FFF;
+end;
+
+function PMLVulkanResultString(AResult: VkResult): String;
+begin
+  case AResult of
+{$I generated/vulkan_result_strings.inc}
+  else
+    if AResult < 0 then
+      Result := 'VK_ERROR_<Unknown>'
+    else
+      Result := 'VK_<Unknown>';
+  end;
 end;
 
 function PMLVulkanLoadGlobalFunctions(AGetProc: PFN_vkGetInstanceProcAddr;

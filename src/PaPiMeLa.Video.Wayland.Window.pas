@@ -35,8 +35,8 @@
       隠れたウィンドウにはコールバックが来ないので、上限が無いと止まる
     - 専用のキューを使うのは、待っている間に入力イベントを配送しないため。
       読み出した入力イベントは既定のキューに残り、次の PumpEvents で配られる
-    - GL（TPMLWindowFlag.OpenGL）のウィンドウは最初の 1 枚を出さない。EGL の
-      最初の eglSwapBuffers がサーフェスをマップする。フレームコールバックの
+    - GL（TPMLWindowFlag.OpenGL）と Vulkan（TPMLWindowFlag.Vulkan）のウィンドウは最初の 1 枚を出さない。
+      EGL の最初の eglSwapBuffers（Vulkan は最初の vkQueuePresentKHR）がサーフェスをマップする。フレームコールバックの
       待ちと頼み（WaitForFrame / RequestFrame）は TPMLWaylandEGL が使う
     - Hide はアンマップなので、xdg-shell の規約どおり configure の済んだ状態を
       捨てる（FConfigured := False）。Show がバッファ無しの commit を出し、
@@ -264,7 +264,8 @@ begin
   FWindowID := AWindowID;
   FWidth := AWidth;
   FHeight := AHeight;
-  FIsGL := TPMLWindowFlag.OpenGL in AFlags;
+  // Vulkan のウィンドウも GL と同じに、最初の 1 枚を出さない（Vulkan の WSI が最初の絵でマップする）
+  FIsGL := (TPMLWindowFlag.OpenGL in AFlags) or (TPMLWindowFlag.Vulkan in AFlags);
   if FWidth <= 0 then FWidth := 640;
   if FHeight <= 0 then FHeight := 480;
 
@@ -617,7 +618,7 @@ procedure TPMLWaylandWindowBackend.PresentFirstFrame;
 begin
   if not FVisible then
     Exit;
-  // GL のウィンドウは、最初の eglSwapBuffers がサーフェスをマップする。
+  // GL のウィンドウは、最初の eglSwapBuffers がサーフェスをマップする（Vulkan は最初の vkQueuePresentKHR）。
   // ソフトウェアの 1 枚を先に出すと、GL の最初の絵の前に黒が 1 フレーム映る。
   if FIsGL then
     Exit;
