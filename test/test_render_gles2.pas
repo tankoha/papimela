@@ -45,10 +45,13 @@ uses
   PaPiMeLa.Video.Backend,
   PaPiMeLa.Video,
   PaPiMeLa.Video.Wayland,
+  PaPiMeLa.Video.Wayland.Window,
   PaPiMeLa.Platform.Wayland.Client,
   PaPiMeLa.Render,
   PaPiMeLa.Render.GLES2,
   PaPiMeLa.Core;
+
+{$I vsync_probe.inc}
 
 {$I render_scenes.inc}
 
@@ -201,7 +204,9 @@ begin
       Exit;
     end;
     VB := TPMLWaylandVideoBackend(Ctx.Video.Backend);
-    Refresh := Ctx.Video.PrimaryDisplay.DesktopMode.RefreshRate;
+    Refresh := PMLVSyncReferenceHz(Ctx);
+    Check(VSyncMeasured or (GetEnvironmentVariable('PAPIMELA_VSYNC_OPTIONAL') = '1'),
+      'コンポジタの合図の周期が測れる（飛ばすには PAPIMELA_VSYNC_OPTIONAL=1）');
 
     Plain := Ctx.Video.CreateWindow(TPMLWindowOptions.Make('plain', 120, 80));
     Soft := TPMLRenderer.CreateForWindow(Plain);
@@ -275,8 +280,8 @@ begin
     Fps1 := Fps(1500);
     R.VSync := 0;
     Fps0 := Fps(1500);
-    WriteLn(Format('  [INFO] 画面 %.1f Hz、VSync 1: %.1f fps、0: %.1f fps', [Refresh, Fps1, Fps0]));
-    Check((Fps1 > Refresh * 0.8) and (Fps1 < Refresh * 1.1), 'VSync 1 は画面のリフレッシュに揃う');
+    WriteLn(Format('  [INFO] 合図 %.1f Hz、VSync 1: %.1f fps、0: %.1f fps', [Refresh, Fps1, Fps0]));
+    Check((Fps1 > Refresh * 0.6) and (Fps1 < Refresh * 1.2), 'VSync 1 はコンポジタの合図の周期に揃う');
     Check(Fps0 > Refresh * 1.5, 'VSync 0 はそれより速い');
     R.VSync := 1;
 

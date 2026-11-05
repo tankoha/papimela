@@ -40,10 +40,13 @@ uses
   PaPiMeLa.Video.Backend,
   PaPiMeLa.Video,
   PaPiMeLa.Video.Wayland,
+  PaPiMeLa.Video.Wayland.Window,
   PaPiMeLa.Platform.Wayland.Client,
   PaPiMeLa.Render,
   PaPiMeLa.Render.Vulkan,
   PaPiMeLa.Core;
+
+{$I vsync_probe.inc}
 
 {$I render_scenes.inc}
 
@@ -345,7 +348,9 @@ begin
       Exit;
     end;
     VB := TPMLWaylandVideoBackend(Ctx.Video.Backend);
-    Refresh := Ctx.Video.PrimaryDisplay.DesktopMode.RefreshRate;
+    Refresh := PMLVSyncReferenceHz(Ctx);
+    Check(VSyncMeasured or (GetEnvironmentVariable('PAPIMELA_VSYNC_OPTIONAL') = '1'),
+      'コンポジタの合図の周期が測れる（飛ばすには PAPIMELA_VSYNC_OPTIONAL=1）');
 
     Plain := Ctx.Video.CreateWindow(TPMLWindowOptions.Make('plain', 120, 80));
     Raised := False;
@@ -444,12 +449,12 @@ begin
     Fps1 := Fps(1500);
     R.VSync := 0;
     Fps0 := Fps(1500);
-    WriteLn(Format('  [INFO] 画面 %.1f Hz、VSync 1: %.1f fps、0: %.1f fps', [Refresh, Fps1, Fps0]));
+    WriteLn(Format('  [INFO] 合図 %.1f Hz、VSync 1: %.1f fps、0: %.1f fps', [Refresh, Fps1, Fps0]));
     // Mesa の Wayland の WSI は、IMMEDIATE / MAILBOX もコンポジタのフレームコールバックのペースへ寄せることがあり、
     // VSync 0 が 1 の何倍も速いとは限らない（GL の swap interval 0 と違う）。待つ側（FIFO）が出力のリフレッシュを
     // 超えないことと、待たない側が待つ側より極端に遅くないことだけを見る
     Check(Fps0 * 1.25 >= Fps1, 'VSync 0 は VSync 1 より極端には遅くない');
-    Check(Fps1 < Refresh * 1.1, 'VSync 1 は画面のリフレッシュを超えない');
+    Check(Fps1 < Refresh * 1.1, 'VSync 1 はコンポジタの合図の周期を超えない');
     R.VSync := 1;
 
     // 最大化: スワップチェーンの作り直し（VK_ERROR_OUT_OF_DATE_KHR / VK_SUBOPTIMAL_KHR）

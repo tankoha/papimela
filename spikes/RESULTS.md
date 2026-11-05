@@ -176,6 +176,15 @@ ibus 1.5.29 と ibus-mozc 2.28.4715.102 を入れ、bwrap で隔離して動か�
 - **CI 相当（arm64 の Ubuntu 24.04、Mesa 25.2.8 / LLVM 20.1.2、bwrap）**: Wayland のコンポジタが無い（`WAYLAND_DISPLAY` なし）ので面の区間は飛ばされるが、ローダ → インスタンス → lavapipe → 論理デバイスまで通る。**CI で面は作れない**ので、窓つきの検査は手元専用（GL の T-21 と同じ扱い）、CI はオフスクリーンの描画比較だけ
 - **未確認**: 実際のスワップチェーンの作成と present（`xdg_toplevel` の役割が要る。段 2 で `Video.Wayland.Window` の面を借りて確かめる）、描画して読み戻すオフスクリーン（段 4）
 
+## スパイク 7: wl_surface.frame の合図の周期（2026-11-05、Raspberry Pi 5、labwc）
+
+`spikes/spike7_frame_callback.pas`。ソフトウェアのレンダラで VSync 0 のまま Present し、直後に `WaitForFrame` で合図を待って、届いた時刻の間隔を 300 回集める。実行: `fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -ospikes/spike7_frame_callback spikes/spike7_frame_callback.pas && spikes/spike7_frame_callback`。
+
+- 画面: EDID の最初の詳細タイミングは 2560x1080、ピクセルクロック 548.79 MHz、全体 2720x1121 で **179.98 Hz**（`DesktopMode.RefreshRate` と一致）
+- 合図の間隔: 平均 10.76〜10.78 ms（約 93 Hz）。ほとんどは **11.0〜11.3 ms（約 90 Hz）** で並び、ときどき 5.4 ms と 16〜17 ms の組（約 1/20 の割合）が混じる。最小 5.4 ms、最大 17.2 ms、標準偏差 2.0〜2.2 ms。打ち切りは 0 回
+- 結論: **VSync 1 の窓が約 90 fps になるのは papimela の待ち方の半減ではなく、合図そのものが約 90 Hz で届くから**に見える。ただし「コンポジタが 180 Hz の画面に 2 回に 1 回しか合図を出さない」のか、「出力が実際は 90 Hz で回っている」のかは、ユーザー空間からは分からない（`wp_presentation` は未実装、DRM の現在のモードは root が要る）。papimela の待ち方を除くために、別のクライアントでの確認は残る
+- 影響: `DesktopMode.RefreshRate` を基準にした VSync の検査（T-21 / T-22 / T-84）は、この端末では原理的に通らない。基準は実測した合図の周期に替える
+
 ## 優先順位への影響
 
 設計書は IBus バックエンドを先に実装する前提だったが、**Fcitx5 バックエンドを先に実装するほうが合理的**。

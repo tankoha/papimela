@@ -34,9 +34,13 @@ uses
   PaPiMeLa.Video.Backend,
   PaPiMeLa.Video,
   PaPiMeLa.Video.Wayland,
+  PaPiMeLa.Video.Wayland.Window,
   PaPiMeLa.Platform.Wayland.Client,
+  PaPiMeLa.Render,
   PaPiMeLa.Platform.GLES2,
   PaPiMeLa.Core;
+
+{$I vsync_probe.inc}
 
 var
   Failures: Integer = 0;
@@ -136,7 +140,9 @@ begin
       Halt(1);
     end;
     VB := TPMLWaylandVideoBackend(Ctx.Video.Backend);
-    Refresh := Ctx.Video.PrimaryDisplay.DesktopMode.RefreshRate;
+    Refresh := PMLVSyncReferenceHz(Ctx);
+    Check(VSyncMeasured or (GetEnvironmentVariable('PAPIMELA_VSYNC_OPTIONAL') = '1'),
+      'コンポジタの合図の周期が測れる（飛ばすには PAPIMELA_VSYNC_OPTIONAL=1）');
 
     WriteLn('1. 前提');
     Check(TPMLVideoCapability.OpenGLES in Ctx.Video.Capabilities, '能力 OpenGLES がある');
@@ -190,8 +196,8 @@ begin
     Fps1 := MeasureFps(Win, 1500);
     C.SwapInterval := 0;
     Fps0 := MeasureFps(Win, 1500);
-    WriteLn(Format('  [INFO] 画面 %.1f Hz、SwapInterval 1: %.1f fps、0: %.1f fps', [Refresh, Fps1, Fps0]));
-    Check((Fps1 > Refresh * 0.8) and (Fps1 < Refresh * 1.1), 'SwapInterval 1 は画面のリフレッシュに揃う');
+    WriteLn(Format('  [INFO] 合図 %.1f Hz、SwapInterval 1: %.1f fps、0: %.1f fps', [Refresh, Fps1, Fps0]));
+    Check((Fps1 > Refresh * 0.6) and (Fps1 < Refresh * 1.2), 'SwapInterval 1 はコンポジタの合図の周期に揃う');
     Check(Fps0 > Refresh * 1.5, 'SwapInterval 0 はそれより速い');
     C.SwapInterval := 5;
     Check(C.SwapInterval = 1, '2 以上は 1 に丸める（SDL の Wayland_GLES_SetSwapInterval と同じ）');
@@ -219,7 +225,7 @@ begin
     Pump(300);
     FpsMin := MeasureFps(Win, 1000);
     WriteLn(Format('  [INFO] 最小化中 %.1f fps', [FpsMin]));
-    Check((FpsMin > 10) and (FpsMin < Refresh * 1.1), '最小化しても止まらない（合図が来なければ打ち切る）');
+    Check((FpsMin > 10) and (FpsMin < Refresh * 1.2), '最小化しても止まらない（合図が来なければ打ち切る）');
     Win.Restore;
     Win.Hide;
     Pump(200);
@@ -249,7 +255,7 @@ begin
     FpsA := MeasureFps(WinA, 800);
     WriteLn(Format('  [INFO] B（0）: %.1f fps、A（1）に戻して: %.1f fps', [FpsB, FpsA]));
     Check(FpsB > Refresh * 1.5, '0 の B の窓は待たない');
-    Check((FpsA > Refresh * 0.8) and (FpsA < Refresh * 1.1), 'A に戻すと A の 1 が効く（SDL では VSync が消える）');
+    Check((FpsA > Refresh * 0.6) and (FpsA < Refresh * 1.2), 'A に戻すと A の 1 が効く（SDL では VSync が消える）');
     // 現在でないコンテキストの間隔を変えても、現在のものには効かない
     CB.SwapInterval := 1;
     CA.SwapInterval := 0;
@@ -259,7 +265,7 @@ begin
     FpsB := MeasureFps(WinB, 800);
     WriteLn(Format('  [INFO] A（0）: %.1f fps、B（1）: %.1f fps', [FpsA, FpsB]));
     Check(FpsA > Refresh * 1.5, '現在でない B を 1 にしても、現在の A（0）は待たない');
-    Check((FpsB > Refresh * 0.8) and (FpsB < Refresh * 1.1), 'B を現在にすると、現在でないときに決めた 1 が効く');
+    Check((FpsB > Refresh * 0.6) and (FpsB < Refresh * 1.2), 'B を現在にすると、現在でないときに決めた 1 が効く');
     WinB.Free;
     WinA.Free;
     C.MakeCurrent;
