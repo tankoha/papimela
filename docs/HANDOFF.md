@@ -1,6 +1,8 @@
 # 引き継ぎ資料
 
-新しいセッションは、`CLAUDE.md` の次にこれを読む。最終更新: 2026-11-06（Raspberry Pi 5 の端末で、窓の VSync の検査の基準を替えた後。次は手元の Radeon の機械へ移る）。
+新しいセッションは、`CLAUDE.md` の次にこれを読む。最終更新: 2026-11-06（手元の Radeon の機械で、窓の VSync の 3 本を流して全部通った後）。
+
+> **2026-11-06（Radeon の機械）: 窓の VSync の調査は終わった。** T-21（33 / 0）・T-22（59 / 0）・T-84（69 / 0）が通った。合図は 199.8 Hz で、VSync 1 はその 0.99〜1.01 倍。**Vulkan の VSync 0 は 9,559〜9,804 fps**（5 回）で、「速くならない」は再現しなかった。そのため present mode と `SubmitAndWait` は調べず、コードも変えていない。この日の画面は 2 枚（DP-1 2560x1080 200 Hz と HDMI-A-1 3840x2160）で、`DesktopMode.RefreshRate` は主の画面の 60 Hz を返す（スパイク 7 の Radeon の分）。報告値でなく合図を基準にした替え方が、ここでも効いた。**次はタブレット/ペン（#66。実機が無いので偽の機器の検査から）。**
 
 >   1. **ゲームパッドは接続されていた**（2026-10-25 に確認。GameSir-K1 Controller for Xbox、`event11` + `js0`、`input` グループで読める）。T-71〜T-73 の実機の確認は済み（一覧・ゲームパッド判定・軸 6・ハット 1・ボタン 16・入力が読める。TEST-LOG の先頭）。**ただしこの機器は FF（EV_FF）を出さない**ので、ランブルは FALSE（カーネルの力覚の経路が無い）。力覚（ランブル・Haptic）の実機の確認は、FF を持つ機器（xpad で動く Xbox 系、FF 付きハンドルなど）がつながったときに残る。
 >   2. **Haptic（#63）を済ませた**（2026-10-25。Sonnet 5.5 の手元のセッション）: `PaPiMeLa.Haptic.Backend`（効果の型 `TPMLHapticEffect`・抽象バックエンド・開いた機器 `TPMLHaptic`）、`PaPiMeLa.Haptic`（`Ctx.Haptics` = `TPMLHapticSystem`。一覧・開く・マウス・ジョイスティックから）、`PaPiMeLa.Haptic.Linux`（evdev の FF。`PMLHapticToFFEffect` は SDL の `SDL_SYS_ToFFEffect` と 735 場面で全バイト一致）。`Platform.Evdev` に FF の共用体（一定・傾斜・条件）・`EVIOCGEFFECTS`・FF の定数を足し（`tools/genevdev.bb`）、`TPMLEvdevNode` に `WriteFF` / `GetEffectCount` を足した。ヒントは `PAPIMELA_JOYSTICK_HAPTIC_AXES` と `PAPIMELA_HAPTIC_GAIN_MAX`。Context は `[TPMLSubsystem.Haptic]` で `Haptics` を作る（ジョイスティックの後・先に壊す）。T-76（201 件）。**検査を実装の後に書いた**ので、変異 56 通りで歯を確かめた（TEST-LOG の T-76）。SDL の不具合 D-84〜D-86 を見つけた（偽の FF 機器に SDL のコードを通して確かめた。`tools/haptic-expect/haptic_suspects.c`）。README の上流の不具合に D-84〜D-86 を載せた（持ち主の判断。これで上流の 34 件すべて載っている）。
@@ -62,7 +64,7 @@
 > **続けて ファイルシステム（#65）を済ませた**（2026-10-25。`PaPiMeLa.FileSystem`、`.Unicode.CaseFold`。T-74。SDL の不具合 D-82・D-83）。次は MessageBox（#40）。
 > **続けて MessageBox（#40）を済ませた**（同日。`PaPiMeLa.MessageBox`、T-75）。次の候補は libdecor（#69）、タブレット/ペン（#66）、Render.GL（#44）。Haptic（#63）は同日に済んだ（冒頭）。
 > **2026-11-05〜06（Pi 5）: 窓の VSync の調査の Pi 5 側を済ませた**（`47899a5`、CI 緑）。この端末は画面が 179.98 Hz（EDID と一致）と報告されるが、`wl_surface.frame` の合図は約 90 Hz で届く（スパイク 7、`spikes/spike7_frame_callback.pas`）。VSync 1 が約 90 fps になるのは papimela の待ち方のせいではない。窓の VSync の検査（T-21 / T-22 / T-84）の基準を、画面の報告値から合図の実測周期に替えた（`test/vsync_probe.inc`。測れないときは既定で失敗、`PAPIMELA_VSYNC_OPTIONAL=1` で飛ばす。帯は 0.6〜1.2）。歯は `SwapSurface` の待ちの無効化で確かめた。**Pi 5 では Vulkan の VSync 0 は速くなる**（226〜450 fps。1 回だけ 125 fps の回があり揺れる）。
-> **次（Radeon の手元の機械、x86_64、labwc、DP-3 2560x1080 200 Hz、Mesa 26.0.8）でやること**:
+> **次（Radeon の手元の機械、x86_64、labwc、DP-3 2560x1080 200 Hz、Mesa 26.0.8）でやること**（**2026-11-06 に 1〜3 は済んだ。冒頭の項**）:
 >   1. `git pull` して、窓の 3 本を流す: `test_render_vulkan`、`test_render_gles2`（窓の区間）、`test_gl_window`（組み方は §5.1 の `$B`）。**まず今回の検査がこの機械で通るか**（合図の実測周期が 200 Hz 前後で出るか、帯 0.6〜1.2 が広すぎ・狭すぎでないか）。`spikes/spike7_frame_callback` も流して合図の周期を記録する。
 >   2. **Vulkan の VSync 0 が VSync 1 より速くなるかを測る**（元の症状。`test_render_vulkan` の `[INFO] 合図 … Hz、VSync 1: … fps、0: … fps` を数回）。速くならなければ、`Render.Vulkan.pas` の present mode の一覧と選ばれた mode を出して確かめる（Mesa の Wayland WSI は IMMEDIATE / MAILBOX も合図に寄せうる。`test_render_vulkan.pas` の該当の検査のコメント）。もう一つの疑いは `Present` が毎フレーム `SubmitAndWait` → `vkQueueWaitIdle` すること（SDL は per-image の fence で重ねる。`Render.Vulkan.pas` の `SubmitAndWait` と `Present`、SDL の `VULKAN_RenderPresent`）。**papimela 側の原因と分かるまでコードは変えない**。
 >   3. 結果は `docs/TEST-LOG.md` の T-21 / T-22 / T-84 と、`spikes/RESULTS.md` のスパイク 7（Radeon の分を追記）へ。Radeon で検査が落ちたら、帯の見直しか原因の調査かを決めて `docs/DEFECTS.md` に載せる。
@@ -382,7 +384,7 @@ man-db などの設定は所有者の切り替えで失敗するが、`dpkg -r -
 | SDL の実物（作る） | 移植の結果を SDL と画素で比べるときに作る。表示サーバ無しで静的に作れる: `cmake -G Ninja -S reference/SDL -B <作業用> -DSDL_UNIX_CONSOLE_BUILD=ON -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TESTS=OFF` に、使わないもの（`-DSDL_AUDIO=OFF` など）を足す。`SDL_CreateSoftwareRenderer` でサーフェスへ描けば比べられる（`docs/TEST-LOG.md` の使い捨て検証） |
 | qwen | 手元の ollama の `qwen2.5-coder:14b`。呼び出しは `tools/qwen-gen.bb`。**クラウドには無い**ので、Low の作業は手元に戻るか、Sonnet に回す |
 | クラウドのセッション | 毎回まっさらな Ubuntu 24.04（root）。最初に揃える: `apt-get install -y fpc libegl1 libgles2 libegl-mesa0 libgl1-mesa-dri`、`git clone https://github.com/tankoha/rawpaco.git ../rawpaco && make -C ../rawpaco`、`docs/ORIGIN.md` の手順で `reference/SDL`、Babashka は `curl -sSL https://raw.githubusercontent.com/babashka/babashka/master/install \| bash`。SDL の実物を作るなら `cmake ninja-build` も（入っていた）。GitHub の CI の状態は `https://api.github.com/repos/tankoha/papimela/actions/runs?head_sha=<コミット>` で読める |
-| 手元の機械 | labwc（Wayland）、画面 DP-3 2560x1080 200 Hz、Radeon RX 9070 + 内蔵 Raphael、Mesa 26.0.8、Ubuntu 26.04、fcitx5-mozc 。ほかに Raspberry Pi 5（aarch64、V3D、labwc、Ubuntu 26.04）の端末もある（§2.1。画面は 180 Hz と報告されるが合図は約 90 Hz） |
+| 手元の機械 | labwc（Wayland）、画面 DP-3 2560x1080 200 Hz（2026-11-06 は DP-1 2560x1080 200 Hz と HDMI-A-1 3840x2160 の 2 枚。主の画面の報告は 60 Hz）、Radeon RX 9070 + 内蔵 Raphael、Mesa 26.0.8、Ubuntu 26.04、fcitx5-mozc 。ほかに Raspberry Pi 5（aarch64、V3D、labwc、Ubuntu 26.04）の端末もある（§2.1。画面は 180 Hz と報告されるが合図は約 90 Hz） |
 
 ## 7. 落とし穴（詳しくは `docs/DEFECTS.md` の「傾向」）
 
