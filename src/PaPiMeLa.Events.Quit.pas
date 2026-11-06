@@ -195,11 +195,12 @@ begin
   if AVerbosity <= 0 then
     Exit(False);
   // 動きの多いものは 2 以上のときだけ出す。SDL にあって papimela の列挙に無い種類
-  // （ペン、ピンチ、ゲームパッドのタッチパッドとセンサー、更新の終わり、センサー）は、
+  // （ピンチ、ゲームパッドのタッチパッドとセンサー、更新の終わり、センサー）は、
   // 列挙に加えるときにここへも足す。
   if AVerbosity < 2 then
     Result := not (AKind in [
       TPMLEventKind.MouseMotion, TPMLEventKind.FingerMotion,
+      TPMLEventKind.PenMotion, TPMLEventKind.PenAxis,
       TPMLEventKind.GamepadAxisMotion, TPMLEventKind.JoystickAxisMotion])
   else
     Result := True;

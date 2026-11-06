@@ -76,6 +76,8 @@ type
     GamepadAxisMotion, GamepadButtonDown, GamepadButtonUp, GamepadAdded,
     GamepadRemoved, GamepadRemapped, GamepadUpdateComplete,
     FingerDown, FingerUp, FingerMotion, FingerCanceled,
+    PenProximityIn, PenProximityOut, PenDown, PenUp, PenButtonDown, PenButtonUp,
+    PenMotion, PenAxis,
     ClipboardUpdate,
     DropFile, DropText, DropBegin, DropComplete, DropPosition,
     DragEnd,                             // papimela 独自（こちらが始めたドラッグの終わり）
@@ -145,6 +147,52 @@ type
     X, Y    : Single;
     DX, DY  : Single;        // 同じ指の前回位置からの移動量
     Pressure: Single;
+  end;
+
+  { ペン（SDL_pen.h と SDL_pen_c.h）。ID は 0 が「無い」。 }
+  TPMLPenID = LongWord;
+  // PML_PEN_INPUT_xxx のビットの和（SDL_PenInputFlags と同じ値）。
+  TPMLPenInputFlags = LongWord;
+
+  // 軸の並びと意味は SDL_PenAxis と同じ。
+  //   Pressure 0..1、XTilt / YTilt -90..90（度）、Distance 0..1、Rotation -180..179.9（度）、
+  //   Slider 0..1、TangentialPressure（筒を握る圧力）
+  TPMLPenAxis = (Pressure, XTilt, YTilt, Distance, Rotation, Slider, TangentialPressure);
+  TPMLPenAxes = array[TPMLPenAxis] of Single;
+
+  // SDL_PEN_CAPABILITY_xxx。Eraser は「消しゴムの先も持つ」。
+  TPMLPenCapability = (Pressure, XTilt, YTilt, Distance, Rotation, Slider,
+    TangentialPressure, Eraser);
+  TPMLPenCapabilities = set of TPMLPenCapability;
+
+  // SDL_PenSubtype（道具の種類）。
+  TPMLPenSubtype = (Unknown, Eraser, Pen, Pencil, Brush, Airbrush);
+  // SDL_PenDeviceType。SDL の INVALID は -1 だが、papimela は値を指定しない列挙にする
+  // （Direct = 画面に触れる、Indirect = 画面でない板に触れる）。
+  TPMLPenDeviceType = (Invalid, Unknown, Direct, Indirect);
+
+  // SDL_PenInfo。バックエンドが AddDevice に渡す。
+  TPMLPenInfo = record
+    Capabilities: TPMLPenCapabilities;
+    MaxTilt     : Single;      // 傾けられる最大の角度。分からなければ -1
+    WacomID     : LongWord;    // Wacom の道具の種類の ID。他は 0
+    NumButtons  : Integer;     // 先端を除くボタンの数。分からなければ -1
+    Subtype     : TPMLPenSubtype;
+    DeviceType  : TPMLPenDeviceType;
+  end;
+
+  { PenProximityIn / Out、PenDown / Up、PenButtonDown / Up、PenMotion、PenAxis の付随情報
+    （SDL の pproximity / ptouch / pbutton / pmotion / paxis を 1 つにした）。
+    X / Y はウィンドウの座標。使わない種類では 0。 }
+  TPMLPenEventData = record
+    Which   : TPMLPenID;
+    PenState: TPMLPenInputFlags;
+    X, Y    : Single;
+    Eraser  : Boolean;          // PenDown / PenUp: 消しゴムの先か
+    Down    : Boolean;          // PenDown / PenUp / PenButtonDown / PenButtonUp
+    Button  : Byte;             // PenButtonDown / Up: 1..5
+    Axis    : TPMLPenAxis;      // PenAxis
+    Value   : Single;           // PenAxis
   end;
 
   // DropBegin / DropFile / DropText / DropPosition / DropComplete の付随情報。ファイルの
@@ -267,9 +315,27 @@ type
       // GamepadAdded / GamepadRemoved / GamepadRemapped / GamepadUpdateComplete は JDevice を使う
       19: (GAxis           : TPMLGamepadAxisEventData);
       20: (GButton         : TPMLGamepadButtonEventData);
+      21: (Pen             : TPMLPenEventData);
       // Display / JAxis / GAxis / Finger ... は各サブシステム着手時に追加する。
       // 可変部への追加は既存コードに影響しない。
   end;
+
+const
+  // TPMLPenInputFlags のビット（SDL_PEN_INPUT_xxx と同じ値）。
+  PML_PEN_INPUT_DOWN         = LongWord(1) shl 0;
+  PML_PEN_INPUT_BUTTON_1     = LongWord(1) shl 1;
+  PML_PEN_INPUT_BUTTON_2     = LongWord(1) shl 2;
+  PML_PEN_INPUT_BUTTON_3     = LongWord(1) shl 3;
+  PML_PEN_INPUT_BUTTON_4     = LongWord(1) shl 4;
+  PML_PEN_INPUT_BUTTON_5     = LongWord(1) shl 5;
+  PML_PEN_INPUT_ERASER_TIP   = LongWord(1) shl 30;
+  PML_PEN_INPUT_IN_PROXIMITY = LongWord(1) shl 31;
+  // ペンから合成したマウスとタッチのイベントの MouseID / DeviceID（SDL の (SDL_MouseID)-2 と
+  // (SDL_TouchID)-2。papimela の ID は 32 ビットなので下の 32 ビット）。
+  PML_PEN_MOUSEID = LongWord($FFFFFFFE);
+  PML_PEN_TOUCHID = LongWord($FFFFFFFE);
+
+type
 
   { バックエンドがキューに登録する。Pump の呼び出し順は登録順（§6.3）。 }
   IPMLEventPumpSource = interface
@@ -406,8 +472,11 @@ type
     FFocusedWindow: TPMLWindowID;
   public
     constructor Create(AContextRef: TObject; AQueue: TPMLEventQueue);
-    procedure SendMotion(AWindowID: TPMLWindowID; AX, AY: Single);
-    procedure SendButton(AWindowID: TPMLWindowID; AButton: LongWord; ADown: Boolean);
+    // AMouseID はイベントの MouseID に載る。ペンから合成するときは PML_PEN_MOUSEID。
+    procedure SendMotion(AWindowID: TPMLWindowID; AX, AY: Single;
+      AMouseID: LongWord = 0);
+    procedure SendButton(AWindowID: TPMLWindowID; AButton: LongWord; ADown: Boolean;
+      AMouseID: LongWord = 0);
     procedure SendWheel(AWindowID: TPMLWindowID; AX, AY: Single);
     // ポインタがロックされている間の移動。絶対座標は動かない。
     procedure SendRelativeMotion(AWindowID: TPMLWindowID; ADX, ADY: Single);
@@ -438,16 +507,84 @@ type
     function  GetFingerCount: Integer;
   public
     constructor Create(AContextRef: TObject; AQueue: TPMLEventQueue);
+    // APressure は wl_touch には無い（触っている間 1.0、離したら 0.0）。ペンから合成する
+    // ときはペンの圧力を渡す。
     procedure SendDown(AWindowID: TPMLWindowID; ADeviceID: LongWord;
-      AFingerID: Int32; AX, AY: Single);
+      AFingerID: Int32; AX, AY: Single; APressure: Single = 1.0);
     // motion と up はウィンドウを取らない。Wayland が送ってこないので、down で
     // 覚えたウィンドウを使う。
-    procedure SendMotion(ADeviceID: LongWord; AFingerID: Int32; AX, AY: Single);
-    procedure SendUp(ADeviceID: LongWord; AFingerID: Int32);
+    procedure SendMotion(ADeviceID: LongWord; AFingerID: Int32; AX, AY: Single;
+      APressure: Single = 1.0);
+    procedure SendUp(ADeviceID: LongWord; AFingerID: Int32; APressure: Single = 0.0);
     // 触っている指すべてを無効にする。コンポジタがジェスチャを奪ったときに来る。
     procedure SendCancel(ADeviceID: LongWord);
     function  TryGetFinger(AFingerID: Int32; out APoint: TPMLTouchPoint): Boolean;
     property FingerCount: Integer read GetFingerCount;
+  end;
+
+  // RemoveAll がペンごとに呼ぶ。AHandle は AddDevice に渡したもの（バックエンドが自分の物を片付ける）。
+  TPMLPenRemoveProc = procedure(AID: TPMLPenID; AHandle: Pointer) of object;
+  // ウィンドウがまだあるか。保留していた近接 out を出す前に聞く（SDL_GetWindowFromID）。
+  TPMLWindowExistsFunc = function(AWindowID: TPMLWindowID): Boolean of object;
+
+  { ペンの状態機械の窓口。バックエンドは Push を直接呼ばず、ここを通す（§6.3）。
+    中身は PaPiMeLa.Events.Pen（SDL_pen.c を写した部分）。
+
+    WHAT:
+      ペンの機器の一覧（ID・名前・情報・バックエンドの Handle）と、ペンごとの状態
+      （PML_PEN_INPUT_xxx・座標・軸の値）を持ち、変わったときだけ Pen* のイベントを積む。
+      ヒント PAPIMELA_PEN_MOUSE_EVENTS / PAPIMELA_PEN_TOUCH_EVENTS（既定は有効）に従い、
+      マウス（PML_PEN_MOUSEID）とタッチ（PML_PEN_TOUCHID の指 1）のイベントも合成する。
+
+    WHY:
+      バックエンドの知らせ（Wayland は frame ごと）は「今の値」を送るだけで、変わったかは
+      言わない。押下・ボタン・近接の状態と最後の座標を覚えているのはここだけ。
+
+    SDL から外した所:
+      - 時刻の引数は取らない（他の状態機械と同じく積むときの PMLNowNS）
+      - 合成するタッチの座標は窓の座標のまま（SDL は窓の大きさで正規化する。TPMLTouchPoint の方針） }
+  TPMLPenState = class sealed(TPMLSystemObject)
+  strict private
+    FImpl: TObject;   // 状態の本体（TPMLPenImpl）。中身は implementation 側
+    function  GetCount: Integer;
+    function  GetWindowExists: TPMLWindowExistsFunc;
+    procedure SetWindowExists(AValue: TPMLWindowExistsFunc);
+  public
+    constructor Create(AContextRef: TObject; AQueue: TPMLEventQueue);
+    destructor Destroy; override;
+
+    // SDL_AddPenDevice。AHandle はバックエンドの物（nil 以外で、ペンごとに違うこと）。
+    // AName が空なら 'Unnamed pen'。AInProximity なら続けて近接 in を出す。
+    function  AddDevice(const AName: String; AWindowID: TPMLWindowID;
+      const AInfo: TPMLPenInfo; AHandle: Pointer; AInProximity: Boolean): TPMLPenID;
+    // SDL_RemovePenDevice。先に近接 out を出す（押下中のボタンも離す）。
+    procedure RemoveDevice(AWindowID: TPMLWindowID; AID: TPMLPenID);
+    // SDL_RemoveAllPenDevices。終わるとき用。近接 out は出さない。ACallback は nil でよい。
+    procedure RemoveAll(ACallback: TPMLPenRemoveProc);
+
+    procedure SendTouch(AID: TPMLPenID; AWindowID: TPMLWindowID; AEraser, ADown: Boolean);
+    procedure SendMotion(AID: TPMLPenID; AWindowID: TPMLWindowID; AX, AY: Single);
+    procedure SendAxis(AID: TPMLPenID; AWindowID: TPMLWindowID; AAxis: TPMLPenAxis;
+      AValue: Single);
+    // AButton は 1..5。それ以外は捨てる。
+    procedure SendButton(AID: TPMLPenID; AWindowID: TPMLWindowID; AButton: Byte;
+      ADown: Boolean);
+    // AImmediate = False の近接 out は保留にし、次の SendPendingProximity で出す
+    // （それまでに移動かボタンが来れば取り消す）。in は常にすぐ出す。
+    procedure SendProximity(AID: TPMLPenID; AWindowID: TPMLWindowID; AIn, AImmediate: Boolean);
+    // 保留していた近接 out を出す。TPMLEventQueue.Pump が呼ぶ。
+    procedure SendPendingProximity;
+
+    // AddDevice に渡した AHandle のペン。無ければ 0。
+    function  FindByHandle(AHandle: Pointer): TPMLPenID;
+    // SDL_GetPenStatus。知らない ID なら 0 を返し、AAxes は全部 0。
+    function  GetStatus(AID: TPMLPenID; out AAxes: TPMLPenAxes): TPMLPenInputFlags;
+    // SDL_GetPenDeviceType。知らない ID なら Invalid。
+    function  GetDeviceType(AID: TPMLPenID): TPMLPenDeviceType;
+    // つながっているペンの数。
+    property Count: Integer read GetCount;
+    // 保留した近接 out の窓がまだあるかを聞く先。nil ならあるものとする。
+    property WindowExists: TPMLWindowExistsFunc read GetWindowExists write SetWindowExists;
   end;
 
   { ドラッグ＆ドロップの窓口。バックエンドは Push を直接呼ばず、ここを通す。
@@ -491,6 +628,7 @@ type
     FKeyboard  : TPMLKeyboardState;
     FMouse     : TPMLMouseState;
     FTouch     : TPMLTouchState;
+    FPen       : TPMLPenState;
     FDrop      : TPMLDropState;
     FKeyFilter : IPMLKeyFilter;
     FLogVerbosity  : Integer;    // ヒント PAPIMELA_EVENT_LOGGING の値（0..3）。どのスレッドの Push からも読む
@@ -549,6 +687,7 @@ type
     property Keyboard: TPMLKeyboardState read FKeyboard;
     property Mouse   : TPMLMouseState read FMouse;
     property Touch   : TPMLTouchState read FTouch;
+    property Pen     : TPMLPenState read FPen;
     property Drop    : TPMLDropState read FDrop;
     // Context が TextInput を生成したあとに差し込む。nil なら IME 転送なし。
     property KeyFilter: IPMLKeyFilter read FKeyFilter write FKeyFilter;
@@ -568,6 +707,7 @@ uses
   BaseUnix, UnixType, TypInfo,
   PaPiMeLa.Events.Drop,
   PaPiMeLa.Events.Keyboard,
+  PaPiMeLa.Events.Pen,
   PaPiMeLa.Events.Quit;
 
 const
@@ -603,6 +743,8 @@ begin
   FKeyboard := TPMLKeyboardState.Create(AContextRef, Self);
   FMouse := TPMLMouseState.Create(AContextRef, Self);
   FTouch := TPMLTouchState.Create(AContextRef, Self);
+  // ペンはマウスとタッチへ合成するので、その後に作り、先に壊す。
+  FPen := TPMLPenState.Create(AContextRef, Self);
   FDrop := TPMLDropState.Create(AContextRef, Self);
   // 作った時点の世代を覚える。これより後に来たシグナルだけを Quit にする。
   FQuitGeneration := PMLQuitSignalGeneration;
@@ -652,6 +794,7 @@ begin
     ContextServices.Hints.RemoveCallback(PML_HINT_EVENT_LOGGING, @EventLoggingChanged);
   CancelMainThreadCalls;
   FKeyFilter := nil;
+  FreeAndNil(FPen);
   FreeAndNil(FKeyboard);
   FreeAndNil(FMouse);
   FreeAndNil(FTouch);
@@ -755,6 +898,9 @@ begin
     else
       FSources[I].PumpEvents(0);
   end;
+  // SDL_PumpEventMaintenance と同じく、バックエンドを回した後に保留の近接 out を出す
+  // （同じ Pump の中で来た移動が保留を取り消せる）。
+  FPen.SendPendingProximity;
 end;
 
 function TPMLEventQueue.Poll(out AEvent: TPMLEvent): Boolean;
@@ -1191,7 +1337,8 @@ begin
   FQueue := AQueue;
 end;
 
-procedure TPMLMouseState.SendMotion(AWindowID: TPMLWindowID; AX, AY: Single);
+procedure TPMLMouseState.SendMotion(AWindowID: TPMLWindowID; AX, AY: Single;
+  AMouseID: LongWord);
 var
   Ev: TPMLEvent;
 begin
@@ -1202,6 +1349,7 @@ begin
   Ev.Text := '';
   Ev.Segments := nil;
   Ev.Strings := nil;
+  Ev.Motion.MouseID := AMouseID;
   Ev.Motion.ButtonState := FButtonState;
   Ev.Motion.X := AX;
   Ev.Motion.Y := AY;
@@ -1213,7 +1361,7 @@ begin
 end;
 
 procedure TPMLMouseState.SendButton(AWindowID: TPMLWindowID;
-  AButton: LongWord; ADown: Boolean);
+  AButton: LongWord; ADown: Boolean; AMouseID: LongWord);
 var
   Ev: TPMLEvent;
   Mask: LongWord;
@@ -1236,6 +1384,7 @@ begin
   Ev.Text := '';
   Ev.Segments := nil;
   Ev.Strings := nil;
+  Ev.Button.MouseID := AMouseID;
   Ev.Button.Button := AButton;
   Ev.Button.Clicks := 1;
   Ev.Button.X := FX;
@@ -1360,7 +1509,7 @@ begin
 end;
 
 procedure TPMLTouchState.SendDown(AWindowID: TPMLWindowID; ADeviceID: LongWord;
-  AFingerID: Int32; AX, AY: Single);
+  AFingerID: Int32; AX, AY: Single; APressure: Single);
 var
   I: Integer;
   P: TPMLTouchPoint;
@@ -1370,7 +1519,7 @@ begin
   P.WindowID := AWindowID;
   P.X := AX;
   P.Y := AY;
-  P.Pressure := 1.0;
+  P.Pressure := APressure;
 
   // 同じ id が離されずに再度 down することは仕様上ないが、来ても壊れないようにする。
   I := IndexOf(AFingerID);
@@ -1384,7 +1533,7 @@ begin
 end;
 
 procedure TPMLTouchState.SendMotion(ADeviceID: LongWord; AFingerID: Int32;
-  AX, AY: Single);
+  AX, AY: Single; APressure: Single);
 var
   I: Integer;
   DX, DY: Single;
@@ -1397,10 +1546,12 @@ begin
   DY := AY - FFingers[I].Y;
   FFingers[I].X := AX;
   FFingers[I].Y := AY;
+  FFingers[I].Pressure := APressure;
   Emit(TPMLEventKind.FingerMotion, FFingers[I], DX, DY);
 end;
 
-procedure TPMLTouchState.SendUp(ADeviceID: LongWord; AFingerID: Int32);
+procedure TPMLTouchState.SendUp(ADeviceID: LongWord; AFingerID: Int32;
+  APressure: Single);
 var
   I, J: Integer;
   P: TPMLTouchPoint;
@@ -1410,7 +1561,7 @@ begin
     Exit;
   // wl_touch.up は座標を送らない。最後に分かっている位置をそのまま載せる。
   P := FFingers[I];
-  P.Pressure := 0.0;
+  P.Pressure := APressure;
   for J := I to High(FFingers) - 1 do
     FFingers[J] := FFingers[J + 1];
   SetLength(FFingers, Length(FFingers) - 1);
@@ -1435,6 +1586,105 @@ begin
     Snapshot[I].Pressure := 0.0;
     Emit(TPMLEventKind.FingerCanceled, Snapshot[I], 0, 0);
   end;
+end;
+
+{ ---- ペン（中身は PaPiMeLa.Events.Pen） ---- }
+
+constructor TPMLPenState.Create(AContextRef: TObject; AQueue: TPMLEventQueue);
+var
+  Hints: TPMLHints;
+begin
+  inherited Create(AContextRef, AQueue);
+  Hints := nil;
+  if ContextServices <> nil then
+    Hints := ContextServices.Hints;
+  FImpl := TPMLPenImpl.Create(AQueue, Hints);
+end;
+
+destructor TPMLPenState.Destroy;
+begin
+  FreeAndNil(FImpl);
+  inherited Destroy;
+end;
+
+function TPMLPenState.GetCount: Integer;
+begin
+  Result := TPMLPenImpl(FImpl).Count;
+end;
+
+function TPMLPenState.GetWindowExists: TPMLWindowExistsFunc;
+begin
+  Result := TPMLPenImpl(FImpl).WindowExists;
+end;
+
+procedure TPMLPenState.SetWindowExists(AValue: TPMLWindowExistsFunc);
+begin
+  TPMLPenImpl(FImpl).WindowExists := AValue;
+end;
+
+function TPMLPenState.AddDevice(const AName: String; AWindowID: TPMLWindowID;
+  const AInfo: TPMLPenInfo; AHandle: Pointer; AInProximity: Boolean): TPMLPenID;
+begin
+  Result := TPMLPenImpl(FImpl).AddDevice(AName, AWindowID, AInfo, AHandle, AInProximity);
+end;
+
+procedure TPMLPenState.RemoveDevice(AWindowID: TPMLWindowID; AID: TPMLPenID);
+begin
+  TPMLPenImpl(FImpl).RemoveDevice(AWindowID, AID);
+end;
+
+procedure TPMLPenState.RemoveAll(ACallback: TPMLPenRemoveProc);
+begin
+  TPMLPenImpl(FImpl).RemoveAll(ACallback);
+end;
+
+procedure TPMLPenState.SendTouch(AID: TPMLPenID; AWindowID: TPMLWindowID;
+  AEraser, ADown: Boolean);
+begin
+  TPMLPenImpl(FImpl).SendTouch(AID, AWindowID, AEraser, ADown);
+end;
+
+procedure TPMLPenState.SendMotion(AID: TPMLPenID; AWindowID: TPMLWindowID; AX, AY: Single);
+begin
+  TPMLPenImpl(FImpl).SendMotion(AID, AWindowID, AX, AY);
+end;
+
+procedure TPMLPenState.SendAxis(AID: TPMLPenID; AWindowID: TPMLWindowID;
+  AAxis: TPMLPenAxis; AValue: Single);
+begin
+  TPMLPenImpl(FImpl).SendAxis(AID, AWindowID, AAxis, AValue);
+end;
+
+procedure TPMLPenState.SendButton(AID: TPMLPenID; AWindowID: TPMLWindowID;
+  AButton: Byte; ADown: Boolean);
+begin
+  TPMLPenImpl(FImpl).SendButton(AID, AWindowID, AButton, ADown);
+end;
+
+procedure TPMLPenState.SendProximity(AID: TPMLPenID; AWindowID: TPMLWindowID;
+  AIn, AImmediate: Boolean);
+begin
+  TPMLPenImpl(FImpl).SendProximity(AID, AWindowID, AIn, AImmediate);
+end;
+
+procedure TPMLPenState.SendPendingProximity;
+begin
+  TPMLPenImpl(FImpl).SendPendingProximity;
+end;
+
+function TPMLPenState.FindByHandle(AHandle: Pointer): TPMLPenID;
+begin
+  Result := TPMLPenImpl(FImpl).FindByHandle(AHandle);
+end;
+
+function TPMLPenState.GetStatus(AID: TPMLPenID; out AAxes: TPMLPenAxes): TPMLPenInputFlags;
+begin
+  Result := TPMLPenImpl(FImpl).GetStatus(AID, AAxes);
+end;
+
+function TPMLPenState.GetDeviceType(AID: TPMLPenID): TPMLPenDeviceType;
+begin
+  Result := TPMLPenImpl(FImpl).GetDeviceType(AID);
 end;
 
 { ---- ドラッグ＆ドロップ（中身は PaPiMeLa.Events.Drop） ---- }
@@ -1548,6 +1798,44 @@ begin
       Add('finger', IntToStr(AEvent.Finger.FingerID));
       Add('x', Flt(AEvent.Finger.X));
       Add('y', Flt(AEvent.Finger.Y));
+    end;
+    // SDL_EventLogging の pproximity / ptouch / pbutton / pmotion / paxis。
+    TPMLEventKind.PenProximityIn, TPMLEventKind.PenProximityOut:
+    begin
+      Add('which', IntToStr(AEvent.Pen.Which));
+      Add('pen_state', IntToStr(AEvent.Pen.PenState));
+    end;
+    TPMLEventKind.PenDown, TPMLEventKind.PenUp:
+    begin
+      Add('which', IntToStr(AEvent.Pen.Which));
+      Add('pen_state', IntToStr(AEvent.Pen.PenState));
+      Add('x', Flt(AEvent.Pen.X));
+      Add('y', Flt(AEvent.Pen.Y));
+      Add('eraser', BoolToStr(AEvent.Pen.Eraser, True));
+    end;
+    TPMLEventKind.PenButtonDown, TPMLEventKind.PenButtonUp:
+    begin
+      Add('which', IntToStr(AEvent.Pen.Which));
+      Add('pen_state', IntToStr(AEvent.Pen.PenState));
+      Add('x', Flt(AEvent.Pen.X));
+      Add('y', Flt(AEvent.Pen.Y));
+      Add('button', IntToStr(AEvent.Pen.Button));
+    end;
+    TPMLEventKind.PenMotion:
+    begin
+      Add('which', IntToStr(AEvent.Pen.Which));
+      Add('pen_state', IntToStr(AEvent.Pen.PenState));
+      Add('x', Flt(AEvent.Pen.X));
+      Add('y', Flt(AEvent.Pen.Y));
+    end;
+    TPMLEventKind.PenAxis:
+    begin
+      Add('which', IntToStr(AEvent.Pen.Which));
+      Add('pen_state', IntToStr(AEvent.Pen.PenState));
+      Add('x', Flt(AEvent.Pen.X));
+      Add('y', Flt(AEvent.Pen.Y));
+      Add('axis', GetEnumName(TypeInfo(TPMLPenAxis), Ord(AEvent.Pen.Axis)));
+      Add('value', Flt(AEvent.Pen.Value));
     end;
     TPMLEventKind.WindowMoved, TPMLEventKind.WindowResized,
     TPMLEventKind.WindowPixelSizeChanged:

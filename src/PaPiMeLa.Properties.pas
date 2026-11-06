@@ -117,6 +117,10 @@ const
   PML_HINT_NO_SIGNAL_HANDLERS = 'PAPIMELA_NO_SIGNAL_HANDLERS';
   // イベントをログに出す（SDL_HINT_EVENT_LOGGING）: 0 出さない、1 動きの多いもの以外、2 以上 全部。
   PML_HINT_EVENT_LOGGING = 'PAPIMELA_EVENT_LOGGING';
+  // ペンからマウスのイベントを合成する（SDL_HINT_PEN_MOUSE_EVENTS）。既定 1。いつ変えてもよい。
+  PML_HINT_PEN_MOUSE_EVENTS = 'PAPIMELA_PEN_MOUSE_EVENTS';
+  // ペンからタッチのイベントを合成する（SDL_HINT_PEN_TOUCH_EVENTS）。既定 1。いつ変えてもよい。
+  PML_HINT_PEN_TOUCH_EVENTS = 'PAPIMELA_PEN_TOUCH_EVENTS';
 
   // ジョイスティック（SDL_HINT_JOYSTICK_xxx）。機器の VID/PID の表は「0x045e/0x02ea,...」の並びか、
   // 「@ファイル名」でファイルから読む。_EXCLUDED は表から外すもの。

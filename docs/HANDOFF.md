@@ -1,6 +1,14 @@
 # 引き継ぎ資料
 
-新しいセッションは、`CLAUDE.md` の次にこれを読む。最終更新: 2026-11-06（手元の Radeon の機械で、窓の VSync の 3 本を流して全部通った後）。
+新しいセッションは、`CLAUDE.md` の次にこれを読む。最終更新: 2026-11-06（手元の Radeon の機械で、タブレット/ペン #66 の検査を先に書いた後）。
+
+> **2026-11-06（Radeon の機械）: タブレット/ペン（#66）の公開 API・骨組み・偽の機器の検査を、実機が届く前に書いた。実装はまだ（実機が届いてから相談する。持ち主の決定）。**
+> - 公開層: `PaPiMeLa.Events` にペンのイベント 8 種・型・窓口 `Ctx.Events.Pen`（中身は `PaPiMeLa.Events.Pen`。移植、メソッドは空）、ヒント `PAPIMELA_PEN_MOUSE_EVENTS` / `PAPIMELA_PEN_TOUCH_EVENTS`（既定 1。ペンからマウスとタッチを合成するのは SDL どおり）。マウスの送る関数に MouseID、タッチに圧力を、省略できる引数で足した
+> - `PaPiMeLa.Video.Wayland.Tablet`: 道具の純粋な状態 `TPMLWaylandTabletToolState` と、道具のカーソルの出口 `IPMLWaylandToolCursorSink`、リスナー `TPMLWaylandTabletSeat`。**中身は空で、`Video.Wayland.Types` / `Seat` / `Video.Wayland` にはまだつないでいない**（`zwp_tablet_manager_v2` の束縛も未）
+> - 期待値: `tools/pen-expect/pen_cases.c` + `gen.bb`。参照版 SDL を静的に作り（§2.1 の cmake の引数で、ビデオの dummy は残す。`-ffp-contract=off`。置き場は `/home/joerg/claude-work/sdl-ref-build`）、SDL_pen.c の内部を直接呼ぶ。tablet の部分は SDL の `tablet_tool_handle_*` の写し
+> - 検査: T-87 `test_pen`（骨組みで FAIL 102）、T-88 `test_wayland_tablet_model`（骨組みで FAIL 60）。どちらも手順を全部比べたかを数で見る。**CI の一覧（lint.yml）にはまだ入れていない**
+> - 読んで見つけた SDL の疑い（確かめていないので DEFECTS には無い）: 窓が壊れるとその上のペンの登録を外して戻さない（T-88 の場面 `window_destroyed`）、`Wayland_ShowCursor` がカーソルを隠しても道具には形を張る（papimela は隠す。DESIGN #66）、`SDL_SendPenTouch` が排他を外した後に軸を読む、`SDL_SendPendingPenProximity` が読む排他を持ったまま入れ子で取る、道具のボタンに pad の定数を使う（値は同じ）
+> - **次**: 実装（DESIGN では Medium = Sonnet）、Wayland へのつなぎ、手元専用の実機の検査 `test_wayland_tablet` とデモ。この機械に要るもの: `cmake`・`ninja-build`・`fp-units-fcl`（2026-11-06 に入れた）、`../rawpaco`
 
 > **2026-11-06（Radeon の機械）: 窓の VSync の調査は終わった。** T-21（33 / 0）・T-22（59 / 0）・T-84（69 / 0）が通った。合図は 199.8 Hz で、VSync 1 はその 0.99〜1.01 倍。**Vulkan の VSync 0 は 9,559〜9,804 fps**（5 回）で、「速くならない」は再現しなかった。そのため present mode と `SubmitAndWait` は調べず、コードも変えていない。この日の画面は 2 枚（DP-1 2560x1080 200 Hz と HDMI-A-1 3840x2160）で、`DesktopMode.RefreshRate` は主の画面の 60 Hz を返す（スパイク 7 の Radeon の分）。報告値でなく合図を基準にした替え方が、ここでも効いた。**同日、デスクトップ GL の T-79 / T-80 を radeonsi で初めて流した**: オフスクリーンは RX 9070 XT・RX 9070・内蔵 Raphael・llvmpipe の 4 つで全部通る。**この機械の GPU は 3 つ**（03:00.0 が RX 9070 XT、09:00.0 が RX 9070、10:00.0 が Raphael）で、surfaceless の EGL の既定は Raphael を選ぶ。dGPU で流すには `DRI_PRIME=pci-0000_03_00_0` などを付ける。T-79 の窓の区間は、VSync の基準を替え漏らしていて 1 件落ちた（D-89）。`vsync_probe.inc` に替えて通った（165 / 0）。**次はタブレット/ペン（#66）。実機は 2026-11-06 の午前中に届く。**
 
@@ -107,7 +115,7 @@ EGL の GL コンテキスト（スワップ間隔はコンテキストごと）
 #21、#45、#46、#47、#48、#49、#50、#51、#52、#53（`.Audio.Mixer` は F32 の分だけ）、#55、#56、#64、#68（YUV から ARGB8888 への変換、I444 のテクスチャ、P010 から XBGR2101010 への変換、I0FL / I4FL から RGB48 への変換）、#70、#71。
 
 未着手: #11、#18–21、#23、#30、#40、#44、
-#18–19、#66–67、#69（#44・#59–63・#65 は済み）。
+#18–19、#66（API と検査だけ書いた。実装は未）、#67、#69（#44・#59–63・#65 は済み）。
 
 ## 2. 前のセッション（2026-10-14、手元）でしたこと
 

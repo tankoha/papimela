@@ -109,6 +109,16 @@ type
   TPMLTouchPoint = PaPiMeLa.Events.TPMLTouchPoint;
   TPMLTouchPoints = PaPiMeLa.Events.TPMLTouchPoints;
   TPMLTouchFingerData = PaPiMeLa.Events.TPMLTouchFingerData;
+  TPMLPenID = PaPiMeLa.Events.TPMLPenID;
+  TPMLPenInputFlags = PaPiMeLa.Events.TPMLPenInputFlags;
+  TPMLPenAxis = PaPiMeLa.Events.TPMLPenAxis;
+  TPMLPenAxes = PaPiMeLa.Events.TPMLPenAxes;
+  TPMLPenCapability = PaPiMeLa.Events.TPMLPenCapability;
+  TPMLPenCapabilities = PaPiMeLa.Events.TPMLPenCapabilities;
+  TPMLPenSubtype = PaPiMeLa.Events.TPMLPenSubtype;
+  TPMLPenDeviceType = PaPiMeLa.Events.TPMLPenDeviceType;
+  TPMLPenInfo = PaPiMeLa.Events.TPMLPenInfo;
+  TPMLPenEventData = PaPiMeLa.Events.TPMLPenEventData;
   TPMLDropEventData = PaPiMeLa.Events.TPMLDropEventData;
   TPMLDragAction = PaPiMeLa.Events.TPMLDragAction;
   TPMLDragActions = PaPiMeLa.Events.TPMLDragActions;
@@ -134,8 +144,22 @@ type
   TPMLKeyboardState = PaPiMeLa.Events.TPMLKeyboardState;
   TPMLMouseState = PaPiMeLa.Events.TPMLMouseState;
   TPMLTouchState = PaPiMeLa.Events.TPMLTouchState;
+  TPMLPenRemoveProc = PaPiMeLa.Events.TPMLPenRemoveProc;
+  TPMLWindowExistsFunc = PaPiMeLa.Events.TPMLWindowExistsFunc;
+  TPMLPenState = PaPiMeLa.Events.TPMLPenState;
   TPMLDropState = PaPiMeLa.Events.TPMLDropState;
   TPMLEventQueue = PaPiMeLa.Events.TPMLEventQueue;
+const
+  PML_PEN_INPUT_DOWN = PaPiMeLa.Events.PML_PEN_INPUT_DOWN;
+  PML_PEN_INPUT_BUTTON_1 = PaPiMeLa.Events.PML_PEN_INPUT_BUTTON_1;
+  PML_PEN_INPUT_BUTTON_2 = PaPiMeLa.Events.PML_PEN_INPUT_BUTTON_2;
+  PML_PEN_INPUT_BUTTON_3 = PaPiMeLa.Events.PML_PEN_INPUT_BUTTON_3;
+  PML_PEN_INPUT_BUTTON_4 = PaPiMeLa.Events.PML_PEN_INPUT_BUTTON_4;
+  PML_PEN_INPUT_BUTTON_5 = PaPiMeLa.Events.PML_PEN_INPUT_BUTTON_5;
+  PML_PEN_INPUT_ERASER_TIP = PaPiMeLa.Events.PML_PEN_INPUT_ERASER_TIP;
+  PML_PEN_INPUT_IN_PROXIMITY = PaPiMeLa.Events.PML_PEN_INPUT_IN_PROXIMITY;
+  PML_PEN_MOUSEID = PaPiMeLa.Events.PML_PEN_MOUSEID;
+  PML_PEN_TOUCHID = PaPiMeLa.Events.PML_PEN_TOUCHID;
 function PMLEventDescription(const AEvent: TPMLEvent): String; inline;
 function PMLNowNS: UInt64; inline;
 
@@ -1223,6 +1247,8 @@ const
   PML_HINT_QUIT_ON_LAST_WINDOW_CLOSE = PaPiMeLa.Properties.PML_HINT_QUIT_ON_LAST_WINDOW_CLOSE;
   PML_HINT_NO_SIGNAL_HANDLERS = PaPiMeLa.Properties.PML_HINT_NO_SIGNAL_HANDLERS;
   PML_HINT_EVENT_LOGGING = PaPiMeLa.Properties.PML_HINT_EVENT_LOGGING;
+  PML_HINT_PEN_MOUSE_EVENTS = PaPiMeLa.Properties.PML_HINT_PEN_MOUSE_EVENTS;
+  PML_HINT_PEN_TOUCH_EVENTS = PaPiMeLa.Properties.PML_HINT_PEN_TOUCH_EVENTS;
   PML_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS = PaPiMeLa.Properties.PML_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS;
   PML_HINT_JOYSTICK_ARCADESTICK_DEVICES = PaPiMeLa.Properties.PML_HINT_JOYSTICK_ARCADESTICK_DEVICES;
   PML_HINT_JOYSTICK_ARCADESTICK_DEVICES_EXCLUDED = PaPiMeLa.Properties.PML_HINT_JOYSTICK_ARCADESTICK_DEVICES_EXCLUDED;

@@ -98,6 +98,8 @@ spikes/spike6_vulkan
 test/test_platform_gl
 test/test_platform_vulkan
 test/test_vulkan_loader
+test/test_pen
+test/test_wayland_tablet_model
 test/test_vulkan_window
 test/test_render_vulkan
 test/test_platform_libdecor
