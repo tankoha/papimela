@@ -108,3 +108,4 @@ test/test_gl_desktop_window
 test/test_render_gl
 test/test_render_gl_shaders
 spikes/spike7_frame_callback
+test/test_wayland_tablet

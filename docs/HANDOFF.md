@@ -1,14 +1,22 @@
 # 引き継ぎ資料
 
-新しいセッションは、`CLAUDE.md` の次にこれを読む。最終更新: 2026-11-06（手元の Radeon の機械で、タブレット/ペン #66 の検査を先に書いた後）。
+新しいセッションは、`CLAUDE.md` の次にこれを読む。最終更新: 2026-11-09（Raspberry Pi 5 の端末で、タブレット/ペン #66 を実装した後）。
 
-> **2026-11-06（Radeon の機械）: タブレット/ペン（#66）の公開 API・骨組み・偽の機器の検査を、実機が届く前に書いた。実装はまだ（実機が届いてから相談する。持ち主の決定）。**
+> **2026-11-06（Radeon の機械）: タブレット/ペン（#66）の公開 API・骨組み・偽の機器の検査を、実機が届く前に書いた。実装は 2026-11-09 に済んだ（上）。**
 > - 公開層: `PaPiMeLa.Events` にペンのイベント 8 種・型・窓口 `Ctx.Events.Pen`（中身は `PaPiMeLa.Events.Pen`。移植、メソッドは空）、ヒント `PAPIMELA_PEN_MOUSE_EVENTS` / `PAPIMELA_PEN_TOUCH_EVENTS`（既定 1。ペンからマウスとタッチを合成するのは SDL どおり）。マウスの送る関数に MouseID、タッチに圧力を、省略できる引数で足した
 > - `PaPiMeLa.Video.Wayland.Tablet`: 道具の純粋な状態 `TPMLWaylandTabletToolState` と、道具のカーソルの出口 `IPMLWaylandToolCursorSink`、リスナー `TPMLWaylandTabletSeat`。**中身は空で、`Video.Wayland.Types` / `Seat` / `Video.Wayland` にはまだつないでいない**（`zwp_tablet_manager_v2` の束縛も未）
 > - 期待値: `tools/pen-expect/pen_cases.c` + `gen.bb`。参照版 SDL を静的に作り（§2.1 の cmake の引数で、ビデオの dummy は残す。`-ffp-contract=off`。置き場は `/home/joerg/claude-work/sdl-ref-build`）、SDL_pen.c の内部を直接呼ぶ。tablet の部分は SDL の `tablet_tool_handle_*` の写し
 > - 検査: T-87 `test_pen`（骨組みで FAIL 102）、T-88 `test_wayland_tablet_model`（骨組みで FAIL 60）。どちらも手順を全部比べたかを数で見る。**CI の一覧（lint.yml）にはまだ入れていない**
 > - 読んで見つけた SDL の疑い（確かめていないので DEFECTS には無い）: 窓が壊れるとその上のペンの登録を外して戻さない（T-88 の場面 `window_destroyed`）、`Wayland_ShowCursor` がカーソルを隠しても道具には形を張る（papimela は隠す。DESIGN #66）、`SDL_SendPenTouch` が排他を外した後に軸を読む、`SDL_SendPendingPenProximity` が読む排他を持ったまま入れ子で取る、道具のボタンに pad の定数を使う（値は同じ）
-> - **次**: 実装（DESIGN では Medium = Sonnet）、Wayland へのつなぎ、手元専用の実機の検査 `test_wayland_tablet` とデモ。この機械に要るもの: `cmake`・`ninja-build`・`fp-units-fcl`（2026-11-06 に入れた）、`../rawpaco`
+> - **次**だったもの（実装・Wayland へのつなぎ・手元専用の実機の検査 `test_wayland_tablet`）は 2026-11-09 に済んだ（上）。この機械に要るもの: `cmake`・`ninja-build`・`fp-units-fcl`、`../rawpaco`
+
+> **2026-11-09（Pi 5 に Intuos M をつないだ）: タブレット/ペン（#66）を実装し、実機で確かめた**（T-87 `test_pen` 167 / 0、T-88 `test_wayland_tablet_model` 187 / 0、どちらも CI の一覧に入れた。T-89 `test_wayland_tablet` は実機で 11 / 0、手元専用）。実装は Sonnet、つなぎと見直しは Opus。この端末は上の Radeon の機械が先に書いた骨組みと検査の上に載せた（同じ日に別々の機械で #66 に着手して、master で衝突した。Pi 5 側で書いた別実装はブランチ `pen-pi5` に残してある。使わないなら消してよい）。
+> - 期待値の表（`tools/pen-expect/`）を作り直した: マウスのボタン番号を papimela の番号に直す（SDL は 2 が中・3 が右、papimela は 2 が右・3 が中）、`pen_cases.c` が壊した窓に `SDL_GetWindowID` を呼んでいた誤りを直した。aarch64 の参照版（`-ffp-contract=off`、`/home/joerg/claude-work/sdl-ref-build-pen`）で作り直しても、それ以外の行は Radeon の機械（x86_64）の表と一致した
+> - 実装時に SDL に合わせて足した: 窓が変わった最初の合成マウスのボタンの前の MouseID 0 の移動、すでに触れている指の再 down は先に `FingerCanceled`（`TPMLTouchState.SendDown`）、合成を切る・ペンが無くなるときに合成した指を黙って忘れる（`TPMLTouchState.ForgetDevice`）
+> - 窓が壊れる知らせは `TPMLWaylandVideoBackend` がキューの見張りで拾う（ウィンドウのバックエンドに触らない妥協。きれいではないので、`Video` 側に窓の破棄の通知があれば替えてよい）。`WindowExists` はバックエンドの窓の一覧で答える
+> - 実機の値: Intuos M のペンは筆圧 0〜1 に届く、サイドボタン 1 と 2 の両方が届く、位置は窓の座標。labwc は tool_added をペンが近づく前に送る。**席より後に現れる tablet manager は拾わない**（SDL は拾う）。傾き・回転・スライダの実機は未（Intuos M に無い）、labwc 以外のコンポジタ（GNOME など）も未
+> - SDL の疑いは上の Radeon の項のほか、`SDL_RemovePenDevice` が `pen_touching` を戻さない（papimela は SDL のまま）、`SendPenButtonEvents` の `mouse_buttons[button]` の添字（`button - 1` でなく、ペンのボタン 1 が右ボタンになり 5 は落ちる。papimela は SDL どおり）。確かめた分だけ不具合一覧に載せる（まだ載せていない）
+> - パッド（`event12`）は `Ctx.Joysticks` にジョイスティックとして出る（SDL も同じ。実測済み）
 
 > **2026-11-06（Radeon の機械）: 窓の VSync の調査は終わった。** T-21（33 / 0）・T-22（59 / 0）・T-84（69 / 0）が通った。合図は 199.8 Hz で、VSync 1 はその 0.99〜1.01 倍。**Vulkan の VSync 0 は 9,559〜9,804 fps**（5 回）で、「速くならない」は再現しなかった。そのため present mode と `SubmitAndWait` は調べず、コードも変えていない。この日の画面は 2 枚（DP-1 2560x1080 200 Hz と HDMI-A-1 3840x2160）で、`DesktopMode.RefreshRate` は主の画面の 60 Hz を返す（スパイク 7 の Radeon の分）。報告値でなく合図を基準にした替え方が、ここでも効いた。**同日、デスクトップ GL の T-79 / T-80 を radeonsi で初めて流した**: オフスクリーンは RX 9070 XT・RX 9070・内蔵 Raphael・llvmpipe の 4 つで全部通る。**この機械の GPU は 3 つ**（03:00.0 が RX 9070 XT、09:00.0 が RX 9070、10:00.0 が Raphael）で、surfaceless の EGL の既定は Raphael を選ぶ。dGPU で流すには `DRI_PRIME=pci-0000_03_00_0` などを付ける。T-79 の窓の区間は、VSync の基準を替え漏らしていて 1 件落ちた（D-89）。`vsync_probe.inc` に替えて通った（165 / 0）。**次はタブレット/ペン（#66）。実機は 2026-11-06 の午前中に届く。**
 
@@ -16,7 +24,7 @@
 >   2. **Haptic（#63）を済ませた**（2026-10-25。Sonnet 5.5 の手元のセッション）: `PaPiMeLa.Haptic.Backend`（効果の型 `TPMLHapticEffect`・抽象バックエンド・開いた機器 `TPMLHaptic`）、`PaPiMeLa.Haptic`（`Ctx.Haptics` = `TPMLHapticSystem`。一覧・開く・マウス・ジョイスティックから）、`PaPiMeLa.Haptic.Linux`（evdev の FF。`PMLHapticToFFEffect` は SDL の `SDL_SYS_ToFFEffect` と 735 場面で全バイト一致）。`Platform.Evdev` に FF の共用体（一定・傾斜・条件）・`EVIOCGEFFECTS`・FF の定数を足し（`tools/genevdev.bb`）、`TPMLEvdevNode` に `WriteFF` / `GetEffectCount` を足した。ヒントは `PAPIMELA_JOYSTICK_HAPTIC_AXES` と `PAPIMELA_HAPTIC_GAIN_MAX`。Context は `[TPMLSubsystem.Haptic]` で `Haptics` を作る（ジョイスティックの後・先に壊す）。T-76（201 件）。**検査を実装の後に書いた**ので、変異 56 通りで歯を確かめた（TEST-LOG の T-76）。SDL の不具合 D-84〜D-86 を見つけた（偽の FF 機器に SDL のコードを通して確かめた。`tools/haptic-expect/haptic_suspects.c`）。README の上流の不具合に D-84〜D-86 を載せた（持ち主の判断。これで上流の 34 件すべて載っている）。
 >   3. **Render.GL（#44）を済ませた**（同日。計画は `~/.claude/plans/precious-puzzling-lamport.md`。持ち主の決定: **GL 2.1 の互換プロファイル（SDL どおり）で、コア 3.x は将来の別件。自動選択は `opengl` を `gles2` より先にし、作れなければ次へ進む**）。段 0 はスパイク 5（EGL でデスクトップ GL が作れる。V3D は GL 3.1 まで、コア 3.3 は作れない）、段 1 は `PaPiMeLa.Platform.GL`（`tools/gengl.bb` が GL ヘッダから生成。T-77）、段 2 は `Video.EGL` のコンテキストごとの API と、デスクトップ GL の関数を libGL の dlsym で引く道（`eglGetProcAddress` は存在しない名前にも非 nil を返す。T-78）、段 3 は T-22 の場面を `test/render_scenes.inc` に括り出して GLES2 と GL で共有（`AdjustTolerance` でドライバごとに許容を持つ。GLES2 は既定のまま）と、`Platform.EGL.Surfaceless`（窓の無い EGL ディスプレイの共有の参照カウント）、段 4 は `PaPiMeLa.Render.GL`（本体。私が書いた）と `.Render.GL.Shaders`（Sonnet のサブエージェント。SDL の GLSL を機械的に写し、C の文字列と全文を突き合わせた）。T-79（ドライバ。オフスクリーン 145 件 + 手元のウィンドウ）、T-80（シェーダ。82 件）。**SDL から外した所は DESIGN #44 の行**（最近傍の境目の補正、YUV の変換結果を挟む、NPOT の奇数の YUV の余白、NPOT でないときは INDEX8・I444・ピクセルアートを持たない、シザーを「ビューポート ∩ クリップ」にする、行の長さを戻す）。**CI と同じ Ubuntu 24.04（arm64、Mesa 25.2.8）の隔離環境**を `/home/joerg/claude-work/ubuntu2404-arm64/run.sh` に作った（リポジトリの外。使い方は run.sh の頭。`apt-get install` のあと `dpkg -r --force-depends man-db` と `dpkg --configure -a` が要った）。
 >   4. **SDL の疑い（読んだだけ・papimela の写しで確かめた。不具合一覧には載せていない）**: `shaders_gl.c` の検証リストに `glUniform4fARB` が無い（無いときに NULL を呼ぶ。実機では起きない）。リンクの成否を見ない（`glGetError` だけ）。`GL_PACK_ROW_LENGTH` と `GL_UNPACK_ROW_LENGTH` を設定して戻さない（アプリ自身の GL に残る）。NPOT でない道（矩形テクスチャ・2 の冪乗への切り上げ）で、パレットの検索（`/256.0` の正規化のまま）・I444（UVCoordScale 0.5）・ピクセルアートと線形パレットの `texel_size` が合わない（実機の GL 2.0 以上は NPOT なので通らない道。papimela は検査用のフックでこの道を通して確かめた）。`GL_CreateRenderer` のエラー経路で確保済みのメモリを解放しない。YUV のシェーダが変換結果を 0..1 に挟まずに色を掛ける（飽和した色に色の変調と合成を掛けると、ソフトウェアのレンダラと 1 成分 35 割れる。SDL のレンダラ同士の不一致）。参照版の SDL を `-DSDL_OPENGL=ON` で作って実物と突き合わせる足場は、時間が無くて作っていない（計画の段 3 の「任意」）。
->   5. 次の仕事は、おすすめの順にタブレット/ペン（#66。実機が無いので偽の機器の検査から）、窓の VSync の性能調査の残り（2026-11-05 に Pi 5 側は済んだ: 合図が約 90 Hz で、検査の基準を実測周期に替えた。**残りは手元の Radeon の機械での Vulkan の VSync 0 の再測定**。Pi 5 では VSync 0 は速くなる）。**libdecor（#69、#78）は済んだ（T-85 / T-86）**: ヒント `PAPIMELA_WAYLAND_PREFER_LIBDECOR` か、xdg-decoration が無いコンポジタで libdecor の文脈ができ、窓は libdecor のフレームで動く（実機の labwc で確認。**GNOME での実機の確認は未**）。この作業で、窓の検査から D-87（libwayland を閉じて開き直していた。Context を 2 つ続けて作れなかった）と D-88（最大化を戻しても大きさが戻らない）を見つけて直した。**Vulkan（#67）は段 0〜4 まで済んだ（T-81〜T-84）**: 型・定数・関数表は papimela が持つ（`tools/genvulkan.bb`。SDL 同梱の `khronos/vulkan/` から）、ローダと面（`Video.Vulkan` / `Video.Wayland.Vulkan`、`TPMLWindowOptions.Vulkan`、`TPMLWindow.VulkanCreateSurface`）、ドライバ `Render.Vulkan`（SDL の SPIR-V を `tools/genspirv.bb` で写す。窓とオフスクリーン。V3D と lavapipe の両方で、共有の 29 場面 + Vulkan 固有の検査が全部通る。実機の窓で VSync・最大化・向きも通る）。**残り**: HDR / PQ / scRGB の出力、YCbCr サンプラ、P010 / I0FL / I4FL、デバイスのリセットの再作成、`Advanced` 以外の PQ のシェーダ（SDL の `VULKAN_*_PQ.h`）。**CI に Wayland のコンポジタは無い**ので窓の検査は手元専用、CI は lavapipe のオフスクリーン比較だけ。作業の木は T-80 まで commit する（CI が緑かは push の後に見る）。
+>   5. 次の仕事は、IME の残り（§3）、Vulkan の残り（HDR / PQ ほか）、GNOME など labwc 以外のコンポジタでの libdecor と tablet の確認。
  **2026-10-14 の手元のセッションで**: §3 の 3b（パレット、INDEX8）と 3c（YUV。YV12 / IYUV / NV12 / NV21 / YUY2 / UYVY / YVYU）を
 > 済ませ、テクスチャの種類（§3 の 1）は終わった。README の上流の不具合に D-58〜D-61 を載せた（持ち主の判断）。SDL の不具合を
 > 4 つ見つけた（D-60〜D-63）。表示サーバ無しの 28 本（1243 件）と T-22（llvmpipe・radeonsi・窓）は全部通る。
@@ -76,7 +84,7 @@
 >   1. `git pull` して、窓の 3 本を流す: `test_render_vulkan`、`test_render_gles2`（窓の区間）、`test_gl_window`（組み方は §5.1 の `$B`）。**まず今回の検査がこの機械で通るか**（合図の実測周期が 200 Hz 前後で出るか、帯 0.6〜1.2 が広すぎ・狭すぎでないか）。`spikes/spike7_frame_callback` も流して合図の周期を記録する。
 >   2. **Vulkan の VSync 0 が VSync 1 より速くなるかを測る**（元の症状。`test_render_vulkan` の `[INFO] 合図 … Hz、VSync 1: … fps、0: … fps` を数回）。速くならなければ、`Render.Vulkan.pas` の present mode の一覧と選ばれた mode を出して確かめる（Mesa の Wayland WSI は IMMEDIATE / MAILBOX も合図に寄せうる。`test_render_vulkan.pas` の該当の検査のコメント）。もう一つの疑いは `Present` が毎フレーム `SubmitAndWait` → `vkQueueWaitIdle` すること（SDL は per-image の fence で重ねる。`Render.Vulkan.pas` の `SubmitAndWait` と `Present`、SDL の `VULKAN_RenderPresent`）。**papimela 側の原因と分かるまでコードは変えない**。
 >   3. 結果は `docs/TEST-LOG.md` の T-21 / T-22 / T-84 と、`spikes/RESULTS.md` のスパイク 7（Radeon の分を追記）へ。Radeon で検査が落ちたら、帯の見直しか原因の調査かを決めて `docs/DEFECTS.md` に載せる。
->   4. その後の次の候補は、タブレット/ペン（#66。実機が無いので偽の機器の検査から）。
+>   4. その後の次の候補は、IME の残り（§3）、Vulkan の残り、GNOME での libdecor と tablet の確認。
 > **再開時の最初にやること（2026-10-25 時点。上の VSync の項が新しい）**:
 >   1. FF を持つ機器がつながったら、`Ctx.Haptics`（一覧・`Open`・`InitRumble` / `PlayRumble`）とジョイスティック経由の `OpenFromJoystick` で実機の力覚を確かめ、TEST-LOG に書く（今の GameSir-K1 は FF が無い）。偽物の検査が見られない所: 実機の `EVIOCGEFFECTS` の値、`FF_GAIN` / `FF_AUTOCENTER` の write の受け入れ、効果のアップロードの受け入れ。
 >   2. README の「上流の不具合」に D-84〜D-86 は載せ済み。
@@ -115,7 +123,7 @@ EGL の GL コンテキスト（スワップ間隔はコンテキストごと）
 #21、#45、#46、#47、#48、#49、#50、#51、#52、#53（`.Audio.Mixer` は F32 の分だけ）、#55、#56、#64、#68（YUV から ARGB8888 への変換、I444 のテクスチャ、P010 から XBGR2101010 への変換、I0FL / I4FL から RGB48 への変換）、#70、#71。
 
 未着手: #11、#18–21、#23、#30、#40、#44、
-#18–19、#66（API と検査だけ書いた。実装は未）、#67、#69（#44・#59–63・#65 は済み）。
+#18–19、#67、#69（#44・#59–63・#65 は済み）。
 
 ## 2. 前のセッション（2026-10-14、手元）でしたこと
 
@@ -290,7 +298,7 @@ Pong もすべて書き換え、今は `uses SysUtils, Math, PaPiMeLa` だけで
 表示サーバ無しで通るもの（CI と同じ）:
 
 ```bash
-for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_render_transform test_render_target test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_drop test_drag_source test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds test_audio_convert test_audio_stream test_audio_mixer test_audio_wave test_audio_device test_pipewire_abi test_pulse_abi test_alsa_abi test_alsa_chmap test_audio_autoselect test_texture_lock test_texture_colorkey test_yuv_hd test_colorspace test_joystick test_gamepad_mapping test_gamepad test_evdev test_udev test_joystick_linux test_filesystem test_messagebox test_haptic test_platform_gl; do
+for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_render_transform test_render_target test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_drop test_drag_source test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds test_audio_convert test_audio_stream test_audio_mixer test_audio_wave test_audio_device test_pipewire_abi test_pulse_abi test_alsa_abi test_alsa_chmap test_audio_autoselect test_texture_lock test_texture_colorkey test_yuv_hd test_colorspace test_joystick test_gamepad_mapping test_gamepad test_evdev test_udev test_joystick_linux test_filesystem test_messagebox test_haptic test_platform_gl test_pen test_wayland_tablet_model; do
   fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/$t test/$t.pas && ./test/$t
 done
 fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -oexamples/pong examples/pong.pas && ./examples/pong --selftest
@@ -318,7 +326,7 @@ env -u WAYLAND_DISPLAY LIBGL_ALWAYS_SOFTWARE=1 ./test/test_render_gles2   # Mesa
 cd papimela && mkdir -p lib
 B='fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib'
 # 0. 表示サーバ無しの分（CI と同じ。手元の新しい Mesa でも通るか）
-for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds test_audio_convert test_audio_stream test_audio_mixer test_audio_wave test_audio_device test_pipewire_abi test_pulse_abi test_alsa_abi test_alsa_chmap test_audio_autoselect test_texture_lock test_texture_colorkey test_yuv_hd test_colorspace test_joystick test_gamepad_mapping test_gamepad test_evdev test_udev test_joystick_linux test_filesystem test_messagebox test_haptic test_platform_gl; do
+for t in test_dummy_video test_pixels test_io test_surface test_blit test_render test_render_window test_render_logical test_time test_keyboard test_textinput_v3 test_ime_keys test_ibus_model test_clipboard test_protocol_types test_atomic test_threading test_timer test_backends test_umbrella test_properties test_log test_hints test_texture_kinds test_audio_convert test_audio_stream test_audio_mixer test_audio_wave test_audio_device test_pipewire_abi test_pulse_abi test_alsa_abi test_alsa_chmap test_audio_autoselect test_texture_lock test_texture_colorkey test_yuv_hd test_colorspace test_joystick test_gamepad_mapping test_gamepad test_evdev test_udev test_joystick_linux test_filesystem test_messagebox test_haptic test_platform_gl test_pen test_wayland_tablet_model; do
   $B -otest/$t test/$t.pas && ./test/$t | tail -1
 done
 # 1. 実機の Wayland（自動判定。最後の行が「結論」で終わればよい）

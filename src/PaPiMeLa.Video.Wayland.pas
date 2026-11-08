@@ -23,7 +23,8 @@
     - 能力集合は Connect 後に確定する（拡張の有無で変わる）
 
   NOT RESOLVED:
-    - シートはキーボード / ポインタ / タッチを実装済み。タブレット（tablet-v2）は未対応
+    - シートはキーボード / ポインタ / タッチを実装済み。タブレット（tablet-v2）は
+      PaPiMeLa.Video.Wayland.Tablet（席ごとに作る。manager が席より後に現れる場合は未対応）
     - クリップボードの部品（#38）は wl_data_device_manager か
       primary selection のマネージャがあり、シートがあるときに作る（ドラッグ＆ドロップは
       未実装）。GL の部品は
@@ -74,6 +75,18 @@ type
     function GetDesktopMode: TPMLDisplayMode; override;
   end;
 
+  TPMLWaylandVideoBackend = class;
+
+  { ウィンドウの破棄（WindowDestroyed）をキューの見張りで拾い、バックエンドへ知らせる。
+    ウィンドウ backend のコードに触らずに「ウィンドウが壊れる」を知るための窓口。 }
+  TPMLWaylandWindowWatch = class(TObject, IPMLEventWatch)
+  strict private
+    FOwner: TPMLWaylandVideoBackend;
+  public
+    constructor Create(AOwner: TPMLWaylandVideoBackend);
+    function OnEventPushed(const AEvent: TPMLEvent): Boolean;
+  end;
+
   TPMLWaylandVideoBackend = class(TPMLVideoBackend, IPMLWaylandSeatProvider)
   strict private
     FConn : TPMLWaylandConnection;
@@ -81,11 +94,15 @@ type
     FSeats: TPMLWaylandSeats;
     FLibDecor: TPMLWaylandLibDecor;     // nil = クライアントサイド装飾を使わない
     FLibDecorError: String;
+    FLiveWindows: array of TPMLWindowID;   // 作って、まだ壊れていないウィンドウ（ペンの窓の存在確認用）
+    FWindowWatch: TPMLWaylandWindowWatch;
     procedure CheckConnectionAlive;
     procedure HandleSeatBound(ASeat: Pwl_seat);
     procedure HandleGrabsChanged(AWindowID: TPMLWindowID);
     function  GetSeats: TPMLWaylandSeats;
     procedure DestroySeats;
+    function  WindowExists(AWindowID: TPMLWindowID): Boolean;
+    procedure ReleaseWindowWatch;
   public
     constructor Create(AContextRef: TObject; AOwner: TPMLObject;
       AQueue: TPMLEventQueue);
@@ -100,6 +117,8 @@ type
     procedure PumpEvents; override;
     procedure WaitEvents(ATimeoutMs: Integer); override;
     procedure WakeEventLoop; override;
+    // ウィンドウが壊れる（TPMLWaylandWindowWatch が呼ぶ）。
+    procedure HandleWindowDestroyed(AWindowID: TPMLWindowID);
 
     // IPMLWaylandSeatProvider。IME バックエンド（TextInput.WaylandTI、#49）が使う。
     function WaylandConnection: TPMLWaylandConnection;
@@ -174,6 +193,7 @@ begin
   FreeAndNil(FGL);
   FreeAndNil(FVulkan);
   DestroySeats;
+  ReleaseWindowWatch;
   FreeAndNil(FConn);
   inherited Destroy;
 end;
@@ -196,6 +216,10 @@ begin
   if not Result then
     Exit;
   FSink := ASink;
+  // ペン（tablet-v2）の窓の扱い。窓が壊れるのを見張り、保留の近接 out を出す前の窓の存在確認に答える。
+  FWindowWatch := TPMLWaylandWindowWatch.Create(Self);
+  FQueue.AddWatch(FWindowWatch);
+  FQueue.Pen.WindowExists := @WindowExists;
   FCapabilities := FConn.Capabilities;
 
   // タッチの有無は接続ではなくシートが知っている。wl_seat.capabilities は
@@ -270,6 +294,7 @@ begin
   FreeAndNil(FClipboard);
   FreeAndNil(FCursors);
   DestroySeats;
+  ReleaseWindowWatch;
   FConn.Disconnect;
   inherited Disconnect;
 end;
@@ -332,6 +357,63 @@ function TPMLWaylandVideoBackend.CreateWindowBackend(AWindowID: TPMLWindowID;
 begin
   Result := TPMLWaylandWindowBackend.Create(ContextRef, Self, FConn, FSink,
     AWindowID, ATitle, AWidth, AHeight, AFlags, FLibDecor);
+  SetLength(FLiveWindows, Length(FLiveWindows) + 1);
+  FLiveWindows[High(FLiveWindows)] := AWindowID;
+end;
+
+{ ウィンドウが壊れた（WindowDestroyed がキューに積まれる直前）。壊れる窓の上にいるペンの
+  道具を外す。ここで外すと近接 out が WindowDestroyed より先に積まれる。 }
+procedure TPMLWaylandVideoBackend.HandleWindowDestroyed(AWindowID: TPMLWindowID);
+var
+  I, J: Integer;
+begin
+  for I := 0 to High(FSeats) do
+    FSeats[I].TabletWindowDestroyed(AWindowID);
+  for I := 0 to High(FLiveWindows) do
+    if FLiveWindows[I] = AWindowID then
+    begin
+      for J := I to High(FLiveWindows) - 1 do
+        FLiveWindows[J] := FLiveWindows[J + 1];
+      SetLength(FLiveWindows, Length(FLiveWindows) - 1);
+      Break;
+    end;
+end;
+
+{ TPMLPenState.WindowExists の答え（SDL_GetWindowFromID）。このバックエンドが作って、まだ
+  壊れていない窓なら True。 }
+function TPMLWaylandVideoBackend.WindowExists(AWindowID: TPMLWindowID): Boolean;
+var
+  I: Integer;
+begin
+  for I := 0 to High(FLiveWindows) do
+    if FLiveWindows[I] = AWindowID then
+      Exit(True);
+  Result := False;
+end;
+
+{ 見張りを外し、ペンの窓の存在確認をやめる。接続を切る前（と破棄）に呼ぶ。2 回呼んでよい。 }
+procedure TPMLWaylandVideoBackend.ReleaseWindowWatch;
+begin
+  if FWindowWatch = nil then
+    Exit;
+  FQueue.Pen.WindowExists := nil;
+  FQueue.RemoveWatch(FWindowWatch);
+  FreeAndNil(FWindowWatch);
+end;
+
+{ TPMLWaylandWindowWatch }
+
+constructor TPMLWaylandWindowWatch.Create(AOwner: TPMLWaylandVideoBackend);
+begin
+  inherited Create;
+  FOwner := AOwner;
+end;
+
+function TPMLWaylandWindowWatch.OnEventPushed(const AEvent: TPMLEvent): Boolean;
+begin
+  if AEvent.Kind = TPMLEventKind.WindowDestroyed then
+    FOwner.HandleWindowDestroyed(AEvent.WindowID);
+  Result := True;
 end;
 
 procedure TPMLWaylandVideoBackend.CheckConnectionAlive;

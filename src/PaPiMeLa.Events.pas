@@ -518,6 +518,8 @@ type
     procedure SendUp(ADeviceID: LongWord; AFingerID: Int32; APressure: Single = 0.0);
     // 触っている指すべてを無効にする。コンポジタがジェスチャを奪ったときに来る。
     procedure SendCancel(ADeviceID: LongWord);
+    // その機器の指を、イベントを出さずに忘れる（SDL_DelTouch。ペンの合成を切ったときなど）。
+    procedure ForgetDevice(ADeviceID: LongWord);
     function  TryGetFinger(AFingerID: Int32; out APoint: TPMLTouchPoint): Boolean;
     property FingerCount: Integer read GetFingerCount;
   end;
@@ -1521,9 +1523,12 @@ begin
   P.Y := AY;
   P.Pressure := APressure;
 
-  // 同じ id が離されずに再度 down することは仕様上ないが、来ても壊れないようにする。
+  // 同じ id が離されずに再度 down することは wl_touch では無いが、ペンの消しゴムの切り替えなどで
+  // 来る。SDL_SendTouch は先に FingerCanceled を出すので、同じ並びにする（位置と圧力は新しいもの）。
   I := IndexOf(AFingerID);
-  if I < 0 then
+  if I >= 0 then
+    Emit(TPMLEventKind.FingerCanceled, P, 0, 0)
+  else
   begin
     SetLength(FFingers, Length(FFingers) + 1);
     I := High(FFingers);
@@ -1586,6 +1591,20 @@ begin
     Snapshot[I].Pressure := 0.0;
     Emit(TPMLEventKind.FingerCanceled, Snapshot[I], 0, 0);
   end;
+end;
+
+procedure TPMLTouchState.ForgetDevice(ADeviceID: LongWord);
+var
+  I, N: Integer;
+begin
+  N := 0;
+  for I := 0 to High(FFingers) do
+    if FFingers[I].DeviceID <> ADeviceID then
+    begin
+      FFingers[N] := FFingers[I];
+      Inc(N);
+    end;
+  SetLength(FFingers, N);
 end;
 
 { ---- ペン（中身は PaPiMeLa.Events.Pen） ---- }

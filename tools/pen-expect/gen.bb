@@ -35,10 +35,19 @@
 
 (defn- q [s] (str "'" (str/replace s "'" "''") "'"))
 
+;; SDL のマウスのボタン番号は 1 左、2 中、3 右。papimela は 1 左、2 右、3 中（Seat の BTN_RIGHT → 2、
+;; BTN_MIDDLE → 3）。期待値の MouseButtonDown / Up の番号だけを papimela の番号に直す
+;; （X1 = 4、X2 = 5 は同じ）。
+(defn- papimela-button [row]
+  (let [f (str/split row #" ")]
+    (if (and (= (count f) 7) (#{"MouseButtonDown" "MouseButtonUp"} (nth f 1)))
+      (str/join " " (assoc f 4 (case (nth f 4) "2" "3" "3" "2" (nth f 4))))
+      row)))
+
 (defn- write [mode file const what]
   (let [a (run mode 0) b (run mode 165)]
     (when-not (= a b) (fail mode " の出力が MALLOC_PERTURB_ で変わる"))
-    (let [rows (filter #(re-find #"^[NSERC] " %) (str/split-lines a))]
+    (let [rows (map papimela-button (filter #(re-find #"^[NSERC] " %) (str/split-lines a)))]
       (spit file
             (str "{ " file " — tools/pen-expect/gen.bb が作る。手で直さない。\n"
                  "  " what "\n"

@@ -65,6 +65,7 @@ extern SDL_PenInputFlags SDL_GetPenStatus(SDL_PenID instance_id, float *axes, in
 #define MAXP 16
 static SDL_Window *win[3];          /* 1 と 2。0 は NULL */
 static bool win_gone[3];
+static SDL_WindowID win_id[3];      /* 作ったときの窓の ID。壊した後に SDL_GetWindowID を呼ばないために覚える */
 static SDL_PenID pen_id[MAXP];       /* 番号 → SDL の ID（外した後も覚えておく） */
 static char handles[MAXP];           /* 番号 → バックエンドの Handle */
 
@@ -72,7 +73,7 @@ static SDL_Window *W(int i) { return (i >= 1 && i <= 2 && !win_gone[i]) ? win[i]
 static int win_index(SDL_WindowID id)
 {
   for (int i = 1; i <= 2; i++)
-    if (win[i] && SDL_GetWindowID(win[i]) == id) return i;
+    if (win[i] && win_id[i] == id) return i;
   return 0;
 }
 static int pen_index(SDL_PenID id)
@@ -159,6 +160,7 @@ static void scene(const char *name)
   for (int i = 1; i <= 2; i++) {
     win[i] = SDL_CreateWindow("pen", WIN_W, WIN_H, 0);
     if (!win[i]) { printf("INIT-ERR %s\n", SDL_GetError()); exit(1); }
+    win_id[i] = SDL_GetWindowID(win[i]);
     win_gone[i] = false;
   }
   memset(pen_id, 0, sizeof(pen_id));

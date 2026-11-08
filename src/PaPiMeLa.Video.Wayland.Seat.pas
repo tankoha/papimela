@@ -1,5 +1,5 @@
 {
-  PaPiMeLa.Video.Wayland.Seat — wl_seat（キーボード / ポインタ / タッチ）
+  PaPiMeLa.Video.Wayland.Seat — wl_seat（キーボード / ポインタ / タッチ。タブレットの席も作る）
 
   Origin : partially ported from SDL (src/video/wayland/SDL_waylandevents.c,
            src/video/wayland/SDL_waylandkeyboard.c)
@@ -28,6 +28,12 @@
       ウィンドウ backend が自分自身を設定しておく
     - キーは押下も解放も IME に通す。修飾キー単独押下もエンジンがモード切替に
       使うため通す（§7.5）
+    - タブレット（tablet-v2）は PaPiMeLa.Video.Wayland.Tablet に分けた。ここは最初の capabilities で
+      TPMLWaylandTabletSeat を作り（manager が束縛済みのとき）、サーフェスからウィンドウ ID を引く
+      WindowIDOf を渡し、カーソルの変化（ApplyCursor）と窓の破棄（TabletWindowDestroyed）を伝えるだけ。
+      最初の capabilities で作る理由: グローバルの束縛（manager を含む）は Connect の最初の
+      roundtrip で全部終わり、capabilities はその後に届くので、ここなら manager の有無が確定している。
+      席より後に現れた manager は拾わない（SDL は拾う）
 
   NOT RESOLVED:
     - タッチは押下・移動・解放・取り消しだけ。shape / orientation（接触面の
@@ -63,7 +69,8 @@ uses
   PaPiMeLa.Platform.Wayland.Protocols.TabletV2,
   PaPiMeLa.Video.Wayland.Types,
   PaPiMeLa.Video.Wayland.Window,
-  PaPiMeLa.Video.Wayland.PointerGrab;
+  PaPiMeLa.Video.Wayland.PointerGrab,
+  PaPiMeLa.Video.Wayland.Tablet;
 
 type
   TPMLWaylandSeat = class;
@@ -135,6 +142,7 @@ type
     FTouchFwd : TPMLWaylandTouchFwd;
     FXKB      : TPMLXKBState;
     FGrab     : TPMLWaylandPointerGrab;
+    FTablet   : TPMLWaylandTabletSeat;   // tablet-v2 の manager があるときだけ。最初の capabilities で作る
     FName     : String;
 
     FKeyFocus : TPMLWindowID;
@@ -208,6 +216,8 @@ type
     // カーソル部品（TPMLWaylandCursorBackend）から呼ばれる。要求を覚えて即適用し、
     // 次に wl_pointer.enter が来たときにも同じ形を張り直す。
     procedure ApplyCursor(AShape: LongWord; AVisible: Boolean);
+    // ウィンドウが壊される。そのウィンドウの上にいるペンの道具を外す（近接 out が出る）。
+    procedure TabletWindowDestroyed(AWindowID: TPMLWindowID);
     // サーフェスを持つウィンドウの ID（user_data のウィンドウ backend から引く）。
     // 解決できなければ 0。データデバイス（ドラッグ＆ドロップ）が使う。
     function  WindowIDOf(ASurface: Pwl_surface): TPMLWindowID;
@@ -387,6 +397,8 @@ end;
 
 destructor TPMLWaylandSeat.Destroy;
 begin
+  // タブレットの道具はペンの登録を外す（近接 out が出る）。他より先に捨てる。
+  FreeAndNil(FTablet);
   // 拘束は wl_pointer より先に捨てる。ポインタを解放したあとに拘束オブジェクトを
   // 破棄する順序はプロトコル上あいまいなので、依存する側から畳む。
   FreeAndNil(FGrab);
@@ -461,6 +473,17 @@ begin
   FCursorShape := AShape;
   FCursorVisible := AVisible;
   ReapplyCursor;
+  // ペンの道具にも同じ見た目を張る（SDL の Wayland_ShowCursor が道具にも張るのと同じ）。
+  // PORT-NOTE: 第 3 引数は「相対モードで隠す」。papimela は相対モードでカーソルを自動で隠さない
+  // （Cursor ユニット）ので常に False。隠したいアプリは Visible を False にする。
+  if FTablet <> nil then
+    FTablet.SetCursor(AShape, AVisible, False);
+end;
+
+procedure TPMLWaylandSeat.TabletWindowDestroyed(AWindowID: TPMLWindowID);
+begin
+  if FTablet <> nil then
+    FTablet.WindowDestroyed(AWindowID);
 end;
 
 { ---- wl_touch ---- }
@@ -496,6 +519,11 @@ end;
 
 procedure TPMLWaylandSeat.capabilities(AProxy: Pwl_seat; capabilities_: LongWord);
 begin
+  // タブレットは wl_seat の能力とは別の経路（tablet_seat）で来るので、最初の capabilities で作る。
+  if (FTablet = nil) and (FConn.TabletMgr <> nil) then
+    FTablet := TPMLWaylandTabletSeat.Create(FConn.TabletMgr, FSeat, FQueue.Pen,
+      @WindowIDOf, FConn.CursorShapeMgr);
+
   if ((capabilities_ and WL_SEAT_CAPABILITY_KEYBOARD) <> 0) and (FKeyboard = nil) then
   begin
     FKeyboard := wl_seat_get_keyboard(FSeat);

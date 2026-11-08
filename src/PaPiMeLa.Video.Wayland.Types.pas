@@ -22,7 +22,8 @@
       メタデータ（geometry / mode / scale / name）が揃う
 
   NOT RESOLVED:
-    - シート（wl_seat の keyboard / pointer / touch）は束縛するが中身は未実装（#37）
+    - シート（wl_seat）の中身は PaPiMeLa.Video.Wayland.Seat（keyboard / pointer / touch。
+      tablet-v2 は PaPiMeLa.Video.Wayland.Tablet）。ここは束縛までで、シートの生成は Video.Wayland
     - 読み取りスレッド（SDL_waylandeventthread.c 相当）は移植しない。
       PumpEvents はメインスレッドで dispatch_pending + poll(2) を行う（§3.2）
 
@@ -132,6 +133,8 @@ type
     PointerConstraints: Pzwp_pointer_constraints_v1;
     RelativePointerMgr: Pzwp_relative_pointer_manager_v1;
     CursorShapeMgr    : Pwp_cursor_shape_manager_v1;
+    // タブレット（tablet-v2）。席ごとの TPMLWaylandTabletSeat がここから作る
+    TabletMgr         : Pzwp_tablet_manager_v2;
     // クリップボード（wl_data_device_manager）とプライマリ選択
     DataDeviceMgr     : Pwl_data_device_manager;
     PrimarySelectionMgr: Pzwp_primary_selection_device_manager_v1;
@@ -302,6 +305,7 @@ begin
   PointerConstraints := nil;
   RelativePointerMgr := nil;
   CursorShapeMgr := nil;
+  TabletMgr := nil;
   DataDeviceMgr := nil;
   PrimarySelectionMgr := nil;
   Compositor := nil;
@@ -348,6 +352,8 @@ begin
       ActivationMgr := Pxdg_activation_v1(B(xdg_activation_v1_interface, 1));
     'zwp_pointer_constraints_v1':
       PointerConstraints := Pzwp_pointer_constraints_v1(B(zwp_pointer_constraints_v1_interface, 1));
+    'zwp_tablet_manager_v2':
+      TabletMgr := Pzwp_tablet_manager_v2(B(zwp_tablet_manager_v2_interface, 1));
     'wp_cursor_shape_manager_v1':
       CursorShapeMgr := Pwp_cursor_shape_manager_v1(B(wp_cursor_shape_manager_v1_interface, 1));
     'zwp_relative_pointer_manager_v1':
@@ -368,7 +374,7 @@ begin
       end;
     'wl_seat':
       begin
-        // keyboard / pointer は TPMLWaylandSeat が取り出す。wl_touch は未実装。
+        // keyboard / pointer / touch は TPMLWaylandSeat が取り出す。tablet-v2 の席も TPMLWaylandSeat が作る。
         Seat := Pwl_seat(B(wl_seat_interface, 9));
         SetLength(FSeats, Length(FSeats) + 1);
         FSeats[High(FSeats)] := Seat;
@@ -418,6 +424,8 @@ begin
   // 閉じ込めだけならロックは不要なので、必要な拡張が別であることを能力でも分ける。
   if PointerConstraints <> nil then
     Include(Result, TPMLVideoCapability.MouseConfine);
+  if TabletMgr <> nil then
+    Include(Result, TPMLVideoCapability.Tablet);
   if CursorShapeMgr <> nil then
     Include(Result, TPMLVideoCapability.CursorShape);
   if (PointerConstraints <> nil) and (RelativePointerMgr <> nil) then
