@@ -23,6 +23,14 @@
     - クリップは転送元と転送先の両方で取る。先に転送先で切ってから、
       切られた分だけ転送元の開始位置をずらす。逆順にすると端がずれる
 
+    - 色空間が違うか、どちらかの形式が 5 バイト以上のときは、PaPiMeLa.Surface.Colorspace の
+      PMLBlitPixelsFloat（SDL_Blit_Slow_Float）へ回す（SDL_blit.c の条件と同じ）。トーンマップ、
+      原色の変換、ヘッドルームの書き戻しもそこ
+
+  PORT-NOTE:
+    SDL は切られた拡大縮小を、先に切られる前の大きさで別のサーフェスへ拡大してから切って写す。
+    ここはその経路を写さず、標本点を切られる前の矩形で決めて同じ位置を取る（AFullW / AOffX）。
+
   NOT RESOLVED:
     - RLE 圧縮（SDL_RLEaccel.c）は未実装。TPMLSurface 側にも入っていない
     - 回転（SDL_rotate.c）は未実装。レンダラの RenderTextureRotated が
@@ -45,7 +53,8 @@ uses
   PaPiMeLa.Types,
   PaPiMeLa.Errors,
   PaPiMeLa.Pixels,
-  PaPiMeLa.Surface;
+  PaPiMeLa.Surface,
+  PaPiMeLa.Surface.Colorspace;
 
 { 等倍の転送。
 
@@ -223,6 +232,50 @@ begin
   Result := (AW > 0) and (AH > 0);
 end;
 
+{ ---- 色空間つきの経路 ---- }
+
+// SDL_blit.c の 170〜177 行と同じ条件。色空間が違うか、どちらかが 5 バイト以上なら浮動小数の経路。
+function NeedsFloatPath(ASrc, ADst: TPMLSurface): Boolean; inline;
+begin
+  Result := (ASrc.Colorspace <> ADst.Colorspace)
+         or (ASrc.Details.BytesPerPixel > 4)
+         or (ADst.Details.BytesPerPixel > 4);
+end;
+
+// 浮動小数の経路で 1 回転送する。ADst のヘッドルームが変わったら書き戻す（SDL はプロパティへ書く）。
+procedure BlitFloat(ASrc: TPMLSurface; ASX, ASY, ASW, ASH: Integer;
+  ADst: TPMLSurface; ADX, ADY, ADW, ADH: Integer;
+  AFullW, AFullH, AOffX, AOffY: Integer);
+var
+  Params: TPMLBlitFloatParams;
+  Options: TPMLColorspaceOptions;
+  Props: TPMLSurfaceColorProps;
+begin
+  Params.BlendMode := ASrc.BlendMode;
+  Params.ModR := ASrc.ColorMod.R;
+  Params.ModG := ASrc.ColorMod.G;
+  Params.ModB := ASrc.ColorMod.B;
+  Params.ModA := ASrc.AlphaMod;
+  Options := PMLColorspaceDefaults;
+  Options.SrcWhitePoint := ASrc.ColorProps.SDRWhitePoint;
+  Options.SrcHeadroom := ASrc.ColorProps.HDRHeadroom;
+  Options.Tonemap := ASrc.ColorProps.Tonemap;
+  Options.DstWhitePoint := ADst.ColorProps.SDRWhitePoint;
+  Options.DstHeadroom := ADst.ColorProps.HDRHeadroom;
+  PMLBlitPixelsFloat(
+    PByte(ASrc.Pixels) + PtrInt(ASY) * ASrc.Pitch + PtrInt(ASX) * ASrc.Details.BytesPerPixel,
+    ASrc.Pitch, ASrc.Format, ASrc.Colorspace, ASrc.Palette, ASW, ASH,
+    PByte(ADst.Pixels) + PtrInt(ADY) * ADst.Pitch + PtrInt(ADX) * ADst.Details.BytesPerPixel,
+    ADst.Pitch, ADst.Format, ADst.Colorspace, ADst.Palette, ADW, ADH,
+    Params, Options, AFullW, AFullH, AOffX, AOffY);
+  if Options.DstHeadroom <> ADst.ColorProps.HDRHeadroom then
+  begin
+    Props := ADst.ColorProps;
+    Props.HDRHeadroom := Options.DstHeadroom;
+    ADst.ColorProps := Props;
+  end;
+end;
+
 { ---- 等倍の転送 ---- }
 
 { 形式が同じで、合成もカラーキーも変調も無い場合の速い経路。
@@ -321,7 +374,9 @@ begin
   if not ClipPair(ASrc, SX, SY, ADst, DX, DY, W, H) then
     Exit;
 
-  if CanCopyRaw(ASrc, ADst) then
+  if NeedsFloatPath(ASrc, ADst) then
+    BlitFloat(ASrc, SX, SY, W, H, ADst, DX, DY, W, H, 0, 0, 0, 0)
+  else if CanCopyRaw(ASrc, ADst) then
     BlitRaw(ASrc, SX, SY, ADst, DX, DY, W, H)
   else
     BlitSlow(ASrc, SX, SY, ADst, DX, DY, W, H);
@@ -391,6 +446,14 @@ begin
     Y2 := ADst.ClipRect.Y + ADst.ClipRect.H;
   if (X1 >= X2) or (Y1 >= Y2) then
     Exit;
+
+  // 色空間つきの経路。標本点は切られる前の矩形（DW x DH）で決める
+  if NeedsFloatPath(ASrc, ADst) then
+  begin
+    BlitFloat(ASrc, SX, SY, SW, SH, ADst, X1, Y1, X2 - X1, Y2 - Y1, DW, DH, X1 - DX, Y1 - DY);
+    Result := True;
+    Exit;
+  end;
 
   UseKey := ASrc.HasColorKey;
   UseMod := not ModIsIdentity(ASrc);

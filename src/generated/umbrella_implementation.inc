@@ -312,6 +312,29 @@ begin
   Result := PaPiMeLa.Surface.Colorspace.PMLColorspaceDefaults;
 end;
 
+procedure PMLBlitPixelsFloat(
+  ASrc: Pointer;
+  ASrcPitch: Integer;
+  ASrcFormat: TPMLPixelFormat;
+  ASrcColorspace: TPMLColorspace;
+  ASrcPalette: TPMLPalette;
+  ASrcW, ASrcH: Integer;
+  ADst: Pointer;
+  ADstPitch: Integer;
+  ADstFormat: TPMLPixelFormat;
+  ADstColorspace: TPMLColorspace;
+  ADstPalette: TPMLPalette;
+  ADstW, ADstH: Integer;
+  const AParams: TPMLBlitFloatParams;
+  var AOptions: TPMLColorspaceOptions;
+  AFullW: Integer;
+  AFullH: Integer;
+  AOffX: Integer;
+  AOffY: Integer);
+begin
+  PaPiMeLa.Surface.Colorspace.PMLBlitPixelsFloat(ASrc, ASrcPitch, ASrcFormat, ASrcColorspace, ASrcPalette, ASrcW, ASrcH, ADst, ADstPitch, ADstFormat, ADstColorspace, ADstPalette, ADstW, ADstH, AParams, AOptions, AFullW, AFullH, AOffX, AOffY);
+end;
+
 function PMLColorspacePrimaries(AColorspace: TPMLColorspace): Integer;
 begin
   Result := PaPiMeLa.Surface.Colorspace.PMLColorspacePrimaries(AColorspace);

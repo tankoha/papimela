@@ -602,6 +602,7 @@ function PMLGetColor(
 
 // ---- PaPiMeLa.Surface
 type
+  TPMLSurfaceColorProps = PaPiMeLa.Surface.TPMLSurfaceColorProps;
   IPMLSurface = PaPiMeLa.Surface.IPMLSurface;
   TPMLFlipMode = PaPiMeLa.Surface.TPMLFlipMode;
   TPMLSurface = PaPiMeLa.Surface.TPMLSurface;
@@ -634,7 +635,27 @@ procedure PMLSaveBMPFile(const APath: String; ASurface: TPMLSurface); inline;
 // ---- PaPiMeLa.Surface.Colorspace
 type
   TPMLColorspaceOptions = PaPiMeLa.Surface.Colorspace.TPMLColorspaceOptions;
+  TPMLBlitFloatParams = PaPiMeLa.Surface.Colorspace.TPMLBlitFloatParams;
 function PMLColorspaceDefaults: TPMLColorspaceOptions; inline;
+procedure PMLBlitPixelsFloat(
+  ASrc: Pointer;
+  ASrcPitch: Integer;
+  ASrcFormat: TPMLPixelFormat;
+  ASrcColorspace: TPMLColorspace;
+  ASrcPalette: TPMLPalette;
+  ASrcW, ASrcH: Integer;
+  ADst: Pointer;
+  ADstPitch: Integer;
+  ADstFormat: TPMLPixelFormat;
+  ADstColorspace: TPMLColorspace;
+  ADstPalette: TPMLPalette;
+  ADstW, ADstH: Integer;
+  const AParams: TPMLBlitFloatParams;
+  var AOptions: TPMLColorspaceOptions;
+  AFullW: Integer = 0;
+  AFullH: Integer = 0;
+  AOffX: Integer = 0;
+  AOffY: Integer = 0); inline;
 function PMLColorspacePrimaries(AColorspace: TPMLColorspace): Integer; inline;
 function PMLColorspaceTransfer(AColorspace: TPMLColorspace): Integer; inline;
 function PMLSRGBToLinear(AValue: Single): Single; inline;

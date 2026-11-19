@@ -28,7 +28,7 @@
     - ブリット（Blit / BlitScaled / FillRect / Flip の高速版）は第 11 章 #29。
       ここにある Convert は 1 画素ずつ回す素直な実装で、速度は #29 が担当する
     - RLE 圧縮（SDL_RLEaccel.c）は未実装。MustLock は常に False を返す
-    - 色空間（Colorspace）と PremultiplyAlpha は未実装
+    - PremultiplyAlpha は未実装（色空間 Colorspace と、白点・ヘッドルーム・トーンマップ ColorProps は持つ）
 
   Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
   Copyright (C) 2026 papimela contributors
@@ -49,6 +49,16 @@ uses
 
 type
   TPMLSurface = class;
+
+  { SDL の surface のプロパティ（SDR_WHITE_POINT_FLOAT、HDR_HEADROOM_FLOAT、TONEMAP_OPERATOR_STRING）。
+    浮動小数は 0 = 指定なし（色空間の既定）。Tonemap は '' = 指定なし、'chrome' / 'none' / '*=<倍率>'。
+    転送先のヘッドルームが 0 のとき、色空間つきの転送（PMLBlit / PMLBlitScaled の浮動小数の経路）は
+    転送元のヘッドルームをここへ書き込む（SDL と同じ）。 }
+  TPMLSurfaceColorProps = record
+    SDRWhitePoint: Single;
+    HDRHeadroom  : Single;
+    Tonemap      : String;
+  end;
 
   { 共有の opt-in（§8.4）。
 
@@ -82,6 +92,8 @@ type
     FAlphaMod  : Byte;
     FBlendMode : TPMLBlendMode;
     FBlendSet  : Boolean;
+    FColorspace: TPMLColorspace;
+    FColorProps: TPMLSurfaceColorProps;
     FLockCount : Integer;
     // 共有（CreateShared）で生成したときだけ 0 以上になる。-1 = 共有しない。
     FRefCount  : LongInt;
@@ -155,6 +167,10 @@ type
     // BlendMode を一度でも書いたか。SDL は alpha のある形式の既定をブレンドにするが、papimela の既定は None
     // （ブリットの既定を変えないため）。テクスチャを作るとき、書かれていなければ alpha の有無で決める。
     property BlendModeAssigned: Boolean read FBlendSet;
+    { 色空間。作ったときは形式の既定（PMLDefaultColorspace）。色空間が違う、または 5 バイト以上の形式への
+      転送は、色空間つきの浮動小数の経路を通る（PMLBlit / PMLBlitScaled）。 }
+    property Colorspace: TPMLColorspace read FColorspace write FColorspace;
+    property ColorProps: TPMLSurfaceColorProps read FColorProps write FColorProps;
     property MustLock : Boolean read GetMustLock;
   end;
 
@@ -203,6 +219,7 @@ begin
   FClipRect := TPMLRect.Make(0, 0, FWidth, FHeight);
   FColorMod := TPMLColor.White;
   FAlphaMod := 255;
+  FColorspace := PMLDefaultColorspace(AFormat);
   FRefCount := -1;
 end;
 
@@ -228,6 +245,7 @@ begin
   FClipRect := TPMLRect.Make(0, 0, FWidth, FHeight);
   FColorMod := TPMLColor.White;
   FAlphaMod := 255;
+  FColorspace := PMLDefaultColorspace(AFormat);
   FRefCount := -1;
 end;
 
@@ -448,6 +466,8 @@ begin
   Result.FAlphaMod := FAlphaMod;
   Result.FBlendMode := FBlendMode;
   Result.FBlendSet := FBlendSet;
+  Result.FColorspace := FColorspace;
+  Result.FColorProps := FColorProps;
   if FPalette <> nil then
     Result.SetPalette(FPalette, False);
 end;

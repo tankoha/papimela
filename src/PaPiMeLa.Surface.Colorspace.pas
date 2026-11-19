@@ -2,7 +2,7 @@
   PaPiMeLa.Surface.Colorspace — 色空間の変換（転送関数・原色・トーンマップ）つきの画素の変換
 
   Origin : partially ported from SDL (src/video/SDL_blit_slow.c, src/video/SDL_pixels.c, src/video/SDL_surface.c)
-           Scope: SDL_Blit_Slow_Float の 1:1 の経路（ReadFloatPixel / WriteFloatPixel、トーンマップ、
+           Scope: SDL_Blit_Slow_Float（拡大・縮小、ブレンド、変調を含む。ReadFloatPixel / WriteFloatPixel、トーンマップ、
            原色の変換）、SDL_Blit_Slow の 8 ビット成分の読み書きの規則（色空間が同じとき）、転送関数
            （SDL_sRGBtoLinear など）、原色の変換行列（SDL_GetColorPrimariesConversionMatrix）、
            SDR の白点と HDR のヘッドルームの既定。
@@ -18,8 +18,10 @@
     ふつうの形式へ直す（SDL_ConvertPixels_YUV_to_RGB の後半）。その後半がこのユニット。
 
   RESOLVED:
-    - 1:1 の変換だけ（SDL_Blit_Slow_Float の拡大・縮小、ブレンド、変調、カラーキーは写さない）。
-      SDL_ConvertPixelsAndColorspace が呼ぶ経路がこれ
+    - 1:1 の変換（PMLConvertPixelsAndColorspace）。SDL_ConvertPixelsAndColorspace が呼ぶ経路がこれ
+    - 色空間つきの転送 PMLBlitPixelsFloat（SDL_Blit_Slow_Float）: 拡大・縮小（16.16 の固定小数点の
+      標本点。切られた矩形は切られる前の矩形で決める）、トーンマップ、原色の変換、変調、ブレンド 4 種、
+      インデックス形式の出力（sRGB へ符号化して最も近いパレットの色）。カラーキーは SDL と同じく何もしない
     - 色空間が同じで、どちらの形式も 4 バイト以下のときは、SDL は浮動小数でなく整数のブリット
       （SDL_Blit_N、SDL_Blit_Slow）を使う。ここでは 8 ビットの成分で読み書きする
       （10 ビットは SDL_Blit_Slow と同じ 8 ビット成分への落とし方・戻し方）
@@ -35,7 +37,7 @@
     （glibc の powf と最後の 1 ビットが違うことがある）。
 
   NOT RESOLVED:
-    - 拡大・縮小、ブレンド、変調、カラーキー、インデックス形式の出力（SDL_Blit_Slow_Float の残り）
+    - SDL_Blit_Slow の 8 ビット成分の経路（色空間が同じで 4 バイト以下）の拡大・縮小、ブレンド、変調
     - YUV は PaPiMeLa.Surface.YUV の仕事（この関数は断る）
 
   Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
@@ -67,6 +69,31 @@ type
 
 // 指定なしの TPMLColorspaceOptions。
 function PMLColorspaceDefaults: TPMLColorspaceOptions;
+
+type
+  { 色空間つきの転送のうち、サーフェスの持ち物（ブレンドモードと色の変調）。SDL の SDL_BlitInfo の flags と r g b a。 }
+  TPMLBlitFloatParams = record
+    BlendMode: TPMLBlendMode;
+    ModR, ModG, ModB, ModA: Byte;   // 255 = 変調なし
+  end;
+
+{ 色空間つきの転送（SDL_Blit_Slow_Float）。矩形の画素を ASrcW x ASrcH から ADstW x ADstH へ、最近傍で写す。
+
+  1 画素ごとに: 読む（ReadFloatPixel）→ トーンマップ → 原色の変換 → 変調 → ブレンド → 書く（WriteFloatPixel。
+  転送先がインデックスなら sRGB へ符号化して最も近いパレットの色の番号を書く）。カラーキーは何もしない（SDL と同じ）。
+  AFullW / AFullH / AOffX / AOffY: 転送先の矩形が端で切られたとき（PMLBlitScaled）の指定。AFullW x AFullH が切られる前の
+  転送先の矩形の大きさ、AOffX / AOffY が書く範囲（ADstW x ADstH）の左上のその中での位置。標本点は切られる前の矩形で決める
+  （0 = 切られていない。AFullW = AFullH = 0 なら ADstW x ADstH）。
+  AOptions: SrcWhitePoint / SrcHeadroom / Tonemap は転送元、DstWhitePoint / DstHeadroom は転送先。
+  DstHeadroom が 0（指定なし）なら SrcHeadroom を書き戻す（SDL は転送先のプロパティへ書く）。
+  ASrc / ADst は矩形の左上の画素の位置（ピッチは行の間隔）。 }
+procedure PMLBlitPixelsFloat(
+  ASrc: Pointer; ASrcPitch: Integer; ASrcFormat: TPMLPixelFormat; ASrcColorspace: TPMLColorspace;
+  ASrcPalette: TPMLPalette; ASrcW, ASrcH: Integer;
+  ADst: Pointer; ADstPitch: Integer; ADstFormat: TPMLPixelFormat; ADstColorspace: TPMLColorspace;
+  ADstPalette: TPMLPalette; ADstW, ADstH: Integer;
+  const AParams: TPMLBlitFloatParams; var AOptions: TPMLColorspaceOptions;
+  AFullW: Integer = 0; AFullH: Integer = 0; AOffX: Integer = 0; AOffY: Integer = 0);
 
 // 色空間の値から取り出す（SDL_COLORSPACEPRIMARIES / SDL_COLORSPACETRANSFER と同じ）。
 function PMLColorspacePrimaries(AColorspace: TPMLColorspace): Integer; inline;
@@ -720,6 +747,54 @@ end;
 type
   TTonemapOp = (None, Linear, Chrome);
 
+{ トーンマップと原色の変換の準備（SDL_Blit_Slow_Float の前半）。転送元のヘッドルームが転送先より大きいときだけ
+  トーンマップを使い、chrome なら BT.2020 の原色で行うので、その分 ASrcPrimaries を BT.2020 へ進める。 }
+procedure PrepareTonemap(const AOptions: TPMLColorspaceOptions; ASrcHeadroom, ADstHeadroom: Single;
+  var ASrcPrimaries: Integer; ADstPrimaries: Integer;
+  out AOp: TTonemapOp; out AScale, AA, AB: Single; out ATonemapMatrix, APrimariesMatrix: PSingle);
+var
+  Name: String;
+  FS: TFormatSettings;
+begin
+  AOp := TTonemapOp.None;
+  AScale := 1.0;
+  AA := 0;
+  AB := 0;
+  ATonemapMatrix := nil;
+  if ASrcHeadroom > ADstHeadroom then
+  begin
+    if AOptions.Tonemap <> '' then
+    begin
+      Name := AOptions.Tonemap;
+      if Copy(Name, 1, 2) = '*=' then
+      begin
+        AOp := TTonemapOp.Linear;
+        FS := DefaultFormatSettings;
+        FS.DecimalSeparator := '.';
+        AScale := Single(StrToFloatDef(Copy(Name, 3, MaxInt), 0.0, FS));
+      end
+      else if SameText(Name, 'chrome') then
+        AOp := TTonemapOp.Chrome
+      else if SameText(Name, 'none') then
+        AOp := TTonemapOp.None;
+    end
+    else
+      AOp := TTonemapOp.Chrome;
+    if AOp = TTonemapOp.Chrome then
+    begin
+      AA := ADstHeadroom / (ASrcHeadroom * ASrcHeadroom);
+      AB := One / ADstHeadroom;
+      // トーンマップは BT.2020 の原色で行う
+      ATonemapMatrix := PMLColorPrimariesMatrix(ASrcPrimaries, PRIMARIES_BT2020);
+      if ATonemapMatrix <> nil then
+        ASrcPrimaries := PRIMARIES_BT2020;
+    end;
+  end;
+  APrimariesMatrix := nil;
+  if ASrcPrimaries <> ADstPrimaries then
+    APrimariesMatrix := PMLColorPrimariesMatrix(ASrcPrimaries, ADstPrimaries);
+end;
+
 { 線形にして白点で割る（SDL の ReadFloatPixel の後半）。 }
 procedure ToLinear(ATransfer: Integer; AWhitePoint: Single; var AR, AG, AB: Single);
 begin
@@ -793,8 +868,6 @@ var
   TmMatrix, PrimMatrix: PSingle;
   SPrim, DPrim, STransfer, DTransfer: Integer;
   R, G, B, A, VMax, Scale: Single;
-  Name: String;
-  FS: TFormatSettings;
 begin
   CheckFormat(ASrcFormat);
   CheckFormat(ADstFormat);
@@ -839,43 +912,7 @@ begin
   if DHead = 0 then
     DHead := SHead;
 
-  Op := TTonemapOp.None;
-  TmScale := 1.0;
-  TmA := 0;
-  TmB := 0;
-  TmMatrix := nil;
-  if SHead > DHead then
-  begin
-    if AOptions.Tonemap <> '' then
-    begin
-      Name := AOptions.Tonemap;
-      if Copy(Name, 1, 2) = '*=' then
-      begin
-        Op := TTonemapOp.Linear;
-        FS := DefaultFormatSettings;
-        FS.DecimalSeparator := '.';
-        TmScale := Single(StrToFloatDef(Copy(Name, 3, MaxInt), 0.0, FS));
-      end
-      else if SameText(Name, 'chrome') then
-        Op := TTonemapOp.Chrome
-      else if SameText(Name, 'none') then
-        Op := TTonemapOp.None;
-    end
-    else
-      Op := TTonemapOp.Chrome;
-    if Op = TTonemapOp.Chrome then
-    begin
-      TmA := DHead / (SHead * SHead);
-      TmB := One / DHead;
-      // トーンマップは BT.2020 の原色で行う
-      TmMatrix := PMLColorPrimariesMatrix(SPrim, PRIMARIES_BT2020);
-      if TmMatrix <> nil then
-        SPrim := PRIMARIES_BT2020;
-    end;
-  end;
-  PrimMatrix := nil;
-  if SPrim <> DPrim then
-    PrimMatrix := PMLColorPrimariesMatrix(SPrim, DPrim);
+  PrepareTonemap(AOptions, SHead, DHead, SPrim, DPrim, Op, TmScale, TmA, TmB, TmMatrix, PrimMatrix);
 
   for Y := 0 to AHeight - 1 do
   begin
@@ -913,6 +950,221 @@ begin
       FromLinear(DTransfer, DWhite, R, G, B);
       WriteRaw(D, DAccess, ADstFormat, DD, R, G, B, A);
       Inc(S, SBytes);
+      Inc(D, DBytes);
+    end;
+  end;
+end;
+
+
+{ ---- 色空間つきの転送 ---- }
+
+{ SDL の ReadFloatPixel（読む → 線形にする）。INDEX8 だけはパレットから読む（アルファも）。 }
+procedure ReadFloatPixel(APixels: PByte; AIndex8: Boolean; AAccess: TAccess; AFormat: TPMLPixelFormat;
+  const ADetails: TPMLPixelFormatDetails; APalette: TPMLPalette; ATransfer: Integer; AWhitePoint: Single;
+  out AR, AG, AB, AA: Single);
+var
+  R8, G8, B8, A8: Byte;
+begin
+  if AIndex8 then
+  begin
+    PMLGetRGBA(APixels^, ADetails, APalette, R8, G8, B8, A8);
+    AR := Single(R8) / C255;
+    AG := Single(G8) / C255;
+    AB := Single(B8) / C255;
+    AA := Single(A8) / C255;
+  end
+  else
+    ReadRaw(APixels, AAccess, AFormat, ADetails, AR, AG, AB, AA);
+  ToLinear(ATransfer, AWhitePoint, AR, AG, AB);
+end;
+
+// PORT-NOTE: SDL_Blit_Slow_Float。カラーキーは SDL と同じく何もしない。SDL の last_pixel のキャッシュは
+// 速度だけの工夫なので写さない（毎回 PMLMapRGBA で最も近いパレットの色を引く。結果は同じ）。
+// SDL_COPY_MODULATE_COLOR / ALPHA は変調が 255 でないときだけ立つので、同じ条件で変調する。
+procedure PMLBlitPixelsFloat(
+  ASrc: Pointer; ASrcPitch: Integer; ASrcFormat: TPMLPixelFormat; ASrcColorspace: TPMLColorspace;
+  ASrcPalette: TPMLPalette; ASrcW, ASrcH: Integer;
+  ADst: Pointer; ADstPitch: Integer; ADstFormat: TPMLPixelFormat; ADstColorspace: TPMLColorspace;
+  ADstPalette: TPMLPalette; ADstW, ADstH: Integer;
+  const AParams: TPMLBlitFloatParams; var AOptions: TPMLColorspaceOptions;
+  AFullW, AFullH, AOffX, AOffY: Integer);
+var
+  SCS, DCS: TPMLColorspace;
+  SD, DD: TPMLPixelFormatDetails;
+  SAccess, DAccess: TAccess;
+  SIndex, DIndex: Boolean;
+  SBytes, DBytes, Y, X: Integer;
+  S, D: PByte;
+  SWhite, DWhite, SHead, DHead: Single;
+  Op: TTonemapOp;
+  TmScale, TmA, TmB: Single;
+  TmMatrix, PrimMatrix: PSingle;
+  SPrim, DPrim, STransfer, DTransfer: Integer;
+  SR, SG, SB, SA, DR, DG, DB, DA, VMax, Scale: Single;
+  IncX, IncY, PosX, PosY, SrcX, SrcY: QWord;
+  FullW, FullH: Integer;
+  ModColor, ModAlpha: Boolean;
+  Blend: TPMLBlendMode;
+  R8, G8, B8, A8: Byte;
+begin
+  if (ASrcW <= 0) or (ASrcH <= 0) or (ADstW <= 0) or (ADstH <= 0) then
+    Exit;
+  SCS := ASrcColorspace;
+  if SCS = PML_COLORSPACE_UNKNOWN then
+    SCS := PMLDefaultColorspace(ASrcFormat);
+  DCS := ADstColorspace;
+  if DCS = PML_COLORSPACE_UNKNOWN then
+    DCS := PMLDefaultColorspace(ADstFormat);
+  PMLGetPixelFormatDetails(ASrcFormat, SD);
+  PMLGetPixelFormatDetails(ADstFormat, DD);
+  SAccess := AccessOf(ASrcFormat);
+  DAccess := AccessOf(ADstFormat);
+  SIndex := ASrcFormat = PML_PIXELFORMAT_INDEX8;
+  DIndex := ADstFormat = PML_PIXELFORMAT_INDEX8;
+  SBytes := PMLBytesPerPixel(ASrcFormat);
+  DBytes := PMLBytesPerPixel(ADstFormat);
+  SPrim := PMLColorspacePrimaries(SCS);
+  DPrim := PMLColorspacePrimaries(DCS);
+  STransfer := PMLColorspaceTransfer(SCS);
+  DTransfer := PMLColorspaceTransfer(DCS);
+  SWhite := EffectiveWhitePoint(SCS, AOptions.SrcWhitePoint);
+  DWhite := EffectiveWhitePoint(DCS, AOptions.DstWhitePoint);
+  SHead := EffectiveHeadroom(SCS, AOptions.SrcHeadroom);
+  DHead := EffectiveHeadroom(DCS, AOptions.DstHeadroom);
+  if DHead = 0 then
+  begin
+    // 転送先の頭上の余裕は転送元と同じになる（SDL は転送先のプロパティへ書く）
+    DHead := SHead;
+    AOptions.DstHeadroom := DHead;
+  end;
+
+  PrepareTonemap(AOptions, SHead, DHead, SPrim, DPrim, Op, TmScale, TmA, TmB, TmMatrix, PrimMatrix);
+
+  Blend := AParams.BlendMode;
+  ModColor := (AParams.ModR <> 255) or (AParams.ModG <> 255) or (AParams.ModB <> 255);
+  ModAlpha := AParams.ModA <> 255;
+
+  // 拡大縮小の標本点は 16.16 の固定小数点。切られる前の矩形で決める
+  FullW := AFullW;
+  FullH := AFullH;
+  if FullW <= 0 then
+    FullW := ADstW;
+  if FullH <= 0 then
+    FullH := ADstH;
+  IncX := (QWord(ASrcW) shl 16) div QWord(FullW);
+  IncY := (QWord(ASrcH) shl 16) div QWord(FullH);
+
+  for Y := 0 to ADstH - 1 do
+  begin
+    PosY := IncY div 2 + QWord(AOffY + Y) * IncY;
+    SrcY := PosY shr 16;
+    D := PByte(ADst) + PtrInt(Y) * ADstPitch;
+    for X := 0 to ADstW - 1 do
+    begin
+      PosX := IncX div 2 + QWord(AOffX + X) * IncX;
+      SrcX := PosX shr 16;
+      S := PByte(ASrc) + PtrInt(SrcY) * ASrcPitch + PtrInt(SrcX) * SBytes;
+
+      ReadFloatPixel(S, SIndex, SAccess, ASrcFormat, SD, ASrcPalette, STransfer, SWhite, SR, SG, SB, SA);
+
+      case Op of
+        TTonemapOp.Linear:
+          begin
+            SR := SR * TmScale;
+            SG := SG * TmScale;
+            SB := SB * TmScale;
+          end;
+        TTonemapOp.Chrome:
+          begin
+            if TmMatrix <> nil then
+              ConvertColorPrimaries(SR, SG, SB, TmMatrix);
+            VMax := SR;
+            if SG > VMax then VMax := SG;
+            if SB > VMax then VMax := SB;
+            if VMax > 0 then
+            begin
+              Scale := (One + TmA * VMax) / (One + TmB * VMax);
+              SR := SR * Scale;
+              SG := SG * Scale;
+              SB := SB * Scale;
+            end;
+          end;
+      end;
+      if PrimMatrix <> nil then
+        ConvertColorPrimaries(SR, SG, SB, PrimMatrix);
+
+      // カラーキーは SDL と同じく何もしない
+      if Blend <> TPMLBlendMode.None then
+        ReadFloatPixel(D, DIndex, DAccess, ADstFormat, DD, ADstPalette, DTransfer, DWhite, DR, DG, DB, DA)
+      else
+      begin
+        DR := 0; DG := 0; DB := 0; DA := 0;
+      end;
+
+      if ModColor then
+      begin
+        SR := (SR * Single(AParams.ModR)) / C255;
+        SG := (SG * Single(AParams.ModG)) / C255;
+        SB := (SB * Single(AParams.ModB)) / C255;
+      end;
+      if ModAlpha then
+        SA := (SA * Single(AParams.ModA)) / C255;
+      if (Blend = TPMLBlendMode.Blend) or (Blend = TPMLBlendMode.Add) then
+        if SA < 1.0 then
+        begin
+          SR := SR * SA;
+          SG := SG * SA;
+          SB := SB * SA;
+        end;
+
+      case Blend of
+        TPMLBlendMode.Blend:
+          begin
+            DR := SR + ((One - SA) * DR);
+            DG := SG + ((One - SA) * DG);
+            DB := SB + ((One - SA) * DB);
+            DA := SA + ((One - SA) * DA);
+          end;
+        TPMLBlendMode.Add:
+          begin
+            DR := SR + DR;
+            DG := SG + DG;
+            DB := SB + DB;
+          end;
+        TPMLBlendMode.Modulate:
+          begin
+            DR := SR * DR;
+            DG := SG * DG;
+            DB := SB * DB;
+          end;
+        TPMLBlendMode.Multiply:
+          begin
+            DR := (SR * DR) + (DR * (One - SA));
+            DG := (SG * DG) + (DG * (One - SA));
+            DB := (SB * DB) + (DB * (One - SA));
+          end;
+      else
+        begin
+          DR := SR;
+          DG := SG;
+          DB := SB;
+          DA := SA;
+        end;
+      end;
+
+      if DIndex then
+      begin
+        R8 := Byte(RoundF(Clamp01(PMLSRGBFromLinear(DR)) * C255));
+        G8 := Byte(RoundF(Clamp01(PMLSRGBFromLinear(DG)) * C255));
+        B8 := Byte(RoundF(Clamp01(PMLSRGBFromLinear(DB)) * C255));
+        A8 := Byte(RoundF(Clamp01(DA) * C255));
+        D^ := Byte(PMLMapRGBA(DD, ADstPalette, R8, G8, B8, A8));
+      end
+      else
+      begin
+        FromLinear(DTransfer, DWhite, DR, DG, DB);
+        WriteRaw(D, DAccess, ADstFormat, DD, DR, DG, DB, DA);
+      end;
       Inc(D, DBytes);
     end;
   end;
