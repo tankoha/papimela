@@ -1,6 +1,6 @@
 # 引き継ぎ資料
 
-新しいセッションは、`CLAUDE.md` の次にこれを読む。最終更新: 2026-11-09（Raspberry Pi 5 の端末で、タブレット/ペン #66 を実装した後）。
+新しいセッションは、`CLAUDE.md` の次にこれを読む。最終更新: 2026-11-20（Raspberry Pi 5 の端末で、Moza R3 の実機で Haptic の FF を確かめた後。T-90）。
 
 > **2026-11-06（Radeon の機械）: タブレット/ペン（#66）の公開 API・骨組み・偽の機器の検査を、実機が届く前に書いた。実装は 2026-11-09 に済んだ（上）。**
 > - 公開層: `PaPiMeLa.Events` にペンのイベント 8 種・型・窓口 `Ctx.Events.Pen`（中身は `PaPiMeLa.Events.Pen`。移植、メソッドは空）、ヒント `PAPIMELA_PEN_MOUSE_EVENTS` / `PAPIMELA_PEN_TOUCH_EVENTS`（既定 1。ペンからマウスとタッチを合成するのは SDL どおり）。マウスの送る関数に MouseID、タッチに圧力を、省略できる引数で足した
@@ -86,7 +86,7 @@
 >   3. 結果は `docs/TEST-LOG.md` の T-21 / T-22 / T-84 と、`spikes/RESULTS.md` のスパイク 7（Radeon の分を追記）へ。Radeon で検査が落ちたら、帯の見直しか原因の調査かを決めて `docs/DEFECTS.md` に載せる。
 >   4. その後の次の候補は、IME の残り（§3）、Vulkan の残り、GNOME での libdecor と tablet の確認。
 > **再開時の最初にやること（2026-10-25 時点。上の VSync の項が新しい）**:
->   1. FF を持つ機器がつながったら、`Ctx.Haptics`（一覧・`Open`・`InitRumble` / `PlayRumble`）とジョイスティック経由の `OpenFromJoystick` で実機の力覚を確かめ、TEST-LOG に書く（今の GameSir-K1 は FF が無い）。偽物の検査が見られない所: 実機の `EVIOCGEFFECTS` の値、`FF_GAIN` / `FF_AUTOCENTER` の write の受け入れ、効果のアップロードの受け入れ。
+>   1. **FF の実機は 2026-11-20 に Moza R3（346e:0005）で確かめた（T-90）**。能力・効果の容量・定数力・サイン・スプリング・`StopEffects` は実機で動く。ダンパーの効きは小さく決定的でない。ペダルをつないだ入力、慣性・摩擦・のこぎり・傾斜、`InitRumble` / `PlayRumble`（R3 は LEFTRIGHT 無しなのでサインで代用）は未。元の記述: FF を持つ機器がつながったら、`Ctx.Haptics`（一覧・`Open`・`InitRumble` / `PlayRumble`）とジョイスティック経由の `OpenFromJoystick` で実機の力覚を確かめ、TEST-LOG に書く（GameSir-K1 は FF が無い）。偽物の検査が見られない所: 実機の `EVIOCGEFFECTS` の値、`FF_GAIN` / `FF_AUTOCENTER` の write の受け入れ、効果のアップロードの受け入れ。
 >   2. README の「上流の不具合」に D-84〜D-86 は載せ済み。
 >   3. 作業の木は T-80 まで commit した後、push して CI が緑かを見る。デスクトップ GL の実機（radeonsi）での T-79 は、2026-11-06 に Radeon の機械で流した（冒頭）。
 > 次の候補は §3。
