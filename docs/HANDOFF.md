@@ -86,7 +86,7 @@
 >   3. 結果は `docs/TEST-LOG.md` の T-21 / T-22 / T-84 と、`spikes/RESULTS.md` のスパイク 7（Radeon の分を追記）へ。Radeon で検査が落ちたら、帯の見直しか原因の調査かを決めて `docs/DEFECTS.md` に載せる。
 >   4. その後の次の候補は、IME の残り（§3）、Vulkan の残り、GNOME での libdecor と tablet の確認。
 > **再開時の最初にやること（2026-10-25 時点。上の VSync の項が新しい）**:
->   1. **FF の実機は 2026-11-20 に Moza R3（346e:0005）で確かめた（T-90）**。能力・効果の容量・定数力・サイン・スプリング・`StopEffects` は実機で動く。ダンパーの効きは小さく決定的でない。ペダルをつないだ入力、慣性・摩擦・のこぎり・傾斜、`InitRumble` / `PlayRumble`（R3 は LEFTRIGHT 無しなのでサインで代用）は未。元の記述: FF を持つ機器がつながったら、`Ctx.Haptics`（一覧・`Open`・`InitRumble` / `PlayRumble`）とジョイスティック経由の `OpenFromJoystick` で実機の力覚を確かめ、TEST-LOG に書く（GameSir-K1 は FF が無い）。偽物の検査が見られない所: 実機の `EVIOCGEFFECTS` の値、`FF_GAIN` / `FF_AUTOCENTER` の write の受け入れ、効果のアップロードの受け入れ。
+>   1. **FF の実機は 2026-11-20 に Moza R3（346e:0005）で確かめた（T-90）**。能力・効果の容量・定数力・サイン・スプリング・`StopEffects` は実機で動く。ダンパーの効きは小さく決定的でない。ペダルの入力は同日に確認した（アクセル = 軸 2、ブレーキ = 軸 5）。慣性・摩擦・のこぎり・傾斜、`InitRumble` / `PlayRumble`（R3 は LEFTRIGHT 無しなのでサインで代用）は未。元の記述: FF を持つ機器がつながったら、`Ctx.Haptics`（一覧・`Open`・`InitRumble` / `PlayRumble`）とジョイスティック経由の `OpenFromJoystick` で実機の力覚を確かめ、TEST-LOG に書く（GameSir-K1 は FF が無い）。偽物の検査が見られない所: 実機の `EVIOCGEFFECTS` の値、`FF_GAIN` / `FF_AUTOCENTER` の write の受け入れ、効果のアップロードの受け入れ。
 >   2. README の「上流の不具合」に D-84〜D-86 は載せ済み。
 >   3. 作業の木は T-80 まで commit した後、push して CI が緑かを見る。デスクトップ GL の実機（radeonsi）での T-79 は、2026-11-06 に Radeon の機械で流した（冒頭）。
 > 次の候補は §3。
