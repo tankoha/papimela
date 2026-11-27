@@ -95,6 +95,7 @@ type
     function  GetIsDown(AScancode: TPMLScancode): Boolean;
     procedure SendKey(AWindowID: TPMLWindowID; const AKey: TPMLKeyEventData;
       ADown: Boolean; const AText: String);
+    procedure SendForwardedKey(const AKey: TPMLKeyEventData; ADown: Boolean; const AText: String);
     procedure SendModifiers(AModifiers: TPMLKeyModifiers);
     procedure SendFocus(AWindowID: TPMLWindowID; AGained: Boolean);
     procedure SetKeymap(AKeymap: TPMLKeymap);
@@ -199,6 +200,52 @@ begin
       Ev.Key.Modifiers := FModifiers;
       FQueue.Push(Ev);
     end;
+  end;
+end;
+
+{ IME が「このキーをアプリへ渡せ」と返したキー（IBus の ForwardKeyEvent）を出す。
+
+  PORT-NOTE: SDL は ForwardKeyEvent を扱わない。GTK / Qt の IBus モジュールは、これを受けて
+  アプリへキーイベントを差し込む。papimela も同じく、IME に通さずに出す（通すとまた
+  IME が返して堂々巡りになる）。
+
+  - 物理の押下状態（FDown。IsDown が見るもの）は変えない。これは物理キーの状態
+  - リピートは KeyDown を出したか（FEmittedDown）で決める。IME が物理キーを消費したうえで
+    同じキーを返す普通の使い方では、物理の押すほうは FDown を立てるが KeyDown は出していない
+  - KeyUp は KeyDown を出したキーにだけ出す（D-47。Emit が見る。ここでは確かめない）。返ってきた離すほうで
+    離した後に物理の離すほうが来ても、二重にならない
+  - 返信待ちのキーがあれば、その後ろに並べる（順序を保つ）。返信待ちの間に IME が
+    返すのが普通なので、本物のキーの結果（消費）の後ろに出る
+  - 修飾キーの状態（FModifiers）は、物理のものを正とするので変えない }
+procedure TPMLKeyboardImpl.SendForwardedKey(const AKey: TPMLKeyEventData; ADown: Boolean;
+  const AText: String);
+var
+  Item: TPMLDeferredKey;
+begin
+  Item.Key := AKey;
+  Item.Key.IsRepeat := False;
+  if Item.Key.Scancode <> TPMLScancode.UNKNOWN then
+  begin
+    Item.Key.IsRepeat := ADown and FEmittedDown[Item.Key.Scancode];
+    if Item.Key.Key = PMLK_UNKNOWN then
+      Item.Key.Key := KeyForScancode(Item.Key.Scancode, AKey.Modifiers);
+  end;
+  Item.Ticket := FNextTicket;
+  Inc(FNextTicket);
+  if FNextTicket = 0 then
+    FNextTicket := 1;
+  Item.WindowID := FFocusedWindow;
+  Item.Down := ADown;
+  Item.Text := AText;
+  Item.SinceNS := PMLNowNS;
+  Item.Resolved := True;
+  Item.Consumed := False;
+  if FDeferred.Count = 0 then
+    Emit(Item, True)
+  else
+  begin
+    FDeferred.Add(Item);
+    Drain;
   end;
 end;
 

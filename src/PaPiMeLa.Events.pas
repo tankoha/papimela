@@ -433,6 +433,8 @@ type
     // AKey.Key が 0 なら、Scancode と今のキーマップから決める。
     procedure SendKey(AWindowID: TPMLWindowID; const AKey: TPMLKeyEventData;
       ADown: Boolean; const AText: String);
+    // IME が「このキーをアプリへ渡せ」と返したもの。IME には通さず、フォーカスのあるウィンドウへ出す。
+    procedure SendForwardedKey(const AKey: TPMLKeyEventData; ADown: Boolean; const AText: String);
     procedure SendModifiers(AModifiers: TPMLKeyModifiers);
     procedure SendFocus(AWindowID: TPMLWindowID; AGained: Boolean);
     // バックエンドが配列を読み込んだ（切り替えた）ときに呼ぶ。所有権はこちらへ移る。
@@ -1299,6 +1301,12 @@ procedure TPMLKeyboardState.SendKey(AWindowID: TPMLWindowID;
   const AKey: TPMLKeyEventData; ADown: Boolean; const AText: String);
 begin
   TPMLKeyboardImpl(FImpl).SendKey(AWindowID, AKey, ADown, AText);
+end;
+
+procedure TPMLKeyboardState.SendForwardedKey(const AKey: TPMLKeyEventData; ADown: Boolean;
+  const AText: String);
+begin
+  TPMLKeyboardImpl(FImpl).SendForwardedKey(AKey, ADown, AText);
 end;
 
 procedure TPMLKeyboardState.SendModifiers(AModifiers: TPMLKeyModifiers);

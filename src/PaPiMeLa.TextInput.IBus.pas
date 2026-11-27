@@ -44,11 +44,15 @@
       SDL は Linux では TextEditingCandidates を出さない（Windows だけ）ので、これは papimela の拡張
     - 接続が切れたら、待っているキーを素通しにして、1 秒ごとにアドレスファイルを
       読み直して繋ぎ直す（ibus-daemon の再起動に追従する）
+    - ForwardKeyEvent(u keyval, u keycode, u state)（IME が「このキーをアプリへ渡せ」と返す）は、
+      IME に通さずに押す・離すとしてアプリへ出す（Sink.KeyForwarded →
+      TPMLKeyboardState.SendForwardedKey）。state の IBUS_RELEASE_MASK で離す。印字できるキーの
+      押下は文字も出す（Ctrl・Alt・Super つきは出さない）。SDL は扱わない。GTK / Qt の IBus
+      モジュールの動き（アプリへキーイベントを差し込む）に倣った
 
   NOT RESOLVED:
-    - ForwardKeyEvent（IME がアプリへキーを渡す）は ibus-mozc では来なかったので、
-      受けたら数えて記録するだけ（ForwardedKeyCount）。キーとして出すのは来る IME を
-      見つけてから
+    - ForwardKeyEvent の信号は実際に返すエンジンで確かめていない（ibus-mozc は返さない）。
+      引数の型は ibus の定義（uint keyval, uint keycode, uint state）による
     - アドレスファイルの inotify 監視は入れていない。切れたことに気づいてから読み直す
     - ibus-anthy / ibus-skk / ibus-libpinyin の属性は未実測（§10 項目 1）
 
@@ -66,6 +70,7 @@ uses
   PaPiMeLa.Types,
   PaPiMeLa.Unicode,
   PaPiMeLa.Events,
+  PaPiMeLa.Events.Keymap,
   PaPiMeLa.Video,
   PaPiMeLa.Platform.DBus,
   PaPiMeLa.TextInput,
@@ -172,6 +177,7 @@ type
     procedure HandleMessage(AMsg: PDBusMessage);
     procedure HandleReply(AMsg: PDBusMessage);
     procedure HandleSignal(AMsg: PDBusMessage);
+    procedure HandleForwardKey(const AReader: TPMLDBusReader);
     function  GetPendingKeyCount: Integer;
   public
     constructor Create;
@@ -228,6 +234,16 @@ function PMLIBusParseAddressFile(const AContent: String; out AAddress: String;
 function PMLIBusIsFcitxEmulation(const AAddress, APidComm: String): Boolean;
 { 今の環境で使うアドレスを探す。見つからなければ空。AFile に見つけたファイル名。 }
 function PMLIBusFindAddress(out AFile: String; out AFromFcitx: Boolean): String;
+
+{ ForwardKeyEvent(u keyval, u keycode, u state) の引数を読む。AReader は最初の引数を指していること。
+  3 つとも u でなければ False。 }
+function PMLReadIBusForwardKey(const AReader: TPMLDBusReader;
+  out AKeysym, AKeycode, AState: LongWord): Boolean;
+{ ForwardKeyEvent の 3 つの値をアプリへ出すキーにする。keycode は evdev の値（X の keycode - 8。
+  ProcessKeyEvent と同じ）、state の IBUS_RELEASE_MASK（1 shl 30）が立っていれば離す。ADown は押すか。
+  AText は、押すキーが印字できて Ctrl・Alt・Super が無いときの確定文字列（UTF-8）。 }
+procedure PMLIBusForwardedKey(AKeysym, AKeycode, AState: LongWord;
+  out AKey: TPMLKeyEventData; out ADown: Boolean; out AText: String);
 
 { IBus の SetCapabilities に渡す値。FOCUS（1 shl 3）と周辺テキスト（1 shl 5）は常に。AUI に
   Composition があれば PREEDIT_TEXT（1 shl 0）も。 }
@@ -1052,6 +1068,25 @@ begin
     FLastNonFatalError := FConn.ErrorNameOf(AMsg);
 end;
 
+{ ForwardKeyEvent(u keyval, u keycode, u state)。IME に通さず、アプリへ押す・離すとして出す。 }
+procedure TPMLIBusTextInputBackend.HandleForwardKey(const AReader: TPMLDBusReader);
+var
+  Sym, Code, State: LongWord;
+  Key: TPMLKeyEventData;
+  Down: Boolean;
+  Text: String;
+begin
+  Inc(FForwarded);
+  if not PMLReadIBusForwardKey(AReader, Sym, Code, State) then
+  begin
+    FLastNonFatalError := 'ForwardKeyEvent: 引数が読めない';
+    Exit;
+  end;
+  PMLIBusForwardedKey(Sym, Code, State, Key, Down, Text);
+  if Assigned(FSink) then
+    FSink.KeyForwarded(Key, Down, Text);
+end;
+
 procedure TPMLIBusTextInputBackend.HandleSignal(AMsg: PDBusMessage);
 var
   Member: String;
@@ -1135,7 +1170,7 @@ begin
       FSink.SurroundingTextRequested;
   end
   else if Member = 'ForwardKeyEvent' then
-    Inc(FForwarded);
+    HandleForwardKey(R);
 end;
 
 procedure TPMLIBusTextInputBackend.HandleMessage(AMsg: PDBusMessage);
@@ -1223,6 +1258,66 @@ begin
   until False;
   if not FConn.IsConnected then
     ConnectionLost;
+end;
+
+function PMLReadIBusForwardKey(const AReader: TPMLDBusReader;
+  out AKeysym, AKeycode, AState: LongWord): Boolean;
+var
+  R: TPMLDBusReader;
+begin
+  AKeysym := 0;
+  AKeycode := 0;
+  AState := 0;
+  Result := False;
+  R := AReader;
+  if R.ArgType <> DBUS_TYPE_UINT32 then
+    Exit;
+  AKeysym := R.AsUInt32;
+  if not R.Next or (R.ArgType <> DBUS_TYPE_UINT32) then
+    Exit;
+  AKeycode := R.AsUInt32;
+  if not R.Next or (R.ArgType <> DBUS_TYPE_UINT32) then
+    Exit;
+  AState := R.AsUInt32;
+  Result := True;
+end;
+
+{ コードポイントを UTF-8 にする（キーシムから出る文字は 1 つだけなので小さな書き方で足りる）。 }
+function CodePointToUTF8(ACode: LongWord): String;
+begin
+  if ACode < $80 then
+    Result := Chr(ACode)
+  else if ACode < $800 then
+    Result := Chr($C0 or (ACode shr 6)) + Chr($80 or (ACode and $3F))
+  else if ACode < $10000 then
+    Result := Chr($E0 or (ACode shr 12)) + Chr($80 or ((ACode shr 6) and $3F))
+      + Chr($80 or (ACode and $3F))
+  else
+    Result := Chr($F0 or (ACode shr 18)) + Chr($80 or ((ACode shr 12) and $3F))
+      + Chr($80 or ((ACode shr 6) and $3F)) + Chr($80 or (ACode and $3F));
+end;
+
+procedure PMLIBusForwardedKey(AKeysym, AKeycode, AState: LongWord;
+  out AKey: TPMLKeyEventData; out ADown: Boolean; out AText: String);
+var
+  Code: LongWord;
+begin
+  FillChar(AKey, SizeOf(AKey), 0);
+  AKey.Keysym := AKeysym;
+  AKey.Raw := AKeycode + 8;
+  AKey.Scancode := PMLScancodeFromEvdev(AKeycode);
+  AKey.Modifiers := PMLXStateToModifiers(AState);
+  ADown := (AState and IBUS_RELEASE_MASK) = 0;
+  AText := '';
+  if not ADown then
+    Exit;
+  // Ctrl・Alt・Super つきは文字にならない（ショートカット）。
+  if AKey.Modifiers * [TPMLKeyModifier.Ctrl, TPMLKeyModifier.Alt, TPMLKeyModifier.Super] <> [] then
+    Exit;
+  Code := PMLKeysymToUcs4(AKeysym);
+  // 制御文字は確定文字列にしない（Enter / Tab / Backspace など。シートと同じ）。
+  if (Code >= 32) and (Code <> 127) then
+    AText := CodePointToUTF8(Code);
 end;
 
 { ---- 登録 ---- }

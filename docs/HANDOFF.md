@@ -1,6 +1,12 @@
 # 引き継ぎ資料
 
-新しいセッションは、`CLAUDE.md` の次にこれを読む。最終更新: 2026-11-27（Raspberry Pi 5 の端末で、Moza R3 の実機で Haptic の FF の残りを確かめ、色空間つきの Convert・ALSA の udev hotplug・fcitx5 の埋め込み候補を入れた後。T-90〜T-97）。
+新しいセッションは、`CLAUDE.md` の次にこれを読む。最終更新: 2026-11-28（Raspberry Pi 5 の端末で、Moza R3 の実機で Haptic の FF の残りを確かめ、色空間つきの Convert・ALSA の udev hotplug・fcitx5 の埋め込み候補を入れた後。T-90〜T-97）。
+
+> **2026-11-28（Pi 5）: IBus の ForwardKeyEvent を入れた（T-100）。**
+> - IME が「このキーをアプリへ渡せ」と返す信号 `ForwardKeyEvent(u keyval, u keycode, u state)` を、IME に通さずに `KeyDown` / `TextInput` / `KeyUp` としてアプリへ出す（`IPMLTextInputSink.KeyForwarded` → `TPMLKeyboardState.SendForwardedKey`。state の `IBUS_RELEASE_MASK` で離す。Ctrl・Alt・Super つきは文字を出さない）。SDL は扱わない（papimela の拡張。GTK / Qt の IBus モジュールの動きに倣った）。
+> - 決めたこと: リピートは「KeyDown を出したか」（`FEmittedDown`）で決める（物理の押下状態 `FDown` は変えない）。IME が物理キーを消費して同じキーを返す普通の使い方で、返ってきた押すほうが KeyDown になり、後から来る物理の離すほうは出ない（D-47 の規則のまま）。返信待ちのキーがあれば後ろに並べる。**IME へは戻さない**（戻すと堂々巡り）。
+> - **信号そのものは実機で見ていない**: ibus-mozc は ForwardKeyEvent を返さないので CI の本物の IME の段では通らない。引数の型は ibus の定義（`uint keyval, uint keycode, uint state`）による。返すエンジン（ibus-skk など）を `tools/ibus-sandbox/` の rootfs に足して確かめるのが先。
+> - 残り: 他のエンジンの属性の実測・GNOME / KDE の IBus 直結
 
 > **2026-11-28（Pi 5）: IBus の埋め込み候補（`UpdateLookupTable` → `TextEditingCandidates`）を入れた（T-98・T-99）。**
 > - ヒント `PAPIMELA_IME_IMPLEMENTED_UI` に candidates があるときだけ、能力に `IBUS_CAP_LOOKUP_TABLE`（`1 shl 2`）を足す（`PMLIBusCapabilities`。[] = 40・[composition] = 41 は変えない）。`UpdateLookupTable(v IBusLookupTable, b visible)` の表は `(sa{sv}uubbiavav)`（**libibus 1.5.34 の出力で形を確かめた**）で、`PMLReadIBusLookupTable` が読み、`PMLIBusLookupPage` が cursor_pos のあるページを切り出す（候補が page_size 以下なら全部を 1 ページ。mozc が 1 ページ分だけ送るかどうかを確かめていないため）。追跡は fcitx5 と同じ `TPMLFcitxCandidateTracker`（IBus の単位は `uses` で借りている。共有の単位に出すかは未決）。Hide / 確定 / Reset / フォーカスを外す / 切断 / ヒントを切るで空の一覧
@@ -275,7 +281,7 @@ D-69（録音で書き換えたバイト数を次の論理デバイスへ持ち�
    - 浮動小数の変換は、範囲の外の値で SDL の SSE2 版とスカラー版の結果が割れる（D-64・D-65）。期待値の入力は範囲の中に置く
 2. 残してあるテクスチャのもの: ~~テクスチャの Lock / Unlock~~ **済んだ（2026-10-16、Pi 5 で。`TPMLTexture.Lock` / `Unlock` / `LockToSurface`、T-64）**。~~I444 / P010~~ **済んだ（2026-10-24、Pi 5 で。T-66。上の冒頭）**、I0FL / I4FL は **済んだ（2026-10-24。変換 `PMLConvertYUV16ToRGB48`、色空間の変換 `PaPiMeLa.Surface.Colorspace`、テクスチャ。T-66・T-67）**。P010 は SDL と同じくテクスチャを持たない。残りは、~~色空間の変換のうち拡大縮小・ブレンド・変調・カラーキー（`SDL_Blit_Slow_Float` の残り）~~ **済んだ（2026-11-20、Pi 5 で。`PMLBlitPixelsFloat`、T-91）**、~~サーフェスに色空間を持たせること~~ **`TPMLSurface.Colorspace` / `ColorProps` は済み（T-91）、色空間つきの Convert も済んだ（2026-11-27、T-93）**、~~サーフェスから作るときのカラーキー~~ **済んだ（2026-10-17、Pi 5 で。`CreateTextureFromSurface` が 17 形式のキー・変調・ブレンドの引き継ぎを SDL と合わせた、T-65）**、~~ソフトウェアのレンダラの Linear が
    実は Nearest（`PMLBlitScaled` が方式を使わない。SDL は補間する）~~（**2026-10-17 に持ち主が「そのまま」と決めた。直さない**）
-3. IME の残り: 埋め込み候補（~~fcitx5~~ **済んだ（2026-11-27、T-96・T-97）**。IBus の `UpdateLookupTable` は **済んだ（2026-11-28、T-98。T-99 は CI で見る）**）、IBus の ForwardKeyEvent、ibus-anthy など他のエンジンの属性の実測、GNOME / KDE での IBus 直結（§7.5 の要検証）。IBus の検査環境は `tools/ibus-sandbox/`（ibus + ibus-mozc を入れた Ubuntu 24.04 の最小 rootfs を bwrap で隔離。デスクトップの fcitx5 と混ざらない）。実測の結果は `spikes/RESULTS.md` のスパイク 3
+3. IME の残り: 埋め込み候補（~~fcitx5~~ **済んだ（2026-11-27、T-96・T-97）**。IBus の `UpdateLookupTable` は **済んだ（2026-11-28、T-98。T-99 は CI で見る）**）、~~IBus の ForwardKeyEvent~~ **済んだ（2026-11-28、T-100。信号は実機で未確認）**、ibus-anthy など他のエンジンの属性の実測、GNOME / KDE での IBus 直結（§7.5 の要検証）。IBus の検査環境は `tools/ibus-sandbox/`（ibus + ibus-mozc を入れた Ubuntu 24.04 の最小 rootfs を bwrap で隔離。デスクトップの fcitx5 と混ざらない）。実測の結果は `spikes/RESULTS.md` のスパイク 3
 
 済んだもの（2026-10-14）: **テクスチャの種類**。3b パレット（INDEX8）と 3c YUV（7 形式、色空間）。§2 の表。
 

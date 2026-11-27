@@ -98,6 +98,8 @@ function PMLParseImeImplementedUI(const AHint: String): TPMLImeUIElements;
 // 修飾キーを X11 の状態マスク（ShiftMask=1、LockMask=2、ControlMask=4、Mod1=8（Alt）、
 // Mod2=16（NumLock）、Mod4=64（Super））にする。Fcitx5 も IBus もこれで話す。
 function PMLModifiersToXState(const AMods: TPMLKeyModifiers): LongWord;
+// PMLModifiersToXState の逆。IBus の ForwardKeyEvent の state（IBUS_RELEASE_MASK など上位の印は無視）から。
+function PMLXStateToModifiers(AState: LongWord): TPMLKeyModifiers;
 
 // IME の「カーソルから AOffset 文字の位置から ACount 文字を消す」を、papimela の
 // 「カーソルの前後を消す」（バイト数と文字数）に直す。AText は最後に IME へ送った
@@ -140,6 +142,17 @@ begin
   if TPMLKeyModifier.Alt      in AMods then Result := Result or (1 shl 3);
   if TPMLKeyModifier.NumLock  in AMods then Result := Result or (1 shl 4);
   if TPMLKeyModifier.Super    in AMods then Result := Result or (1 shl 6);
+end;
+
+function PMLXStateToModifiers(AState: LongWord): TPMLKeyModifiers;
+begin
+  Result := [];
+  if (AState and (1 shl 0)) <> 0 then Include(Result, TPMLKeyModifier.Shift);
+  if (AState and (1 shl 1)) <> 0 then Include(Result, TPMLKeyModifier.CapsLock);
+  if (AState and (1 shl 2)) <> 0 then Include(Result, TPMLKeyModifier.Ctrl);
+  if (AState and (1 shl 3)) <> 0 then Include(Result, TPMLKeyModifier.Alt);
+  if (AState and (1 shl 4)) <> 0 then Include(Result, TPMLKeyModifier.NumLock);
+  if (AState and (1 shl 6)) <> 0 then Include(Result, TPMLKeyModifier.Super);
 end;
 
 function PMLDeleteSurroundingFromChars(const AText: String;

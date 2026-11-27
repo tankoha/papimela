@@ -83,6 +83,9 @@ type
     procedure BackendLost(const AReason: String);
     // FilterKey で Deferred を返したキーの結果（ATicket は FilterKey に渡した番号）。
     procedure KeyResolved(ATicket: LongWord; AConsumed: Boolean);
+    // IME が「このキーをアプリへ渡せ」と返した（IBus の ForwardKeyEvent）。IME には通さずに、
+    // 押す・離すのどちらかとして出す。AText は印字できるキーを押したときの確定文字列（無ければ空）。
+    procedure KeyForwarded(const AKey: TPMLKeyEventData; ADown: Boolean; const AText: String);
     // IME が周辺テキストを求めた。アプリから取り直して UpdateSurroundingText で送る。
     procedure SurroundingTextRequested;
   end;
@@ -196,6 +199,7 @@ type
       ASelected: Integer; AHorizontal: Boolean);
     procedure BackendLost(const AReason: String);
     procedure KeyResolved(ATicket: LongWord; AConsumed: Boolean);
+    procedure KeyForwarded(const AKey: TPMLKeyEventData; ADown: Boolean; const AText: String);
     procedure SurroundingTextRequested;
 
     property BackendName: String read FSelectedName;
@@ -560,6 +564,13 @@ procedure TPMLTextInputSystem.KeyResolved(ATicket: LongWord; AConsumed: Boolean)
 begin
   if Assigned(FQueue.Keyboard) then
     FQueue.Keyboard.ResolveKey(ATicket, AConsumed);
+end;
+
+procedure TPMLTextInputSystem.KeyForwarded(const AKey: TPMLKeyEventData; ADown: Boolean;
+  const AText: String);
+begin
+  if Assigned(FQueue.Keyboard) then
+    FQueue.Keyboard.SendForwardedKey(AKey, ADown, AText);
 end;
 
 procedure TPMLTextInputSystem.BackendLost(const AReason: String);

@@ -48,6 +48,7 @@ type
       ASelected: Integer; AHorizontal: Boolean);
     procedure BackendLost(const AReason: String);
     procedure KeyResolved(ATicket: LongWord; AConsumed: Boolean);
+    procedure KeyForwarded(const AKey: TPMLKeyEventData; ADown: Boolean; const AText: String);
     procedure SurroundingTextRequested;
   end;
 
@@ -146,6 +147,12 @@ end;
 function TEditor.GetCursorRect: TPMLRect;
 begin
   Result := TPMLRect.Make(0, 0, 2, 18);
+end;
+
+procedure TRecordingSink.KeyForwarded(const AKey: TPMLKeyEventData; ADown: Boolean;
+  const AText: String);
+begin
+  Log := Log + 'F';
 end;
 
 procedure TRecordingSink.SurroundingTextRequested;
