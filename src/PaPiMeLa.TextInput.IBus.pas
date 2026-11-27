@@ -34,6 +34,14 @@
     - 能力（SetCapabilities）は FOCUS と SURROUNDING_TEXT に、ヒント PAPIMELA_IME_IMPLEMENTED_UI が
       composition（置かれていなければこれ）なら PREEDIT_TEXT を足したもの。既定は 41。ヒントが
       変わったら次の Pump で送り直す（ヒントはどのスレッドからも変えられるため）
+    - 埋め込み候補: 能力 IBUS_CAP_LOOKUP_TABLE（1 shl 2）を、ヒント PAPIMELA_IME_IMPLEMENTED_UI に
+      candidates があるときだけ足す。UpdateLookupTable(v IBusLookupTable, b visible) の表
+      (s a{sv} u page_size, u cursor_pos, b cursor_visible, b round, i orientation, av candidates, av labels。
+      libibus 1.5.34 の出力で形を確かめた）から、cursor_pos のあるページを切り出して、変わったときだけ
+      CandidatesChanged にする（PaPiMeLa.TextInput.Fcitx の TPMLFcitxCandidateTracker を使い回す）。
+      候補が page_size 以下なら全部を 1 ページとして扱う。orientation は 0（横）だけ横。
+      HideLookupTable・確定・Reset・フォーカスを外す・切断・ヒントを切るで空の一覧を出す。
+      SDL は Linux では TextEditingCandidates を出さない（Windows だけ）ので、これは papimela の拡張
     - 接続が切れたら、待っているキーを素通しにして、1 秒ごとにアドレスファイルを
       読み直して繋ぎ直す（ibus-daemon の再起動に追従する）
 
@@ -41,7 +49,6 @@
     - ForwardKeyEvent（IME がアプリへキーを渡す）は ibus-mozc では来なかったので、
       受けたら数えて記録するだけ（ForwardedKeyCount）。キーとして出すのは来る IME を
       見つけてから
-    - 埋め込み候補（UpdateLookupTable → TextEditingCandidates）は未実装（fcitx5 は済んだ。PaPiMeLa.TextInput.Fcitx の TPMLFcitxCandidateTracker を使い回せる）
     - アドレスファイルの inotify 監視は入れていない。切れたことに気づいてから読み直す
     - ibus-anthy / ibus-skk / ibus-libpinyin の属性は未実測（§10 項目 1）
 
@@ -62,7 +69,8 @@ uses
   PaPiMeLa.Video,
   PaPiMeLa.Platform.DBus,
   PaPiMeLa.TextInput,
-  PaPiMeLa.TextInput.Backend;
+  PaPiMeLa.TextInput.Backend,
+  PaPiMeLa.TextInput.Fcitx;   // 候補の追跡（TPMLFcitxCandidateTracker）を使い回す
 
 const
   // ibusattribute.h
@@ -114,6 +122,16 @@ type
     class function Build(const AText: TPMLIBusText; ACursorChar: Integer): TPMLComposition; static;
   end;
 
+  { IBusLookupTable（候補の表。UpdateLookupTable の第 1 引数）。形は
+  (s a{sv} u page_size, u cursor_pos, b cursor_visible, b round, i orientation, av candidates, av labels)
+  （libibus 1.5.34 の出力で確かめた）。候補は文字列だけ取り、属性とラベルは使わない。 }
+  TPMLIBusLookupTable = record
+    PageSize, CursorPos: LongWord;   // cursor_pos は全候補の中の番号
+    CursorVisible, Round: Boolean;
+    Orientation: LongInt;            // 0 = 横、1 = 縦、2 = システム任せ
+    Candidates: TPMLStringArray;
+  end;
+
   TPMLIBusPendingKey = record
     Serial, Ticket: LongWord;
   end;
@@ -135,6 +153,8 @@ type
     FRetryAtNS   : Int64;
     FForwarded   : Integer;
     FLastNonFatalError: String;
+    FCandidates  : TPMLFcitxCandidateTracker;
+    FLookup      : TPMLIBusLookupTable;   // 最後に届いた候補の表（ShowLookupTable で出し直す）
     function  OpenConnection: Boolean;
     procedure CloseConnection;
     procedure ConnectionLost;
@@ -142,11 +162,17 @@ type
     procedure SendActivation;
     procedure CallAsync(const AMethod: String);
     procedure SetComposition(const AComposition: TPMLComposition);
+    // 出していた候補があれば、空の一覧で消す。Sink が無ければ内容を忘れるだけ。
+    procedure ClearCandidates;
+    // FLookup の 1 ページ分を、前に出したものと違えば CandidatesChanged で出す。
+    procedure ApplyLookup;
+    procedure HandleLookupTable(AMsg: PDBusMessage);
     procedure HandleMessage(AMsg: PDBusMessage);
     procedure HandleReply(AMsg: PDBusMessage);
     procedure HandleSignal(AMsg: PDBusMessage);
     function  GetPendingKeyCount: Integer;
   public
+    constructor Create;
     destructor Destroy; override;
     function  BackendName: String; override;
     function  Capabilities: TPMLTextInputCapabilities; override;
@@ -174,6 +200,17 @@ type
 function PMLReadIBusText(const AReader: TPMLDBusReader; out AText: TPMLIBusText): Boolean;
 { IBusText を variant として書く。 }
 procedure PMLWriteIBusText(var AWriter: TPMLDBusWriter; const AText: TPMLIBusText);
+
+{ AReader は variant を指していること。型名が違えば False。 }
+function PMLReadIBusLookupTable(const AReader: TPMLDBusReader; out ATable: TPMLIBusLookupTable): Boolean;
+{ 表を variant として書く（ラベルは空）。 }
+procedure PMLWriteIBusLookupTable(var AWriter: TPMLDBusWriter; const ATable: TPMLIBusLookupTable);
+{ 表から、いま見えている 1 ページ分の候補と選択の番号（-1 = 無し）、fcitx5 の CandidateLayoutHint
+  相当の配置（横 = 2、縦 = 1、システム = 0）を取る。候補が page_size 以下なら全部を 1 ページとして
+  扱い（1 ページ分しか送らない IME がある）、そうでなければ cursor_pos のあるページを切り出す。
+  cursor_visible が偽、または番号が範囲の外なら選択なし。page_size が 0 なら切らない。 }
+procedure PMLIBusLookupPage(const ATable: TPMLIBusLookupTable; out ATexts: TPMLStringArray;
+  out AIndex, ALayoutHint: Integer);
 
 { アドレスファイルの候補を試す順に返す。AConfigDir は $XDG_CONFIG_HOME（無ければ
   ~/.config）。 }
@@ -600,9 +637,16 @@ end;
 
 { ---- バックエンド ---- }
 
+constructor TPMLIBusTextInputBackend.Create;
+begin
+  inherited Create;
+  FCandidates := TPMLFcitxCandidateTracker.Create;
+end;
+
 destructor TPMLIBusTextInputBackend.Destroy;
 begin
   Disconnect;
+  FreeAndNil(FCandidates);
   inherited Destroy;
 end;
 
@@ -698,6 +742,7 @@ end;
 
 procedure TPMLIBusTextInputBackend.Disconnect;
 begin
+  ClearCandidates;
   UnsubscribeImeUI;
   CloseConnection;
   FPending := nil;
@@ -798,6 +843,7 @@ begin
   FActive := False;
   if Assigned(FConn) then
     CallAsync('FocusOut');
+  ClearCandidates;
   Empty.Clear;
   FPreedit.Clear;
   SetComposition(Empty);
@@ -809,6 +855,7 @@ var
 begin
   if Assigned(FConn) then
     CallAsync('Reset');
+  ClearCandidates;
   Empty.Clear;
   FPreedit.Clear;
   SetComposition(Empty);
@@ -912,6 +959,52 @@ begin
     FSink.CompositionChanged(FComposition);
 end;
 
+procedure TPMLIBusTextInputBackend.ClearCandidates;
+begin
+  FLookup.Candidates := nil;
+  if FCandidates.Clear and Assigned(FSink) then
+    FSink.CandidatesChanged(nil, -1, False);
+end;
+
+procedure TPMLIBusTextInputBackend.ApplyLookup;
+var
+  Texts: TPMLStringArray;
+  Index, Hint, Sel: Integer;
+  Hor: Boolean;
+begin
+  if not (TPMLImeUIElement.Candidates in FImeUI) then
+    Exit;   // ヒントで切ってあるのに届いたら捨てる
+  PMLIBusLookupPage(FLookup, Texts, Index, Hint);
+  if FCandidates.Update(Texts, Index, Hint, Sel, Hor) and Assigned(FSink) then
+  begin
+    if Length(Texts) = 0 then
+      FSink.CandidatesChanged(nil, Sel, Hor)
+    else
+      FSink.CandidatesChanged(Texts, Sel, Hor);
+  end;
+end;
+
+{ UpdateLookupTable(v table, b visible)。visible が偽なら隠す（表は覚えておく）。 }
+procedure TPMLIBusTextInputBackend.HandleLookupTable(AMsg: PDBusMessage);
+var
+  R: TPMLDBusReader;
+  Table: TPMLIBusLookupTable;
+  Visible: Boolean;
+begin
+  if not (TPMLImeUIElement.Candidates in FImeUI) then
+    Exit;
+  R := FConn.Reader(AMsg);
+  if not PMLReadIBusLookupTable(R, Table) then
+    Exit;
+  R.Next;
+  Visible := (R.ArgType = DBUS_TYPE_BOOLEAN) and R.AsBoolean;
+  FLookup := Table;
+  if Visible then
+    ApplyLookup
+  else if FCandidates.Clear and Assigned(FSink) then
+    FSink.CandidatesChanged(nil, -1, False);
+end;
+
 procedure TPMLIBusTextInputBackend.HandleReply(AMsg: PDBusMessage);
 var
   Serial: LongWord;
@@ -960,7 +1053,14 @@ begin
   begin
     if PMLReadIBusText(R, T) and (T.Text <> '') and Assigned(FSink) then
       FSink.TextCommitted(T.Text);
+    ClearCandidates;
   end
+  else if Member = 'UpdateLookupTable' then
+    HandleLookupTable(AMsg)
+  else if Member = 'ShowLookupTable' then
+    ApplyLookup
+  else if Member = 'HideLookupTable' then
+    ClearCandidates
   else if (Member = 'UpdatePreeditText') or (Member = 'UpdatePreeditTextWithMode') then
   begin
     if not PMLReadIBusText(R, T) then
@@ -1045,6 +1145,7 @@ begin
   if Assigned(FSink) then
     for I := 0 to High(Pending) do
       FSink.KeyResolved(Pending[I].Ticket, False);
+  ClearCandidates;
   Empty.Clear;
   FPreedit.Clear;
   SetComposition(Empty);
@@ -1078,6 +1179,8 @@ begin
   // Activate のときに新しい値で送る。
   if TakeImeUIChanged and FActive then
   begin
+    if not (TPMLImeUIElement.Candidates in FImeUI) then
+      ClearCandidates;
     try
       SendCapabilities;
     except
@@ -1107,11 +1210,128 @@ begin
   Result := TPMLIBusTextInputBackend.Create;
 end;
 
+function PMLReadIBusLookupTable(const AReader: TPMLDBusReader; out ATable: TPMLIBusLookupTable): Boolean;
+var
+  F, Arr: TPMLDBusReader;
+  T: TPMLIBusText;
+  N: Integer;
+begin
+  Result := False;
+  ATable.PageSize := 0;
+  ATable.CursorPos := 0;
+  ATable.CursorVisible := False;
+  ATable.Round := False;
+  ATable.Orientation := 0;
+  ATable.Candidates := nil;
+  if not OpenVariantStruct(AReader, F) or not EnterSerializable(F, 'IBusLookupTable') then
+    Exit;
+  // u page_size, u cursor_pos, b cursor_visible, b round, i orientation, av candidates, av labels
+  if F.ArgType <> DBUS_TYPE_UINT32 then Exit;
+  ATable.PageSize := F.AsUInt32;
+  F.Next;
+  if F.ArgType <> DBUS_TYPE_UINT32 then Exit;
+  ATable.CursorPos := F.AsUInt32;
+  F.Next;
+  if F.ArgType <> DBUS_TYPE_BOOLEAN then Exit;
+  ATable.CursorVisible := F.AsBoolean;
+  F.Next;
+  if F.ArgType <> DBUS_TYPE_BOOLEAN then Exit;
+  ATable.Round := F.AsBoolean;
+  F.Next;
+  if F.ArgType <> DBUS_TYPE_INT32 then Exit;
+  ATable.Orientation := F.AsInt32;
+  F.Next;
+  if F.ArgType <> DBUS_TYPE_ARRAY then Exit;
+  Arr := F.Recurse;
+  N := 0;
+  while not Arr.AtEnd do
+  begin
+    if not PMLReadIBusText(Arr, T) then
+    begin
+      ATable.Candidates := nil;
+      Exit;
+    end;
+    SetLength(ATable.Candidates, N + 1);
+    ATable.Candidates[N] := T.Text;
+    Inc(N);
+    Arr.Next;
+  end;
+  // ラベル（av）は使わない。
+  Result := True;
+end;
+
+procedure PMLWriteIBusLookupTable(var AWriter: TPMLDBusWriter; const ATable: TPMLIBusLookupTable);
+var
+  V, S, D, Arr, Labels: TPMLDBusWriter;
+  T: TPMLIBusText;
+  I: Integer;
+begin
+  V := AWriter.OpenVariant('(sa{sv}uubbiavav)');
+  S := V.OpenStruct;
+  S.AddString('IBusLookupTable');
+  D := S.OpenArray('{sv}');
+  S.Close(D);
+  S.AddUInt32(ATable.PageSize);
+  S.AddUInt32(ATable.CursorPos);
+  S.AddBoolean(ATable.CursorVisible);
+  S.AddBoolean(ATable.Round);
+  S.AddInt32(ATable.Orientation);
+  Arr := S.OpenArray('v');
+  T.Attributes := nil;
+  for I := 0 to High(ATable.Candidates) do
+  begin
+    T.Text := ATable.Candidates[I];
+    PMLWriteIBusText(Arr, T);
+  end;
+  S.Close(Arr);
+  Labels := S.OpenArray('v');
+  S.Close(Labels);
+  V.Close(S);
+  AWriter.Close(V);
+end;
+
+procedure PMLIBusLookupPage(const ATable: TPMLIBusLookupTable; out ATexts: TPMLStringArray;
+  out AIndex, ALayoutHint: Integer);
+var
+  Count, Start, Stop, I: Integer;
+  Cursor: Int64;
+begin
+  case ATable.Orientation of
+    0: ALayoutHint := 2;   // 横
+    1: ALayoutHint := 1;   // 縦
+  else
+    ALayoutHint := 0;
+  end;
+  Count := Length(ATable.Candidates);
+  Cursor := ATable.CursorPos;
+  Start := 0;
+  Stop := Count;
+  if (ATable.PageSize > 0) and (Count > Integer(ATable.PageSize)) and (Cursor < Count) then
+  begin
+    Start := Integer(Cursor div ATable.PageSize) * Integer(ATable.PageSize);
+    Stop := Start + Integer(ATable.PageSize);
+    if Stop > Count then
+      Stop := Count;
+  end
+  else if (ATable.PageSize > 0) and (Count > Integer(ATable.PageSize)) then
+    Stop := Integer(ATable.PageSize);   // 範囲の外のカーソルは先頭ページ
+  ATexts := nil;
+  SetLength(ATexts, Stop - Start);
+  for I := Start to Stop - 1 do
+    ATexts[I - Start] := ATable.Candidates[I];
+  if ATable.CursorVisible and (Cursor >= Start) and (Cursor < Stop) then
+    AIndex := Integer(Cursor) - Start
+  else
+    AIndex := -1;
+end;
+
 function PMLIBusCapabilities(AUI: TPMLImeUIElements): LongWord;
 begin
   Result := IBUS_CAP_FOCUS or IBUS_CAP_SURROUNDING_TEXT;
   if TPMLImeUIElement.Composition in AUI then
     Result := Result or IBUS_CAP_PREEDIT_TEXT;
+  if TPMLImeUIElement.Candidates in AUI then
+    Result := Result or IBUS_CAP_LOOKUP_TABLE;
 end;
 
 initialization
