@@ -4,7 +4,7 @@
 
 > **2026-11-28（Pi 5）: IBus の埋め込み候補（`UpdateLookupTable` → `TextEditingCandidates`）を入れた（T-98・T-99）。**
 > - ヒント `PAPIMELA_IME_IMPLEMENTED_UI` に candidates があるときだけ、能力に `IBUS_CAP_LOOKUP_TABLE`（`1 shl 2`）を足す（`PMLIBusCapabilities`。[] = 40・[composition] = 41 は変えない）。`UpdateLookupTable(v IBusLookupTable, b visible)` の表は `(sa{sv}uubbiavav)`（**libibus 1.5.34 の出力で形を確かめた**）で、`PMLReadIBusLookupTable` が読み、`PMLIBusLookupPage` が cursor_pos のあるページを切り出す（候補が page_size 以下なら全部を 1 ページ。mozc が 1 ページ分だけ送るかどうかを確かめていないため）。追跡は fcitx5 と同じ `TPMLFcitxCandidateTracker`（IBus の単位は `uses` で借りている。共有の単位に出すかは未決）。Hide / 確定 / Reset / フォーカスを外す / 切断 / ヒントを切るで空の一覧
-> - **本物の ibus-mozc での確認（T-99）はまだ。この機械には IBus の隔離環境（`tools/ibus-sandbox/setup.sh`。Ubuntu の rootfs を取る）が無い。CI の IBus の段に入れてあるので、そこで見る。** 落ちたら、mozc が表を出す時機とページの分け方の仮定を疑う
+> - **本物の ibus-mozc での確認（T-99）は CI で通った**（この機械では走らせられない: IBus の隔離環境は amd64 の rootfs で Pi 5 は arm64）。**mozc は既定では自前の `mozc_renderer` で候補を描き、環境変数 `MOZC_IBUS_CANDIDATE_WINDOW=ibus` を付けない限り IBus の候補の表を送らない**（`ibus-engine-mozc` の文字列で確認）。アプリが `candidates` を要求しても、ユーザーの環境でこの変数が無ければ mozc の場合は届かない（fcitx5 は届く）。mozc は表を 1 ページ分だけ送る（`page_size` = 候補数）。診断用に `TPMLIBusTextInputBackend.LookupLog`（caps と届いた表の記録。1500 文字まで）を残した
 > - 残り: ForwardKeyEvent・他のエンジンの属性の実測・GNOME / KDE の IBus 直結
 
 > **2026-11-27（Pi 5）: fcitx5 の埋め込み候補（`TextEditingCandidates`）を入れた（T-96・T-97、スパイク 8）。**
