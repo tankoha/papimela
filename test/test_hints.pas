@@ -377,8 +377,8 @@ begin
   Check(PMLParseImeImplementedUI('candidates') = [D], '"candidates" だけ');
   Check(PMLParseImeImplementedUI('composition,none') = [], '"none" は他より強い');
   Check((PMLFcitxCapabilities([C]) = 82) and (PMLFcitxCapabilities([]) = 64)
-    and (PMLFcitxCapabilities([D]) = 64),
-    'fcitx5: composition なら 82（今まで送っていた値）、無ければ周辺テキストの 64 だけ');
+    and (PMLFcitxCapabilities([D]) = 64 + (QWord(1) shl 39)) and (PMLFcitxCapabilities([C, D]) = 82 + (QWord(1) shl 39)),
+    'fcitx5: composition なら 82（今まで送っていた値）、無ければ周辺テキストの 64 だけ。candidates は ClientSideUI（1 shl 39。実測）を足す');
   Check((PMLIBusCapabilities([C]) = 41) and (PMLIBusCapabilities([]) = 40),
     'IBus: composition なら 41（今まで送っていた値）、無ければ FOCUS と周辺テキストの 40');
 end;

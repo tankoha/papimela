@@ -21,7 +21,7 @@
     - 文節を提供しないバックエンドは SegmentsReliable = False で全体を 1 文節にする
 
   NOT RESOLVED:
-    - 埋め込み候補（TextEditingCandidates）はバックエンド側が未実装
+    - 埋め込み候補（TextEditingCandidates）は fcitx5 だけ（T-96）。IBus の UpdateLookupTable は未実装
 
   Copyright (C) 2026 papimela contributors
   （zlib ライセンス本文は papimela.inc を参照）

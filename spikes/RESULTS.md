@@ -186,6 +186,17 @@ ibus 1.5.29 と ibus-mozc 2.28.4715.102 を入れ、bwrap で隔離して動か�
 - 影響: `DesktopMode.RefreshRate` を基準にした VSync の検査（T-21 / T-22 / T-84）は、この端末では原理的に通らない。基準は実測した合図の周期に替える
 - **Radeon の機械（2026-11-06、x86_64、labwc、RX 9070 XT、Mesa 26.0.8）**: 画面は 2 枚（DP-1 2560x1080 と HDMI-A-1 3840x2160）。`DesktopMode.RefreshRate` は **60.00 Hz** を返すが、合図の間隔は 3 回とも平均 **5.004〜5.005 ms（199.8 Hz）**、標準偏差 0.06〜0.19 ms、最小 2.8 ms・最大 7.0 ms（1 回だけ 7.0 と 2.8 の組）、打ち切り 0 回。窓は 200 Hz の画面に出ており、報告値は別の画面（主の画面）のもの。Pi 5 とは逆向きに、**報告値と合図が食い違う**例。合図を基準にした検査（`test/vsync_probe.inc`）はここでも通る（TEST-LOG の 2026-11-06）
 
+## スパイク 8: fcitx5 の ClientSideUI の能力ビットと UpdateClientSideUI の形（2026-11-27、Raspberry Pi 5、fcitx5 + mozc）
+
+`spike2_fcitx.pas` の SetCapability に 1 ビットずつ足して、UpdateClientSideUI のシグナルが届くかを見た（使い捨ての改造。fcitx5 の `capabilityflags.h` が手元に無かったので、番号を記憶でなく実測で決めた）。
+
+- **`QWord(1) shl 39`（ClientSideUI）を足すと UpdateClientSideUI が届く**（17 回。ローマ字入力とスペースの間）。足さない対照（すでに立てているビット 6 だけ）では 0 回。papimela の `CAP_CLIENT_SIDE_UI`
+- シグナルの型: `a(si) preedit, i cursor, a(si) auxUp, a(si) auxDown, a(ss) candidates, i candidateIndex, i layoutHint, b hasPrev, b hasNext`
+- 実例（mozc）: ローマ字の途中は `a[] -1 a[ ("[Tabキーで選択]",0) ] a[] a[ ("", "私の") ("", "私の願い") ] -1 1 F F`。**候補の各要素は (ラベル, 文字列) で、ラベルは空**。変換の候補の窓が出た後は candidateIndex が 1 になり、候補が 9 件届いた。**preedit の欄は空**で、変換中の文字は従来どおり UpdateFormattedPreedit から取る
+- layoutHint は 0（未指定）と 1（縦）を観測。横（2）は fcitx5 のソースの規約（`CandidateLayoutHint`）で、実機では見ていない
+- **mozc は Escape で変換を未変換へ戻しても予測の候補を出し続ける**。候補が空になるのは確定のとき
+- 結果: papimela の `TPMLFcitxCandidateTracker`（T-96）と手元専用の `test_fcitx_candidates_live`（T-97）
+
 ## 優先順位への影響
 
 設計書は IBus バックエンドを先に実装する前提だったが、**Fcitx5 バックエンドを先に実装するほうが合理的**。

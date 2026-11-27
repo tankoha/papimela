@@ -20,9 +20,15 @@
       Activate を忘れると fcitx5 は非アクティブ状態のままで ProcessKeyEvent が
       常に false を返す（実測）
     - capability は SurroundingText に、ヒント PAPIMELA_IME_IMPLEMENTED_UI が composition
-      （置かれていなければこれ）なら Preedit|FormattedPreedit を足したもの。既定は 82。
+      （置かれていなければこれ）なら Preedit|FormattedPreedit を、candidates なら
+      ClientSideUI（1 shl 39）を足したもの。既定は 82。
       FormattedPreedit が無いと文節に分かれた形で届かない（実測）。ヒントが変わったら
       次の Pump で SetCapability を送り直す（ヒントはどのスレッドからも変えられるため）
+    - 埋め込み候補: ClientSideUI を立てると UpdateClientSideUI が届く（実測。立てなければ
+      届かない）。候補欄（a(ss) の 2 つ目の文字列）、選択の番号、配置を読み、前に出したものと
+      変わったときだけ CandidatesChanged にする（TPMLFcitxCandidateTracker）。SDL は Linux では
+      TextEditingCandidates を出さない（Windows だけ）ので、これは papimela の拡張。
+      UpdateClientSideUI の preedit / aux の欄は使わない（preedit は UpdateFormattedPreedit から取る）
     - UpdateFormattedPreedit の cursor は UTF-8 バイトオフセット。
       一方 SetSurroundingText の cursor / anchor はコードポイント単位。
       この非対称は fcitx5 側の仕様なので papimela が吸収する
@@ -31,7 +37,7 @@
     - フラグ → 文節状態の対応は fcitx5-mozc で実測した規則。fcitx5-anthy /
       fcitx5-chinese-addons では未確認（Design: docs/DESIGN.md §10 項目 1）
     - ProcessKeyEvent は同期呼び出し。非同期化は §10 項目 3
-    - 埋め込み候補（UpdateClientSideUI）は未実装
+    - ForwardKey / CurrentIM は未使用
 
   Copyright (C) 2026 papimela contributors
   （zlib ライセンス本文は papimela.inc を参照）
@@ -55,6 +61,8 @@ uses
   PaPiMeLa.TextInput.Backend;
 
 type
+  TPMLFcitxCandidateTracker = class;
+
   TPMLFcitxTextInputBackend = class(TPMLTextInputBackend)
   strict private
     FConn        : TPMLDBusConnection;
@@ -65,6 +73,7 @@ type
     // バイト数へ変換するために保持する。
     FSurrounding     : String;
     FSurroundingCursor: Integer;   // コードポイント位置
+    FCandidates: TPMLFcitxCandidateTracker;
     // 致命的でないが診断に必要なエラー。例外を投げ直さない箇所で記録する。
     FLastNonFatalError: String;
     procedure Subscribe;
@@ -73,6 +82,9 @@ type
     procedure HandleFormattedPreedit(AMsg: PDBusMessage);
     procedure HandleCommitString(AMsg: PDBusMessage);
     procedure HandleDeleteSurrounding(AMsg: PDBusMessage);
+    procedure HandleClientSideUI(AMsg: PDBusMessage);
+    // 出していた候補があれば、空の一覧で消す。Sink が無ければ内容を忘れるだけ。
+    procedure ClearCandidates;
   public
     constructor Create;
     destructor Destroy; override;
@@ -99,6 +111,30 @@ type
   Preedit（1 shl 1）と FormattedPreedit（1 shl 4）も（アプリが変換中の文字を描く）。 }
 function PMLFcitxCapabilities(AUI: TPMLImeUIElements): QWord;
 
+type
+  { UpdateClientSideUI の候補欄から、TextEditingCandidates を出すかを決める（変わったときだけ出す）。
+    fcitx5 は入力のたびに同じ内容を何度も送ってくるので、前に出したものと比べる。 }
+  TPMLFcitxCandidateTracker = class
+  strict private
+    FTexts: TPMLStringArray;
+    FSelected: Integer;
+    FHorizontal: Boolean;
+  public
+    constructor Create;
+    { 候補欄を受ける。ATexts は候補の文字列（ラベルは含めない）、AIndex は選択中の番号（-1 = 無し）、
+      ALayoutHint は fcitx5 の CandidateLayoutHint（0 = 未指定、1 = 縦、2 = 横）。
+      イベントを出すべきなら True を返し、ASelected（範囲の外の番号は -1）と AHorizontal（ALayoutHint = 2）を入れる。
+      前に出したものと同じなら False。候補が空のままなら（番号や配置が変わっても）False。
+      空でなかったものが空になったら True（空の一覧を出す）。 }
+    function  Update(const ATexts: TPMLStringArray; AIndex, ALayoutHint: Integer;
+      out ASelected: Integer; out AHorizontal: Boolean): Boolean;
+    { 候補が消えたとき（フォーカスを外す、確定、ヒントを切る、切断）。前に出したものが空でなければ True
+      （空の一覧を出す）。出したものを忘れるので、続けて同じ候補が来たらまた出す。 }
+    function  Clear: Boolean;
+    // 前に出した候補が空でないか。
+    function  HasCandidates: Boolean;
+  end;
+
 implementation
 
 const
@@ -113,6 +149,7 @@ const
   CAP_PREEDIT           = QWord(1) shl 1;
   CAP_FORMATTED_PREEDIT = QWord(1) shl 4;
   CAP_SURROUNDING_TEXT  = QWord(1) shl 6;
+  CAP_CLIENT_SIDE_UI    = QWord(1) shl 39;
 
   // TextFormatFlag (fcitx5: src/lib/fcitx-utils/textformatflags.h)
   FMT_UNDERLINE = 1 shl 3;
@@ -123,11 +160,13 @@ begin
   inherited Create;
   FSurroundingCursor := 0;
   FCursorRectV2 := True;
+  FCandidates := TPMLFcitxCandidateTracker.Create;
 end;
 
 destructor TPMLFcitxTextInputBackend.Destroy;
 begin
   Disconnect;
+  FreeAndNil(FCandidates);
   inherited Destroy;
 end;
 
@@ -232,8 +271,15 @@ begin
   end;
 end;
 
+procedure TPMLFcitxTextInputBackend.ClearCandidates;
+begin
+  if FCandidates.Clear and Assigned(FSink) then
+    FSink.CandidatesChanged(nil, -1, False);
+end;
+
 procedure TPMLFcitxTextInputBackend.Disconnect;
 begin
+  ClearCandidates;   // Sink が壊れていることがあるので ClearCandidates は Assigned を見る
   UnsubscribeImeUI;
   if Assigned(FConn) and (FICPath <> '') then
   begin
@@ -282,12 +328,14 @@ begin
     FConn.CallVoid(FCITX_SERVICE, FICPath, IC_IFACE, 'FocusOut');
     FActive := False;
   end;
+  ClearCandidates;
 end;
 
 procedure TPMLFcitxTextInputBackend.ResetComposition;
 begin
   if Assigned(FConn) then
     FConn.CallVoid(FCITX_SERVICE, FICPath, IC_IFACE, 'Reset');
+  ClearCandidates;
 end;
 
 procedure TPMLFcitxTextInputBackend.UpdateSurroundingText(const AText: String;
@@ -410,6 +458,8 @@ begin
   // D-Bus を触るのはメインスレッドで呼ばれるここ）。
   if TakeImeUIChanged and (FICPath <> '') then
   begin
+    if not (TPMLImeUIElement.Candidates in FImeUI) then
+      ClearCandidates;
     try
       SetCapability(PMLFcitxCapabilities(FImeUI));
     except
@@ -437,8 +487,10 @@ begin
   else if FConn.IsSignal(AMsg, IC_IFACE, 'CommitString') then
     HandleCommitString(AMsg)
   else if FConn.IsSignal(AMsg, IC_IFACE, 'DeleteSurroundingText') then
-    HandleDeleteSurrounding(AMsg);
-  // ForwardKey / CurrentIM / UpdateClientSideUI は現状未使用。
+    HandleDeleteSurrounding(AMsg)
+  else if FConn.IsSignal(AMsg, IC_IFACE, 'UpdateClientSideUI') then
+    HandleClientSideUI(AMsg);
+  // ForwardKey / CurrentIM は現状未使用。
 end;
 
 { UpdateFormattedPreedit(a(si) segments, i cursor)
@@ -550,6 +602,73 @@ begin
     Exit;
   if Assigned(FSink) then
     FSink.TextCommitted(R.AsString);
+  ClearCandidates;
+end;
+
+{ UpdateClientSideUI(a(si) preedit, i cursor, a(si) auxUp, a(si) auxDown, a(ss) candidates,
+  i candidateIndex, i layoutHint, b hasPrev, b hasNext)
+
+  使うのは candidates（各要素の 2 つ目の文字列）、candidateIndex、layoutHint だけ。
+  形が違えば何もしない。 }
+procedure TPMLFcitxTextInputBackend.HandleClientSideUI(AMsg: PDBusMessage);
+var
+  R, Arr, St: TPMLDBusReader;
+  Texts: TPMLStringArray;
+  Count, Index, Hint, Sel: Integer;
+  Hor: Boolean;
+  I: Integer;
+begin
+  if not (TPMLImeUIElement.Candidates in FImeUI) then
+    Exit;   // ヒントで切ってあるのに届いたら捨てる
+  R := FConn.Reader(AMsg);
+  // preedit、cursor、auxUp、auxDown を読み飛ばす
+  for I := 0 to 3 do
+  begin
+    if I = 1 then
+    begin
+      if R.ArgType <> DBUS_TYPE_INT32 then
+        Exit;
+    end
+    else if R.ArgType <> DBUS_TYPE_ARRAY then
+      Exit;
+    R.Next;
+  end;
+  if R.ArgType <> DBUS_TYPE_ARRAY then
+    Exit;
+
+  Texts := nil;
+  Count := 0;
+  Arr := R.Recurse;
+  while Arr.ArgType = DBUS_TYPE_STRUCT do
+  begin
+    St := Arr.Recurse;
+    if St.ArgType <> DBUS_TYPE_STRING then
+      Exit;
+    St.Next;   // ラベルは使わない
+    if St.ArgType <> DBUS_TYPE_STRING then
+      Exit;
+    SetLength(Texts, Count + 1);
+    Texts[Count] := St.AsString;
+    Inc(Count);
+    Arr.Next;
+  end;
+
+  R.Next;
+  if R.ArgType <> DBUS_TYPE_INT32 then
+    Exit;
+  Index := R.AsInt32;
+  R.Next;
+  if R.ArgType <> DBUS_TYPE_INT32 then
+    Exit;
+  Hint := R.AsInt32;
+
+  if FCandidates.Update(Texts, Index, Hint, Sel, Hor) and Assigned(FSink) then
+  begin
+    if Count = 0 then
+      FSink.CandidatesChanged(nil, Sel, Hor)
+    else
+      FSink.CandidatesChanged(Texts, Sel, Hor);
+  end;
 end;
 
 { DeleteSurroundingText(i offset, u size)
@@ -578,6 +697,72 @@ begin
     FSink.DeleteSurroundingRequested(Data);
 end;
 
+{ ---- 埋め込み候補の追跡 ---- }
+
+constructor TPMLFcitxCandidateTracker.Create;
+begin
+  inherited Create;
+  FTexts := nil;
+  FSelected := -1;
+  FHorizontal := False;
+end;
+
+function TPMLFcitxCandidateTracker.Update(const ATexts: TPMLStringArray; AIndex, ALayoutHint: Integer;
+  out ASelected: Integer; out AHorizontal: Boolean): Boolean;
+var
+  I: Integer;
+  Same: Boolean;
+begin
+  if (AIndex >= 0) and (AIndex < Length(ATexts)) then
+    ASelected := AIndex
+  else
+    ASelected := -1;
+  AHorizontal := (ALayoutHint = 2);
+
+  if Length(ATexts) = 0 then
+  begin
+    // 空のまま: 出さない。空でなかったものが空になった: 空の一覧を出す。
+    ASelected := -1;
+    AHorizontal := False;
+    Result := Length(FTexts) > 0;
+    FTexts := nil;
+    FSelected := -1;
+    FHorizontal := False;
+    Exit;
+  end;
+
+  Same := (Length(ATexts) = Length(FTexts)) and (ASelected = FSelected)
+    and (AHorizontal = FHorizontal);
+  if Same then
+    for I := 0 to High(ATexts) do
+      if ATexts[I] <> FTexts[I] then
+      begin
+        Same := False;
+        Break;
+      end;
+  Result := not Same;
+  if Result then
+  begin
+    // 動的配列は参照渡しなので、イベントに渡した配列とは別に覚える
+    FTexts := Copy(ATexts, 0, Length(ATexts));
+    FSelected := ASelected;
+    FHorizontal := AHorizontal;
+  end;
+end;
+
+function TPMLFcitxCandidateTracker.Clear: Boolean;
+begin
+  Result := Length(FTexts) > 0;
+  FTexts := nil;
+  FSelected := -1;
+  FHorizontal := False;
+end;
+
+function TPMLFcitxCandidateTracker.HasCandidates: Boolean;
+begin
+  Result := Length(FTexts) > 0;
+end;
+
 { ---- 登録 ---- }
 
 function CreateFcitxTextInputBackend: TPMLTextInputBackend;
@@ -590,6 +775,8 @@ begin
   Result := CAP_SURROUNDING_TEXT;
   if TPMLImeUIElement.Composition in AUI then
     Result := Result or CAP_PREEDIT or CAP_FORMATTED_PREEDIT;
+  if TPMLImeUIElement.Candidates in AUI then
+    Result := Result or CAP_CLIENT_SIDE_UI;
 end;
 
 initialization

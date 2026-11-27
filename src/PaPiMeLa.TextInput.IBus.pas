@@ -41,7 +41,7 @@
     - ForwardKeyEvent（IME がアプリへキーを渡す）は ibus-mozc では来なかったので、
       受けたら数えて記録するだけ（ForwardedKeyCount）。キーとして出すのは来る IME を
       見つけてから
-    - 埋め込み候補（UpdateLookupTable → TextEditingCandidates）は未実装
+    - 埋め込み候補（UpdateLookupTable → TextEditingCandidates）は未実装（fcitx5 は済んだ。PaPiMeLa.TextInput.Fcitx の TPMLFcitxCandidateTracker を使い回せる）
     - アドレスファイルの inotify 監視は入れていない。切れたことに気づいてから読み直す
     - ibus-anthy / ibus-skk / ibus-libpinyin の属性は未実測（§10 項目 1）
 

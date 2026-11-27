@@ -1,6 +1,10 @@
 # 引き継ぎ資料
 
-新しいセッションは、`CLAUDE.md` の次にこれを読む。最終更新: 2026-11-27（Raspberry Pi 5 の端末で、Moza R3 の実機で Haptic の FF の残りを確かめ、色空間つきの Convert と ALSA の udev hotplug を入れた後。T-90〜T-95）。
+新しいセッションは、`CLAUDE.md` の次にこれを読む。最終更新: 2026-11-27（Raspberry Pi 5 の端末で、Moza R3 の実機で Haptic の FF の残りを確かめ、色空間つきの Convert・ALSA の udev hotplug・fcitx5 の埋め込み候補を入れた後。T-90〜T-97）。
+
+> **2026-11-27（Pi 5）: fcitx5 の埋め込み候補（`TextEditingCandidates`）を入れた（T-96・T-97、スパイク 8）。**
+> - ヒント `PAPIMELA_IME_IMPLEMENTED_UI` に candidates を足すと、SetCapability に ClientSideUI（`1 shl 39`。実測）を足し、`UpdateClientSideUI`（a(ss) の 2 つ目の文字列、選択の番号、配置）を `TextEditingCandidates` にする。`TPMLFcitxCandidateTracker` が前に出したものと比べて、変わったときだけ出す。確定・Deactivate・リセット・切断・ヒントを外したときは空の一覧で消す。**SDL は Linux では出さず Windows だけ**なので papimela の拡張
+> - **mozc は Escape で変換を未変換へ戻しても予測の候補を出し続ける**（候補が空になるのは確定のとき）。IBus の `UpdateLookupTable` は未（`TPMLFcitxCandidateTracker` を使い回せる）。ForwardKeyEvent・他のエンジンの属性の実測・GNOME / KDE の IBus 直結は未
 
 > **2026-11-27（Pi 5）: ALSA の hotplug を udev の知らせにした（T-94・T-95）。**
 > - `TPMLAlsaHotplugDriver`（`PaPiMeLa.Audio.Alsa`）: udev（`PaPiMeLa.Platform.Udev`）が使えれば、知らせのたびにメインスレッドの Pump の中で走査し（`TPMLAudioBackend.PumpEvents` を新設し `TPMLAudioSystem.PumpEvents` が呼ぶ。SDL の `SDL_UDEV_Poll` が `SDL_PumpEvents` から呼ばれるのと同じ）、使えなければ走査のスレッドのまま。SDL は知らせの種類で絞らずどんな知らせでも走査する（papimela も同じ）
@@ -266,7 +270,7 @@ D-69（録音で書き換えたバイト数を次の論理デバイスへ持ち�
    - 浮動小数の変換は、範囲の外の値で SDL の SSE2 版とスカラー版の結果が割れる（D-64・D-65）。期待値の入力は範囲の中に置く
 2. 残してあるテクスチャのもの: ~~テクスチャの Lock / Unlock~~ **済んだ（2026-10-16、Pi 5 で。`TPMLTexture.Lock` / `Unlock` / `LockToSurface`、T-64）**。~~I444 / P010~~ **済んだ（2026-10-24、Pi 5 で。T-66。上の冒頭）**、I0FL / I4FL は **済んだ（2026-10-24。変換 `PMLConvertYUV16ToRGB48`、色空間の変換 `PaPiMeLa.Surface.Colorspace`、テクスチャ。T-66・T-67）**。P010 は SDL と同じくテクスチャを持たない。残りは、~~色空間の変換のうち拡大縮小・ブレンド・変調・カラーキー（`SDL_Blit_Slow_Float` の残り）~~ **済んだ（2026-11-20、Pi 5 で。`PMLBlitPixelsFloat`、T-91）**、~~サーフェスに色空間を持たせること~~ **`TPMLSurface.Colorspace` / `ColorProps` は済み（T-91）、色空間つきの Convert も済んだ（2026-11-27、T-93）**、~~サーフェスから作るときのカラーキー~~ **済んだ（2026-10-17、Pi 5 で。`CreateTextureFromSurface` が 17 形式のキー・変調・ブレンドの引き継ぎを SDL と合わせた、T-65）**、~~ソフトウェアのレンダラの Linear が
    実は Nearest（`PMLBlitScaled` が方式を使わない。SDL は補間する）~~（**2026-10-17 に持ち主が「そのまま」と決めた。直さない**）
-3. IME の残り: 埋め込み候補（`TextEditingCandidates`）、IBus の ForwardKeyEvent、ibus-anthy など他のエンジンの属性の実測、GNOME / KDE での IBus 直結（§7.5 の要検証）。IBus の検査環境は `tools/ibus-sandbox/`（ibus + ibus-mozc を入れた Ubuntu 24.04 の最小 rootfs を bwrap で隔離。デスクトップの fcitx5 と混ざらない）。実測の結果は `spikes/RESULTS.md` のスパイク 3
+3. IME の残り: 埋め込み候補（~~fcitx5~~ **済んだ（2026-11-27、T-96・T-97）**。IBus の `UpdateLookupTable` は未）、IBus の ForwardKeyEvent、ibus-anthy など他のエンジンの属性の実測、GNOME / KDE での IBus 直結（§7.5 の要検証）。IBus の検査環境は `tools/ibus-sandbox/`（ibus + ibus-mozc を入れた Ubuntu 24.04 の最小 rootfs を bwrap で隔離。デスクトップの fcitx5 と混ざらない）。実測の結果は `spikes/RESULTS.md` のスパイク 3
 
 済んだもの（2026-10-14）: **テクスチャの種類**。3b パレット（INDEX8）と 3c YUV（7 形式、色空間）。§2 の表。
 
