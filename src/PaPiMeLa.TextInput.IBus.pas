@@ -156,6 +156,7 @@ type
     FCandidates  : TPMLFcitxCandidateTracker;
     FLookup      : TPMLIBusLookupTable;   // 最後に届いた候補の表（ShowLookupTable で出し直す）
     FLookupLog   : String;                // 診断用: 届いた候補の信号の記録
+    FSignalLog   : String;                // 診断用: 届いた信号の名前（全部）
     function  OpenConnection: Boolean;
     procedure CloseConnection;
     procedure ConnectionLost;
@@ -197,6 +198,7 @@ type
     property LastNonFatalError: String read FLastNonFatalError;
     // 候補に関する信号（UpdateLookupTable など）と読み取りの結果の記録。診断用
     property LookupLog: String read FLookupLog;
+    property SignalLog: String read FSignalLog;
   end;
 
 { IBusText（variant）を読む。AReader は variant を指していること。型名が違えば False。 }
@@ -999,12 +1001,12 @@ begin
   R := FConn.Reader(AMsg);
   if not PMLReadIBusLookupTable(R, Table) then
   begin
-    FLookupLog := FLookupLog + 'Update:読めない ';
+    FLookupLog := FLookupLog + '表:読めない ';
     Exit;
   end;
   R.Next;
   Visible := (R.ArgType = DBUS_TYPE_BOOLEAN) and R.AsBoolean;
-  FLookupLog := FLookupLog + Format('Update:%d個,page=%d,cur=%d,vis=%s ',
+  FLookupLog := FLookupLog + Format('表:%d個,page=%d,cur=%d,vis=%s ',
     [Length(Table.Candidates), Table.PageSize, Table.CursorPos, BoolToStr(Visible, True)]);
   FLookup := Table;
   if Visible then
@@ -1056,6 +1058,7 @@ var
   Empty: TPMLComposition;
 begin
   Member := FConn.MemberOf(AMsg);
+  FSignalLog := FSignalLog + Member + ' ';
   R := FConn.Reader(AMsg);
   if Member = 'CommitText' then
   begin
