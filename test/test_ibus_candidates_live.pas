@@ -215,7 +215,6 @@ begin
     else
       Check(Length(Got) = 0, Format('既定（composition だけ）では TextEditingCandidates が届かない（%d 件）', [Length(Got)]));
     WriteLn('    候補の信号: ', IB.LookupLog);
-    WriteLn('    届いた信号: ', IB.SignalLog);
     Session.ResetComposition;
     Settle(300);
   finally

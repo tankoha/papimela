@@ -156,7 +156,6 @@ type
     FCandidates  : TPMLFcitxCandidateTracker;
     FLookup      : TPMLIBusLookupTable;   // 最後に届いた候補の表（ShowLookupTable で出し直す）
     FLookupLog   : String;                // 診断用: 届いた候補の信号の記録
-    FSignalLog   : String;                // 診断用: 届いた信号の名前（全部）
     function  OpenConnection: Boolean;
     procedure CloseConnection;
     procedure ConnectionLost;
@@ -166,6 +165,7 @@ type
     procedure SetComposition(const AComposition: TPMLComposition);
     // 出していた候補があれば、空の一覧で消す。Sink が無ければ内容を忘れるだけ。
     procedure ClearCandidates;
+    procedure LogLookup(const AText: String);
     // FLookup の 1 ページ分を、前に出したものと違えば CandidatesChanged で出す。
     procedure ApplyLookup;
     procedure HandleLookupTable(AMsg: PDBusMessage);
@@ -196,9 +196,8 @@ type
     property PendingKeyCount: Integer read GetPendingKeyCount;
     property ForwardedKeyCount: Integer read FForwarded;
     property LastNonFatalError: String read FLastNonFatalError;
-    // 候補に関する信号（UpdateLookupTable など）と読み取りの結果の記録。診断用
+    // 候補に関する信号（UpdateLookupTable など）と読み取りの結果の記録。診断用（長くなったら止める）
     property LookupLog: String read FLookupLog;
-    property SignalLog: String read FSignalLog;
   end;
 
 { IBusText（variant）を読む。AReader は variant を指していること。型名が違えば False。 }
@@ -777,7 +776,7 @@ begin
   Msg := FConn.BeginCall(IBUS_SERVICE, FICPath, IC_IFACE, 'SetCapabilities');
   try
     FConn.Writer(Msg).AddUInt32(PMLIBusCapabilities(FImeUI));
-    FLookupLog := FLookupLog + Format('caps=%d ', [PMLIBusCapabilities(FImeUI)]);
+    LogLookup(Format('caps=%d ', [PMLIBusCapabilities(FImeUI)]));
     FConn.SendAsync(Msg);
   finally
     FConn.Unref(Msg);
@@ -965,6 +964,12 @@ begin
     FSink.CompositionChanged(FComposition);
 end;
 
+procedure TPMLIBusTextInputBackend.LogLookup(const AText: String);
+begin
+  if Length(FLookupLog) < 1500 then
+    FLookupLog := FLookupLog + AText;
+end;
+
 procedure TPMLIBusTextInputBackend.ClearCandidates;
 begin
   FLookup.Candidates := nil;
@@ -1002,13 +1007,13 @@ begin
   R := FConn.Reader(AMsg);
   if not PMLReadIBusLookupTable(R, Table) then
   begin
-    FLookupLog := FLookupLog + '表:読めない ';
+    LogLookup('表:読めない ');
     Exit;
   end;
   R.Next;
   Visible := (R.ArgType = DBUS_TYPE_BOOLEAN) and R.AsBoolean;
-  FLookupLog := FLookupLog + Format('表:%d個,page=%d,cur=%d,vis=%s ',
-    [Length(Table.Candidates), Table.PageSize, Table.CursorPos, BoolToStr(Visible, True)]);
+  LogLookup(Format('表:%d個,page=%d,cur=%d,vis=%s ',
+    [Length(Table.Candidates), Table.PageSize, Table.CursorPos, BoolToStr(Visible, True)]));
   FLookup := Table;
   if Visible then
     ApplyLookup
@@ -1059,7 +1064,6 @@ var
   Empty: TPMLComposition;
 begin
   Member := FConn.MemberOf(AMsg);
-  FSignalLog := FSignalLog + Member + ' ';
   R := FConn.Reader(AMsg);
   if Member = 'CommitText' then
   begin
@@ -1071,12 +1075,12 @@ begin
     HandleLookupTable(AMsg)
   else if Member = 'ShowLookupTable' then
   begin
-    FLookupLog := FLookupLog + 'Show ';
+    LogLookup('Show ');
     ApplyLookup;
   end
   else if Member = 'HideLookupTable' then
   begin
-    FLookupLog := FLookupLog + 'Hide ';
+    LogLookup('Hide ');
     ClearCandidates;
   end
   else if (Member = 'UpdatePreeditText') or (Member = 'UpdatePreeditTextWithMode') then

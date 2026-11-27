@@ -110,12 +110,10 @@ jobs:
           fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_ibus_textinput test/test_ibus_textinput.pas
           # ランナーは使い捨ての VM で root でもないので、隔離せずに ibus-session で立てる
           sh tools/ibus-sandbox/ibus-session ./test/test_ibus_textinput
-          # 診断（一時）: mozc が候補の表を送る条件を探す
-          dpkg -L ibus-mozc | head -30
-          E=$(dpkg -L ibus-mozc | grep -E 'ibus-engine-mozc$' | head -1)
-          strings -a "$E" | grep -i -E 'lookup|candidate_window|use_mozc|renderer|client_cap|CAP_' | head -60 || true
           fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/test_ibus_candidates_live test/test_ibus_candidates_live.pas
-          sh tools/ibus-sandbox/ibus-session ./test/test_ibus_candidates_live
+          # mozc は既定では自前の mozc_renderer で候補を描き、IBus の候補の表を送らない。
+          # 環境変数 MOZC_IBUS_CANDIDATE_WINDOW=ibus で IBus の表にさせる（ibus-engine-mozc の文字列で確認）
+          MOZC_IBUS_CANDIDATE_WINDOW=ibus sh tools/ibus-sandbox/ibus-session ./test/test_ibus_candidates_live
 
       - name: Build and self-test examples
         run: |
