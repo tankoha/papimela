@@ -36,6 +36,7 @@ uses
   PaPiMeLa.Events.Keymap,
   PaPiMeLa.TextInput,
   PaPiMeLa.Core,
+  PaPiMeLa.TextInput.IBus,
   PaPiMeLa.Backends;
 
 type
@@ -64,6 +65,7 @@ var
   Failures: Integer = 0;
   Ctx: TPMLContext;
   Editor: TFakeEditor;
+  IB: TPMLIBusTextInputBackend;
   Got: array of TPMLEvent;       // 届いた TextEditingCandidates
 
 procedure Check(ACondition: Boolean; const ALabel: String);
@@ -179,6 +181,7 @@ begin
   end;
   try
     Check(Ctx.TextInput.BackendName = 'ibus', Format('バックエンドは ibus（%s）', [Ctx.TextInput.BackendName]));
+    IB := Ctx.TextInput.BackendInstance as TPMLIBusTextInputBackend;
     Session := Ctx.TextInput.Start(nil, Editor as IPMLTextInputClient);
     Session.NotifyCursorRectChanged;
     Settle(300);
@@ -211,6 +214,7 @@ begin
     end
     else
       Check(Length(Got) = 0, Format('既定（composition だけ）では TextEditingCandidates が届かない（%d 件）', [Length(Got)]));
+    WriteLn('    候補の信号: ', IB.LookupLog);
     Session.ResetComposition;
     Settle(300);
   finally

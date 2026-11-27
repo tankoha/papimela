@@ -155,6 +155,7 @@ type
     FLastNonFatalError: String;
     FCandidates  : TPMLFcitxCandidateTracker;
     FLookup      : TPMLIBusLookupTable;   // 最後に届いた候補の表（ShowLookupTable で出し直す）
+    FLookupLog   : String;                // 診断用: 届いた候補の信号の記録
     function  OpenConnection: Boolean;
     procedure CloseConnection;
     procedure ConnectionLost;
@@ -194,6 +195,8 @@ type
     property PendingKeyCount: Integer read GetPendingKeyCount;
     property ForwardedKeyCount: Integer read FForwarded;
     property LastNonFatalError: String read FLastNonFatalError;
+    // 候補に関する信号（UpdateLookupTable など）と読み取りの結果の記録。診断用
+    property LookupLog: String read FLookupLog;
   end;
 
 { IBusText（variant）を読む。AReader は variant を指していること。型名が違えば False。 }
@@ -995,9 +998,14 @@ begin
     Exit;
   R := FConn.Reader(AMsg);
   if not PMLReadIBusLookupTable(R, Table) then
+  begin
+    FLookupLog := FLookupLog + 'Update:読めない ';
     Exit;
+  end;
   R.Next;
   Visible := (R.ArgType = DBUS_TYPE_BOOLEAN) and R.AsBoolean;
+  FLookupLog := FLookupLog + Format('Update:%d個,page=%d,cur=%d,vis=%s ',
+    [Length(Table.Candidates), Table.PageSize, Table.CursorPos, BoolToStr(Visible, True)]);
   FLookup := Table;
   if Visible then
     ApplyLookup
@@ -1058,9 +1066,15 @@ begin
   else if Member = 'UpdateLookupTable' then
     HandleLookupTable(AMsg)
   else if Member = 'ShowLookupTable' then
-    ApplyLookup
+  begin
+    FLookupLog := FLookupLog + 'Show ';
+    ApplyLookup;
+  end
   else if Member = 'HideLookupTable' then
-    ClearCandidates
+  begin
+    FLookupLog := FLookupLog + 'Hide ';
+    ClearCandidates;
+  end
   else if (Member = 'UpdatePreeditText') or (Member = 'UpdatePreeditTextWithMode') then
   begin
     if not PMLReadIBusText(R, T) then
