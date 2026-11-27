@@ -186,13 +186,14 @@ begin
     Session.NotifyCursorRectChanged;
     Settle(300);
     TypeRomaji('watashinonamaeha');
-    // 変換の候補の窓は 2 度目のスペースで出ることが多い。出るまで（3 回まで）押す
+    // 候補は入力の途中（予測）から届く。変換の候補の窓（選択のある候補）が出るまで、スペースを 4 回まで押す
     Tries := 0;
     repeat
       Tap($20, 57);
       Settle;
       Inc(Tries);
-    until (Length(Got) > 0) or (Tries >= 3) or not AExpectCandidates;
+    until (Tries >= 4) or not AExpectCandidates
+      or ((Length(Got) > 0) and (Length(Got[High(Got)].Strings) > 0) and (Got[High(Got)].Edit.FocusedSegment >= 0));
     NonEmpty := 0;
     Dups := 0;
     for I := 0 to High(Got) do
@@ -206,6 +207,8 @@ begin
     begin
       Check(Dups = 0, Format('連続する 2 つのイベントは内容が違う（%d 組が同じだった）', [Dups]));
       Check(NonEmpty >= 1, Format('候補つきの TextEditingCandidates が届く（%d 件）', [NonEmpty]));
+      Check((Length(Got) > 0) and (Got[High(Got)].Edit.FocusedSegment >= 0) and (Length(Got[High(Got)].Strings) > 0),
+        'スペースの後に、選択つきの候補が届いている（変換の候補の窓）');
       Got := nil;
       Tap($FF0D, 28);
       Settle;
