@@ -115,14 +115,16 @@ function PMLDefaultHDRHeadroom(AColorspace: TPMLColorspace): Single;
 { 画素を色空間つきで変換する（SDL_ConvertPixelsAndColorspace の、YUV でもインデックスでもない形式の分）。
   幅 AWidth・高さ AHeight の画素を、行の幅 ASrcPitch・ADstPitch（バイト）で読み書きする。
   色空間が PML_COLORSPACE_UNKNOWN なら形式の既定（PMLDefaultColorspace）。
-  形式が YUV・インデックス・不明なら EPMLArgument。 }
+  形式が YUV・インデックス・不明なら EPMLArgument。
+  AOptions.DstHeadroom が 0（指定なし）で浮動小数の経路を通ったときは、転送元の実効ヘッドルームを書き戻す
+  （SDL は転送先のサーフェスのプロパティへ書く。整数の経路は書かない）。 }
 procedure PMLConvertPixelsAndColorspace(AWidth, AHeight: Integer;
   ASrcFormat: TPMLPixelFormat; ASrcColorspace: TPMLColorspace; ASrc: Pointer; ASrcPitch: Integer;
   ADstFormat: TPMLPixelFormat; ADstColorspace: TPMLColorspace; ADst: Pointer; ADstPitch: Integer); overload;
 procedure PMLConvertPixelsAndColorspace(AWidth, AHeight: Integer;
   ASrcFormat: TPMLPixelFormat; ASrcColorspace: TPMLColorspace; ASrc: Pointer; ASrcPitch: Integer;
   ADstFormat: TPMLPixelFormat; ADstColorspace: TPMLColorspace; ADst: Pointer; ADstPitch: Integer;
-  const AOptions: TPMLColorspaceOptions); overload;
+  var AOptions: TPMLColorspaceOptions); overload;
 
 implementation
 
@@ -847,15 +849,18 @@ end;
 procedure PMLConvertPixelsAndColorspace(AWidth, AHeight: Integer;
   ASrcFormat: TPMLPixelFormat; ASrcColorspace: TPMLColorspace; ASrc: Pointer; ASrcPitch: Integer;
   ADstFormat: TPMLPixelFormat; ADstColorspace: TPMLColorspace; ADst: Pointer; ADstPitch: Integer);
+var
+  Options: TPMLColorspaceOptions;
 begin
+  Options := PMLColorspaceDefaults;
   PMLConvertPixelsAndColorspace(AWidth, AHeight, ASrcFormat, ASrcColorspace, ASrc, ASrcPitch,
-    ADstFormat, ADstColorspace, ADst, ADstPitch, PMLColorspaceDefaults);
+    ADstFormat, ADstColorspace, ADst, ADstPitch, Options);
 end;
 
 procedure PMLConvertPixelsAndColorspace(AWidth, AHeight: Integer;
   ASrcFormat: TPMLPixelFormat; ASrcColorspace: TPMLColorspace; ASrc: Pointer; ASrcPitch: Integer;
   ADstFormat: TPMLPixelFormat; ADstColorspace: TPMLColorspace; ADst: Pointer; ADstPitch: Integer;
-  const AOptions: TPMLColorspaceOptions);
+  var AOptions: TPMLColorspaceOptions);
 var
   SCS, DCS: TPMLColorspace;
   SD, DD: TPMLPixelFormatDetails;
@@ -910,7 +915,10 @@ begin
   SHead := EffectiveHeadroom(SCS, AOptions.SrcHeadroom);
   DHead := EffectiveHeadroom(DCS, AOptions.DstHeadroom);
   if DHead = 0 then
+  begin
     DHead := SHead;
+    AOptions.DstHeadroom := DHead;
+  end;
 
   PrepareTonemap(AOptions, SHead, DHead, SPrim, DPrim, Op, TmScale, TmA, TmB, TmMatrix, PrimMatrix);
 

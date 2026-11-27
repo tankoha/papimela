@@ -404,7 +404,7 @@ procedure PMLConvertPixelsAndColorspace(
   ADstColorspace: TPMLColorspace;
   ADst: Pointer;
   ADstPitch: Integer;
-  const AOptions: TPMLColorspaceOptions);
+  var AOptions: TPMLColorspaceOptions);
 begin
   PaPiMeLa.Surface.Colorspace.PMLConvertPixelsAndColorspace(AWidth, AHeight, ASrcFormat, ASrcColorspace, ASrc, ASrcPitch, ADstFormat, ADstColorspace, ADst, ADstPitch, AOptions);
 end;

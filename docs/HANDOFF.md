@@ -1,6 +1,11 @@
 # 引き継ぎ資料
 
-新しいセッションは、`CLAUDE.md` の次にこれを読む。最終更新: 2026-11-27（Raspberry Pi 5 の端末で、Moza R3 の実機で Haptic の FF の残りを確かめた後。T-90〜T-92）。
+新しいセッションは、`CLAUDE.md` の次にこれを読む。最終更新: 2026-11-27（Raspberry Pi 5 の端末で、Moza R3 の実機で Haptic の FF の残りを確かめ、色空間つきの Convert を入れた後。T-90〜T-93）。
+
+> **2026-11-27（Pi 5）: `TPMLSurface.Convert` を色空間つきにした（T-93）。**
+> - `Convert(AFormat)` は SDL_ConvertSurface のとおり、変換先の形式の既定の色空間へ直す。`ConvertTo(AFormat, AColorspace)` は SDL_ConvertSurfaceAndColorspace（UNKNOWN は転送元のまま）。転送元の白点・ヘッドルーム・トーンマップは結果へ引き継ぐ。**従来の Convert は浮動小数・16 ビット整数の形式へ書けず、ARGB8888 へ直してもガンマが入らなかった**（Clipboard と Render の ARGB8888 への変換は、8888 同士なので結果は変わらない）
+> - `PMLConvertPixelsAndColorspace`（`AOptions` を `var` に）が、転送先のヘッドルームが 0 で浮動小数の経路を通ったとき転送元の値を書き戻す（SDL と同じ。PMLBlitPixelsFloat も同じ）
+> - 範囲外のまま: インデックス形式への変換（従来の 1 画素ずつ）、カラーキー・ブレンドモード・変調・クリップ矩形の結果への引き継ぎ、RLE。**§3 の 2 の「Linear の拡大縮小」は持ち主が「そのまま」と決めてある（2026-10-17）、BMP は SDL が色空間を扱わないので移すものが無い**
 
 > **2026-11-20（Pi 5）: 色空間つきの転送（`SDL_Blit_Slow_Float` の拡大縮小・ブレンド・変調・カラーキー・インデックスの出力）を入れた（T-91）。**
 > - `PaPiMeLa.Surface.Colorspace` の `PMLBlitPixelsFloat`、`PaPiMeLa.Surface.Blit` の `PMLBlit` / `PMLBlitScaled` が「色空間が違う、または 5 バイト以上の形式」のとき通る（SDL_blit.c と同じ条件）。`TPMLSurface` に `Colorspace`（既定は形式の既定）と `ColorProps`（白点・ヘッドルーム・トーンマップ）を足した。転送先のヘッドルームが 0 なら転送元の値が書き込まれる（SDL と同じ）
@@ -254,7 +259,7 @@ D-69（録音で書き換えたバイト数を次の論理デバイスへ持ち�
      録音は手元にソースが無いので実機では通していない（T-54 は飛ばす）。PipeWire の既定の変更での移動も実機では見ていない
      （利用者の既定を変えるので）
    - 浮動小数の変換は、範囲の外の値で SDL の SSE2 版とスカラー版の結果が割れる（D-64・D-65）。期待値の入力は範囲の中に置く
-2. 残してあるテクスチャのもの: ~~テクスチャの Lock / Unlock~~ **済んだ（2026-10-16、Pi 5 で。`TPMLTexture.Lock` / `Unlock` / `LockToSurface`、T-64）**。~~I444 / P010~~ **済んだ（2026-10-24、Pi 5 で。T-66。上の冒頭）**、I0FL / I4FL は **済んだ（2026-10-24。変換 `PMLConvertYUV16ToRGB48`、色空間の変換 `PaPiMeLa.Surface.Colorspace`、テクスチャ。T-66・T-67）**。P010 は SDL と同じくテクスチャを持たない。残りは、~~色空間の変換のうち拡大縮小・ブレンド・変調・カラーキー（`SDL_Blit_Slow_Float` の残り）~~ **済んだ（2026-11-20、Pi 5 で。`PMLBlitPixelsFloat`、T-91）**、~~サーフェスに色空間を持たせること~~ **`TPMLSurface.Colorspace` / `ColorProps` は済んだ（T-91）。変換先の色空間を指定する Convert は未**、~~サーフェスから作るときのカラーキー~~ **済んだ（2026-10-17、Pi 5 で。`CreateTextureFromSurface` が 17 形式のキー・変調・ブレンドの引き継ぎを SDL と合わせた、T-65）**、~~ソフトウェアのレンダラの Linear が
+2. 残してあるテクスチャのもの: ~~テクスチャの Lock / Unlock~~ **済んだ（2026-10-16、Pi 5 で。`TPMLTexture.Lock` / `Unlock` / `LockToSurface`、T-64）**。~~I444 / P010~~ **済んだ（2026-10-24、Pi 5 で。T-66。上の冒頭）**、I0FL / I4FL は **済んだ（2026-10-24。変換 `PMLConvertYUV16ToRGB48`、色空間の変換 `PaPiMeLa.Surface.Colorspace`、テクスチャ。T-66・T-67）**。P010 は SDL と同じくテクスチャを持たない。残りは、~~色空間の変換のうち拡大縮小・ブレンド・変調・カラーキー（`SDL_Blit_Slow_Float` の残り）~~ **済んだ（2026-11-20、Pi 5 で。`PMLBlitPixelsFloat`、T-91）**、~~サーフェスに色空間を持たせること~~ **`TPMLSurface.Colorspace` / `ColorProps` は済み（T-91）、色空間つきの Convert も済んだ（2026-11-27、T-93）**、~~サーフェスから作るときのカラーキー~~ **済んだ（2026-10-17、Pi 5 で。`CreateTextureFromSurface` が 17 形式のキー・変調・ブレンドの引き継ぎを SDL と合わせた、T-65）**、~~ソフトウェアのレンダラの Linear が
    実は Nearest（`PMLBlitScaled` が方式を使わない。SDL は補間する）~~（**2026-10-17 に持ち主が「そのまま」と決めた。直さない**）
 3. IME の残り: 埋め込み候補（`TextEditingCandidates`）、IBus の ForwardKeyEvent、ibus-anthy など他のエンジンの属性の実測、GNOME / KDE での IBus 直結（§7.5 の要検証）。IBus の検査環境は `tools/ibus-sandbox/`（ibus + ibus-mozc を入れた Ubuntu 24.04 の最小 rootfs を bwrap で隔離。デスクトップの fcitx5 と混ざらない）。実測の結果は `spikes/RESULTS.md` のスパイク 3
 

@@ -80,6 +80,7 @@ test/test_texture_colorkey
 test/test_yuv_hd
 test/test_colorspace
 test/test_colorspace_blit
+test/test_surface_convert
 test/test_joystick
 test/test_gamepad_mapping
 test/test_gamepad

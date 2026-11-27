@@ -24,7 +24,14 @@
       CreateShared で作ったものだけが参照カウントで生き、_Release で消える。
       既定の TPMLSurface は参照カウントしない
 
+    - Convert / ConvertTo は色空間を見る（変換先の色空間、白点・ヘッドルーム・トーンマップの引き継ぎ）
+
+  PORT-NOTE:
+    Convert は SDL_ConvertSurface のとおり、変換先の形式の既定の色空間へ直す（以前は色空間を見ず、
+    色の値をそのまま写していた）。
+
   NOT RESOLVED:
+    - インデックスへの変換、カラーキー・ブレンドモード・変調・クリップ矩形の結果への引き継ぎは範囲外
     - ブリット（Blit / BlitScaled / FillRect / Flip の高速版）は第 11 章 #29。
       ここにある Convert は 1 画素ずつ回す素直な実装で、速度は #29 が担当する
     - RLE 圧縮（SDL_RLEaccel.c）は未実装。MustLock は常に False を返す
@@ -45,7 +52,8 @@ uses
   PaPiMeLa.Types,
   PaPiMeLa.Errors,
   PaPiMeLa.Core.Base,
-  PaPiMeLa.Pixels;
+  PaPiMeLa.Pixels,
+  PaPiMeLa.Surface.Colorspace;
 
 type
   TPMLSurface = class;
@@ -102,6 +110,7 @@ type
     procedure SetClipRect(const AValue: TPMLRect);
     procedure SetBlendMode(AValue: TPMLBlendMode);
     function  GetMustLock: Boolean;
+    procedure ConvertPerPixel(ADest: TPMLSurface);
   protected
     // IInterface。FRefCount が -1 のもの（既定）は参照カウントしない。
     function QueryInterface(constref AIID: TGUID; out AObj): HResult; {$IFDEF WINDOWS}stdcall{$ELSE}cdecl{$ENDIF};
@@ -142,6 +151,11 @@ type
     function  Duplicate: TPMLSurface;
     // 別の形式へ変換した新しいサーフェスを返す。呼び出し側が Free する。
     function  Convert(AFormat: TPMLPixelFormat): TPMLSurface;
+    { 別の形式と色空間へ変換した新しいサーフェスを返す。呼び出し側が Free する（SDL_ConvertSurfaceAndColorspace）。
+      AColorspace が PML_COLORSPACE_UNKNOWN なら、転送元の色空間のまま。Convert は SDL_ConvertSurface と同じく、
+      変換先の形式の既定の色空間へ直す（色空間が違えば値が変わる）。
+      転送元の白点・ヘッドルーム・トーンマップ（ColorProps）は結果へ引き継ぐ。 }
+    function  ConvertTo(AFormat: TPMLPixelFormat; AColorspace: TPMLColorspace): TPMLSurface;
     // その場で反転する。
     procedure Flip(AMode: TPMLFlipMode);
 
@@ -472,19 +486,81 @@ begin
     Result.SetPalette(FPalette, False);
 end;
 
-{ 別の形式へ変換する。
-
-  1 画素ずつ色に戻してから書き直す。形式の組み合わせに依らず必ず正しく、
-  往復の検査もしやすい。速い経路（同じ並びなら memcpy、8888 同士ならシフトだけ）
-  は第 11 章 #29 が持つ。 }
+{ 別の形式へ変換する（SDL_ConvertSurface）。変換先の形式の既定の色空間へ直す。 }
 function TPMLSurface.Convert(AFormat: TPMLPixelFormat): TPMLSurface;
+begin
+  Result := ConvertTo(AFormat, PMLDefaultColorspace(AFormat));
+end;
+
+{ 1 画素ずつ色に戻してから書き直す（インデックスへの変換と、整数のままパレットの色を写す場合の経路）。
+  形式の組み合わせに依らず必ず正しく、往復の検査もしやすい。 }
+procedure TPMLSurface.ConvertPerPixel(ADest: TPMLSurface);
 var
   X, Y: Integer;
 begin
-  Result := TPMLSurface.Create(FWidth, FHeight, AFormat);
   for Y := 0 to FHeight - 1 do
     for X := 0 to FWidth - 1 do
-      Result.WritePixel(X, Y, ReadPixel(X, Y));
+      ADest.WritePixel(X, Y, ReadPixel(X, Y));
+end;
+
+{ 別の形式と色空間へ変換する（SDL_ConvertSurfaceAndColorspace の色空間の部分）。
+
+  転送元の白点・ヘッドルーム・トーンマップは結果へ引き継ぐ（SDL_CopyProperties）。 }
+function TPMLSurface.ConvertTo(AFormat: TPMLPixelFormat; AColorspace: TPMLColorspace): TPMLSurface;
+var
+  Options: TPMLColorspaceOptions;
+  Params: TPMLBlitFloatParams;
+  Props: TPMLSurfaceColorProps;
+begin
+  Result := TPMLSurface.Create(FWidth, FHeight, AFormat);
+  try
+    if AColorspace = PML_COLORSPACE_UNKNOWN then
+      Result.FColorspace := FColorspace
+    else
+      Result.FColorspace := AColorspace;
+
+    Options := PMLColorspaceDefaults;
+    Options.SrcWhitePoint := FColorProps.SDRWhitePoint;
+    Options.SrcHeadroom := FColorProps.HDRHeadroom;
+    Options.Tonemap := FColorProps.Tonemap;
+
+    if PMLIsPixelFormatIndexed(AFormat) then
+      ConvertPerPixel(Result)
+    else if PMLIsPixelFormatIndexed(FFormat) and
+      ((Result.FColorspace <> FColorspace) or (PMLBytesPerPixel(AFormat) > 4)) then
+    begin
+      Params.BlendMode := TPMLBlendMode.None;
+      Params.ModR := 255;
+      Params.ModG := 255;
+      Params.ModB := 255;
+      Params.ModA := 255;
+      PMLBlitPixelsFloat(
+        FPixels, FPitch, FFormat, FColorspace, FPalette, FWidth, FHeight,
+        Result.FPixels, Result.FPitch, AFormat, Result.FColorspace, nil, FWidth, FHeight,
+        Params, Options);
+    end
+    else if PMLIsPixelFormatIndexed(FFormat) then
+      ConvertPerPixel(Result)
+    else
+      PMLConvertPixelsAndColorspace(FWidth, FHeight,
+        FFormat, FColorspace, FPixels, FPitch,
+        AFormat, Result.FColorspace, Result.FPixels, Result.FPitch, Options);
+
+    // 白点・ヘッドルーム・トーンマップの引き継ぎ。転送先のヘッドルームが書き込まれていれば、転送元が 0 のとき残す。
+    Props := Result.FColorProps;
+    if Options.DstHeadroom <> 0 then
+      Props.HDRHeadroom := Options.DstHeadroom;
+    if FColorProps.SDRWhitePoint <> 0 then
+      Props.SDRWhitePoint := FColorProps.SDRWhitePoint;
+    if FColorProps.HDRHeadroom <> 0 then
+      Props.HDRHeadroom := FColorProps.HDRHeadroom;
+    if FColorProps.Tonemap <> '' then
+      Props.Tonemap := FColorProps.Tonemap;
+    Result.FColorProps := Props;
+  except
+    Result.Free;
+    raise;
+  end;
 end;
 
 procedure TPMLSurface.Flip(AMode: TPMLFlipMode);

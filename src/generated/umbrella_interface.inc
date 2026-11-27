@@ -685,7 +685,7 @@ procedure PMLConvertPixelsAndColorspace(
   ADstColorspace: TPMLColorspace;
   ADst: Pointer;
   ADstPitch: Integer;
-  const AOptions: TPMLColorspaceOptions); inline; overload;
+  var AOptions: TPMLColorspaceOptions); inline; overload;
 
 // ---- PaPiMeLa.Surface.YUV
 type
