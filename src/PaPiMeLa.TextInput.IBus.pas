@@ -777,6 +777,7 @@ begin
   Msg := FConn.BeginCall(IBUS_SERVICE, FICPath, IC_IFACE, 'SetCapabilities');
   try
     FConn.Writer(Msg).AddUInt32(PMLIBusCapabilities(FImeUI));
+    FLookupLog := FLookupLog + Format('caps=%d ', [PMLIBusCapabilities(FImeUI)]);
     FConn.SendAsync(Msg);
   finally
     FConn.Unref(Msg);
