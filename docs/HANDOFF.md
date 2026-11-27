@@ -1,6 +1,11 @@
 # 引き継ぎ資料
 
-新しいセッションは、`CLAUDE.md` の次にこれを読む。最終更新: 2026-11-27（Raspberry Pi 5 の端末で、Moza R3 の実機で Haptic の FF の残りを確かめ、色空間つきの Convert を入れた後。T-90〜T-93）。
+新しいセッションは、`CLAUDE.md` の次にこれを読む。最終更新: 2026-11-27（Raspberry Pi 5 の端末で、Moza R3 の実機で Haptic の FF の残りを確かめ、色空間つきの Convert と ALSA の udev hotplug を入れた後。T-90〜T-95）。
+
+> **2026-11-27（Pi 5）: ALSA の hotplug を udev の知らせにした（T-94・T-95）。**
+> - `TPMLAlsaHotplugDriver`（`PaPiMeLa.Audio.Alsa`）: udev（`PaPiMeLa.Platform.Udev`）が使えれば、知らせのたびにメインスレッドの Pump の中で走査し（`TPMLAudioBackend.PumpEvents` を新設し `TPMLAudioSystem.PumpEvents` が呼ぶ。SDL の `SDL_UDEV_Poll` が `SDL_PumpEvents` から呼ばれるのと同じ）、使えなければ走査のスレッドのまま。SDL は知らせの種類で絞らずどんな知らせでも走査する（papimela も同じ）
+> - 実機の確認（T-95）は snd-dummy を modprobe して見る。**`wireplumber` がカードを掴んで `rmmod` できなくなる**ので、検査の間だけ止める。**Pump を回さない使い方では、udev の知らせは処理されない**（SDL も同じ）
+> - 残り（オーディオ）: 録音の実機での確認、PipeWire の既定の変更での移動
 
 > **2026-11-27（Pi 5）: `TPMLSurface.Convert` を色空間つきにした（T-93）。**
 > - `Convert(AFormat)` は SDL_ConvertSurface のとおり、変換先の形式の既定の色空間へ直す。`ConvertTo(AFormat, AColorspace)` は SDL_ConvertSurfaceAndColorspace（UNKNOWN は転送元のまま）。転送元の白点・ヘッドルーム・トーンマップは結果へ引き継ぐ。**従来の Convert は浮動小数・16 ビット整数の形式へ書けず、ARGB8888 へ直してもガンマが入らなかった**（Clipboard と Render の ARGB8888 への変換は、8888 同士なので結果は変わらない）
@@ -253,9 +258,9 @@ D-69（録音で書き換えたバイト数を次の論理デバイスへ持ち�
    - **`SDL_MixAudio` の 8 形式は済んだ（2026-10-15、aarch64 の Pi5 で。`PaPiMeLa.Audio.Mixer`、T-56）**。F32 は aarch64 の SDL が FMA に融合して値が割れる（TEST-LOG の T-56）
    - **WAV（#54）は済んだ（2026-10-15、Pi 5 で。`PaPiMeLa.Audio.Wave`、`Ctx.Audio.LoadWAV`、T-57）**。SDL のヒント 4 つは `PAPIMELA_WAVE_*`
    - **PulseAudio（#57）・#20 の Pulse の結合は済んだ（2026-10-15、Pi 5 で）**。T-58（CI）、T-59（手元専用）
-   - **ALSA（#58）・#20 の Alsa の結合は済んだ（2026-10-15、Pi 5 で）**。T-60・T-61（CI）、T-62（手元専用。生きた SDL と突き合わせる）。udev の hotplug は無い（走査のスレッド）
+   - **ALSA（#58）・#20 の Alsa の結合は済んだ（2026-10-15、Pi 5 で）**。T-60・T-61（CI）、T-62（手元専用。生きた SDL と突き合わせる）。**udev の hotplug は 2026-11-27 に済んだ**（T-94 CI、T-95 手元専用）。udev が使えなければ走査のスレッド
    - **「優先する pipewire」も済んだ（2026-10-15）**: `TPMLAudioBackend.AcceptForAutoSelection`。T-63（CI）
-   - 残り（オーディオ）: ALSA の udev による hotplug（SDL の `SDL_udev`。今は 5 秒ごとの走査）、録音の実機での確認（Pulse と ALSA は録音の装置を勝手に開かないので、モニターだけ通した）。
+   - 残り（オーディオ）: ~~ALSA の udev による hotplug~~ **済んだ（T-94・T-95）**、録音の実機での確認（Pulse と ALSA は録音の装置を勝手に開かないので、モニターだけ通した）。
      録音は手元にソースが無いので実機では通していない（T-54 は飛ばす）。PipeWire の既定の変更での移動も実機では見ていない
      （利用者の既定を変えるので）
    - 浮動小数の変換は、範囲の外の値で SDL の SSE2 版とスカラー版の結果が割れる（D-64・D-65）。期待値の入力は範囲の中に置く

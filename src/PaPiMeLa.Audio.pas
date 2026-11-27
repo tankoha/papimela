@@ -998,6 +998,8 @@ end;
 
 procedure TPMLAudioSystem.PumpEvents(ATimeoutMs: Integer);
 begin
+  if FBackend <> nil then
+    FBackend.PumpEvents;
   ProcessPendingDisconnects;
   FlushPendingEvents;
 end;

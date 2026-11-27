@@ -208,6 +208,8 @@ type
     // 終わりの始め（DeinitializeStart。hotplug を止めるのによい）と終わり（Deinitialize）。
     procedure DeinitializeStart; virtual;
     procedure Deinitialize; virtual;
+    // メインスレッドの Pump から呼ばれる。バックエンドが溜めた知らせを処理する（SDL_UDEV_Poll に当たる）。
+    procedure PumpEvents; virtual;
     property  Capabilities: TPMLAudioBackendCapabilities read FCapabilities;
     property  Core: TPMLAudioCore read FCore;
   end;
@@ -346,6 +348,10 @@ begin
 end;
 
 procedure TPMLAudioBackend.Deinitialize;
+begin
+end;
+
+procedure TPMLAudioBackend.PumpEvents;
 begin
 end;
 

@@ -4,8 +4,9 @@
   Origin : ported from SDL (src/audio/alsa/SDL_alsa_audio.c, SDL_alsa_audio.h)
            Scope: SDL_alsa_audio.c の全体（デバイス名の接頭辞の推測、カードと PCM の列挙、走査による
            hotplug、PCM を開いてハードウェアとソフトウェアのパラメータを決める道、チャンネルの並びの
-           交渉と入れ替え、待つ・鳴らす・録る・回復、閉じる）。udev による hotplug は、SDL が持つ
-           別の部品（core/linux/SDL_udev.c）を使うので移植せず、SDL の udev 無しの道（走査のスレッド）だけ。
+           交渉と入れ替え、待つ・鳴らす・録る・回復、閉じる）。hotplug は、udev が使えれば
+           （PaPiMeLa.Platform.Udev。#19）知らせでその場で走査し（メインスレッドの Pump から。SDL の
+           SDL_UDEV_Poll が SDL_PumpEvents から呼ばれるのと同じ）、使えなければ走査のスレッド。
            SDL revision: see docs/ORIGIN.md
   Design : docs/DESIGN.md §9.4、§11 #58
 
@@ -25,6 +26,10 @@
       まだ指していた）
     - snd_pcm_hw_params_alloca は xxx_sizeof() の大きさの領域を確保して 0 で埋める
 
+  PORT-NOTE:
+    SDL は udev の知らせの種類（sound か input か）で絞らず、どんな知らせでも走査する。papimela も同じ
+    （効率の観察であって不具合ではない）。
+
   PORT-NOTE(bug):
     SDL の alsa_chmap_cfg_ordered_fixed_or_paired は、`sdl_chmap[i] == alsa_chmap[i]` を調べてから
     `i == chans_n` を見るので、全部一致した後にもう 1 つ先（配列の外）を読む。外の値が偶然 0 でなければ
@@ -36,7 +41,6 @@
 
   NOT RESOLVED:
     - 録音は手元の実機で通していない（録音の装置を勝手に開かない）。SDL のとおりに写した
-    - udev の hotplug（SDL の ALSA_udev_callback）は無い。走査の間隔は 5 秒（ヒントで変えられる）
 
   Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
   Copyright (C) 2026 papimela contributors
@@ -57,11 +61,57 @@ uses
   PaPiMeLa.Properties,
   PaPiMeLa.Core.Base,
   PaPiMeLa.Platform.Alsa,
+  PaPiMeLa.Platform.Udev,
   PaPiMeLa.Audio.Convert,
   PaPiMeLa.Audio.Backend;
 
 type
   TPMLAlsaAudioBackend = class;
+
+  { 抜き差しの知らせ（SDL の ALSA_udev_callback が受ける SDL_UDEV_deviceevent と devpath）。
+    AAdded = True なら追加、False なら取り外し。APath は udev の devpath（空は知らせとして扱わない）。 }
+  TPMLAlsaHotplugCallback = procedure(AAdded: Boolean; const APath: String) of object;
+
+  { udev の窓口（SDL の SDL_UDEV_Init / AddCallback / Poll / DelCallback / Quit の束）。検査では偽物に差し替える。 }
+  IPMLAlsaHotplugSource = interface
+    ['{B7A15E0C-4C26-4D8B-9F3E-61C8D0A52E94}']
+    { ALSA_start_udev。libudev を開いて監視を始め、ACallback を登録する。開けなければ（ライブラリが無い、
+      netlink が使えない）False を返し、何も残さない。 }
+    function  Start(ACallback: TPMLAlsaHotplugCallback): Boolean;
+    // SDL_UDEV_Poll。溜まった抜き差しを処理し、その場（呼んだスレッド）で ACallback を呼ぶ。
+    procedure Poll;
+    // ALSA_stop_udev。コールバックを外して閉じる。
+    procedure Stop;
+  end;
+  TPMLAlsaHotplugSourceFactory = function: IPMLAlsaHotplugSource;
+
+  { 走査の呼び出し（ALSA_HotplugIteration の外側）。 }
+  TPMLAlsaScanProc = procedure of object;
+
+  { ALSA の hotplug の切り替え。udev が使えれば、知らせのたびに（メインスレッドの Pump の中で）走査し、
+    使えなければ走査のスレッド（呼び出し側が持つ）に任せる。SDL の ALSA_DetectDevices の末尾と
+    ALSA_udev_callback に当たる。 }
+  TPMLAlsaHotplugDriver = class
+  strict private
+    FScan: TPMLAlsaScanProc;
+    FSource: IPMLAlsaHotplugSource;
+    FUsingUdev: Boolean;
+    FLastError: String;
+    function  NewSource: IPMLAlsaHotplugSource;
+    procedure OnHotplug(AAdded: Boolean; const APath: String);
+  public
+    constructor Create(AScan: TPMLAlsaScanProc);
+    destructor Destroy; override;
+    { ALSA_start_udev。成功したら True（以後はスレッドを使わない）。2 度目以降は何もせず UsingUdev を返す。 }
+    function  StartUdev: Boolean;
+    // 溜まった知らせを処理する（SDL_UDEV_Poll。メインスレッドの Pump から）。udev を使っていなければ何もしない。
+    procedure Poll;
+    // ALSA_stop_udev。何度呼んでもよい。
+    procedure Stop;
+    property  UsingUdev: Boolean read FUsingUdev;
+    // 走査が例外を投げたときの記録（Poll は例外を外へ出さない）。
+    property  LastError: String read FLastError;
+  end;
 
   { ALSA_Device。物理デバイスの Handle（このオブジェクトのポインタ）。 }
   TAlsaDeviceHandle = class
@@ -94,6 +144,7 @@ type
     FHotplugThread: TPMLThread;
     FHotplugShutdown: TPMLAtomicInt;
     FHotplugIntervalMs: Integer;
+    FHotplug: TPMLAlsaHotplugDriver;
     FLastError: String;
     procedure NoteError(E: Exception; const AWhere: String);
     procedure GuessDevicePrefix;
@@ -120,12 +171,18 @@ type
     procedure FreeDeviceHandle(ADevice: TPMLAudioDevice); override;
     procedure DeinitializeStart; override;
     procedure Deinitialize; override;
+    // メインスレッドの Pump から。udev の知らせを処理する（SDL_UDEV_Poll）。
+    procedure PumpEvents; override;
     // 検査用: 走査を 1 回、今すぐ行う（hotplug のスレッドと同じ処理）。
     procedure ScanNow;
     // 検査用: 推測した接頭辞（"hw:" など）。
     property  DevicePrefix: String read FPrefix;
     property  LastError: String read FLastError;
   end;
+
+var
+  // 検査用: nil なら本物（libudev）。
+  PMLAlsaHotplugSourceFactory: TPMLAlsaHotplugSourceFactory = nil;
 
 type
   { SDL のチャンネルの並びの交渉の結果。 }
@@ -215,6 +272,7 @@ begin
   FAllHandles := TList.Create;
   FAlsa := TPMLAlsa.Create;   // 無ければ EPMLPlatformLibrary（次のバックエンドへ）
   FCapabilities := [TPMLAudioBackendCapability.HasRecordingSupport];
+  FHotplug := TPMLAlsaHotplugDriver.Create(@ScanNow);
   FHotplugIntervalMs := 5000;
   Interval := StrToIntDef(Trim(FCore.Hint(PML_HINT_AUDIO_ALSA_HOTPLUG_INTERVAL)), 0);
   if Interval > 0 then
@@ -238,6 +296,7 @@ var
 begin
   if FHotplugThread <> nil then
     DeinitializeStart;
+  FHotplug.Free;
   FAlsa.Free;
   if FAllHandles <> nil then
     for I := 0 to FAllHandles.Count - 1 do
@@ -1004,6 +1063,153 @@ begin
   Result := True;
 end;
 
+{ ---- hotplug の切り替え ---- }
+
+type
+  // 本物の窓口（libudev。SDL の ALSA_start_udev / ALSA_stop_udev の udev 部分）。
+  TPMLAlsaUdevSource = class(TInterfacedObject, IPMLAlsaHotplugSource)
+  strict private
+    FUdev: TPMLUdev;
+    FCallback: TPMLAlsaHotplugCallback;
+    FLastError: String;
+    procedure OnUdev(AEvent: TPMLUdevDeviceEvent; AClass: Integer; const APath: String);
+  public
+    destructor Destroy; override;
+    function  Start(ACallback: TPMLAlsaHotplugCallback): Boolean;
+    procedure Poll;
+    procedure Stop;
+    // Start が開けなかったときの理由。
+    property  LastError: String read FLastError;
+  end;
+
+destructor TPMLAlsaUdevSource.Destroy;
+begin
+  Stop;
+  inherited Destroy;
+end;
+
+procedure TPMLAlsaUdevSource.OnUdev(AEvent: TPMLUdevDeviceEvent; AClass: Integer; const APath: String);
+begin
+  if Assigned(FCallback) then
+    FCallback(AEvent = TPMLUdevDeviceEvent.Added, APath);
+end;
+
+function TPMLAlsaUdevSource.Start(ACallback: TPMLAlsaHotplugCallback): Boolean;
+begin
+  Result := False;
+  FCallback := ACallback;
+  try
+    FUdev := TPMLUdev.Create;
+  except
+    on E: EPMLPlatformLibrary do
+    begin
+      FLastError := E.ClassName + ': ' + E.Message;   // ログの文脈を持たないので記録だけ残す
+      FUdev := nil;
+      FCallback := nil;
+      Exit;
+    end;
+  end;
+  FUdev.AddCallback(@OnUdev);
+  Result := True;
+end;
+
+procedure TPMLAlsaUdevSource.Poll;
+begin
+  if FUdev <> nil then
+    FUdev.Poll;
+end;
+
+procedure TPMLAlsaUdevSource.Stop;
+begin
+  if FUdev <> nil then
+  begin
+    FUdev.DelCallback(@OnUdev);
+    FUdev.Free;
+    FUdev := nil;
+  end;
+  FCallback := nil;
+end;
+
+constructor TPMLAlsaHotplugDriver.Create(AScan: TPMLAlsaScanProc);
+begin
+  inherited Create;
+  FScan := AScan;
+end;
+
+destructor TPMLAlsaHotplugDriver.Destroy;
+begin
+  Stop;
+  inherited Destroy;
+end;
+
+function TPMLAlsaHotplugDriver.NewSource: IPMLAlsaHotplugSource;
+begin
+  if Assigned(PMLAlsaHotplugSourceFactory) then
+    Result := PMLAlsaHotplugSourceFactory()
+  else
+    Result := TPMLAlsaUdevSource.Create;
+end;
+
+procedure TPMLAlsaHotplugDriver.OnHotplug(AAdded: Boolean; const APath: String);
+begin
+  if APath = '' then
+    Exit;
+  try
+    if Assigned(FScan) then
+      FScan();
+  except
+    on E: Exception do
+      FLastError := E.ClassName + ': ' + E.Message;
+  end;
+end;
+
+function TPMLAlsaHotplugDriver.StartUdev: Boolean;
+begin
+  if FUsingUdev then
+    Exit(True);
+  try
+    FSource := NewSource;
+  except
+    on E: Exception do
+    begin
+      FLastError := E.ClassName + ': ' + E.Message;
+      FSource := nil;
+      Exit(False);
+    end;
+  end;
+  try
+    if (FSource <> nil) and FSource.Start(@OnHotplug) then
+      FUsingUdev := True
+    else
+      FSource := nil;
+  except
+    on E: Exception do
+    begin
+      // 窓口が開けなかった（ライブラリが無い、netlink が使えない）。スレッドの道へ譲る
+      FLastError := E.ClassName + ': ' + E.Message;
+      FSource := nil;
+      FUsingUdev := False;
+    end;
+  end;
+  Result := FUsingUdev;
+end;
+
+procedure TPMLAlsaHotplugDriver.Poll;
+begin
+  if FUsingUdev then
+    FSource.Poll;
+end;
+
+procedure TPMLAlsaHotplugDriver.Stop;
+begin
+  if FUsingUdev then
+  begin
+    FSource.Stop;
+    FSource := nil;
+    FUsingUdev := False;
+  end;
+end;
+
 { ---- 列挙と hotplug ---- }
 
 { hotplug_device_process。1 つの PCM の（再生か録音の）サブデバイスを見る。見えたものを ASeen に、
@@ -1274,17 +1480,21 @@ begin
     ADefaultRecording := FCore.AddDevice(True, 'ALSA default recording device', '',
       TPMLAudioSpec.Make(0, 0, 0), FDefaultRecording);
 
-  // udev は使わない（SDL の udev 無しの道）。スレッドが起きなければ、それ以後の hotplug は無い
-  FHotplugShutdown.Exchange(0);
-  try
-    Thr := TAlsaHotplugThread.Create(Self);
-    FHotplugThread := Thr;
-    Thr.Start;
-  except
-    on E: Exception do
-    begin
-      NoteError(E, 'hotplug thread');
-      FHotplugThread := nil;
+  // udev が使えれば知らせで走査する（Pump から）。使えなければ走査のスレッド（SDL どおり）。
+  // スレッドが起きなければ、それ以後の hotplug は無い
+  if not FHotplug.StartUdev then
+  begin
+    FHotplugShutdown.Exchange(0);
+    try
+      Thr := TAlsaHotplugThread.Create(Self);
+      FHotplugThread := Thr;
+      Thr.Start;
+    except
+      on E: Exception do
+      begin
+        NoteError(E, 'hotplug thread');
+        FHotplugThread := nil;
+      end;
     end;
   end;
 end;
@@ -1299,6 +1509,7 @@ procedure TPMLAlsaAudioBackend.DeinitializeStart;
 var
   Thr: TPMLThread;
 begin
+  FHotplug.Stop;
   Thr := FHotplugThread;
   if Thr <> nil then
   begin
@@ -1318,6 +1529,11 @@ end;
 
 procedure TPMLAlsaAudioBackend.Deinitialize;
 begin
+end;
+
+procedure TPMLAlsaAudioBackend.PumpEvents;
+begin
+  FHotplug.Poll;
 end;
 
 function CreateAlsaBackend(ACore: TPMLAudioCore): TPMLAudioBackend;
