@@ -115,6 +115,23 @@ jobs:
           # 環境変数 MOZC_IBUS_CANDIDATE_WINDOW=ibus で IBus の表にさせる（ibus-engine-mozc の文字列で確認）
           MOZC_IBUS_CANDIDATE_WINDOW=ibus sh tools/ibus-sandbox/ibus-session ./test/test_ibus_candidates_live
 
+      # 診断（検査ではない）: mozc 以外のエンジンが送るプリエディットの属性・候補・ForwardKeyEvent を記録する。
+      # 結果は CI のログで読み、TPMLIBusSegmenter の規則と検査に反映する（T-101）。
+      - name: IBus with other engines (probe, informational)
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          sudo apt-get install -y --no-install-recommends ibus-anthy ibus-skk ibus-libpinyin ibus-hangul
+          fpc -O1 -Fisrc -Fusrc -Fusrc/generated -FUlib -otest/probe_ibus_engine test/probe_ibus_engine.pas
+          probe() {
+            echo "######## $1 : $2"
+            IBUS_ENGINE=$1 PROBE_KEYS=$2 sh tools/ibus-sandbox/ibus-session sh -c 'ibus list-engine | grep -i "$IBUS_ENGINE" | head -5; ./test/probe_ibus_engine' || echo "(失敗: $?)"
+          }
+          probe anthy 'watashinonamaeha<SP><SP><RET>'
+          probe skk 'WatashinoNamaeha<SP><RET>'
+          probe libpinyin 'nihaoshijie<SP><RET>'
+          probe hangul 'gksrmf<SP><RET>'
+
       - name: Build and self-test examples
         run: |
           set -eu

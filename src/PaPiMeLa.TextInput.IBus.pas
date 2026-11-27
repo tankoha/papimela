@@ -161,6 +161,7 @@ type
     FCandidates  : TPMLFcitxCandidateTracker;
     FLookup      : TPMLIBusLookupTable;   // 最後に届いた候補の表（ShowLookupTable で出し直す）
     FLookupLog   : String;                // 診断用: 届いた候補の信号の記録
+    FPreeditLog  : String;                // 診断用: 届いたプリエディットの生の属性の記録（上限つき）
     function  OpenConnection: Boolean;
     procedure CloseConnection;
     procedure ConnectionLost;
@@ -171,6 +172,7 @@ type
     // 出していた候補があれば、空の一覧で消す。Sink が無ければ内容を忘れるだけ。
     procedure ClearCandidates;
     procedure LogLookup(const AText: String);
+    procedure LogPreedit(const AText: TPMLIBusText; ACursor: LongWord; AVisible: Boolean);
     // FLookup の 1 ページ分を、前に出したものと違えば CandidatesChanged で出す。
     procedure ApplyLookup;
     procedure HandleLookupTable(AMsg: PDBusMessage);
@@ -204,6 +206,8 @@ type
     property LastNonFatalError: String read FLastNonFatalError;
     // 候補に関する信号（UpdateLookupTable など）と読み取りの結果の記録。診断用（長くなったら止める）
     property LookupLog: String read FLookupLog;
+    // 診断用。UpdatePreeditText ごとの「文字列 { 型:値:開始-終了 ... } cursor」を 6000 文字まで。
+    property PreeditLog: String read FPreeditLog;
   end;
 
 { IBusText（variant）を読む。AReader は variant を指していること。型名が違えば False。 }
@@ -980,6 +984,22 @@ begin
     FSink.CompositionChanged(FComposition);
 end;
 
+procedure TPMLIBusTextInputBackend.LogPreedit(const AText: TPMLIBusText; ACursor: LongWord;
+  AVisible: Boolean);
+var
+  I: Integer;
+  S: String;
+begin
+  if Length(FPreeditLog) >= 6000 then
+    Exit;
+  S := '';
+  for I := 0 to High(AText.Attributes) do
+    S := S + Format(' %d:%d:%d-%d', [AText.Attributes[I].AttrType, AText.Attributes[I].Value,
+      AText.Attributes[I].StartChar, AText.Attributes[I].EndChar]);
+  FPreeditLog := FPreeditLog + Format('[%s]{%s} cur=%d vis=%s' + LineEnding,
+    [AText.Text, S, ACursor, BoolToStr(AVisible, True)]);
+end;
+
 procedure TPMLIBusTextInputBackend.LogLookup(const AText: String);
 begin
   if Length(FLookupLog) < 1500 then
@@ -1128,6 +1148,7 @@ begin
       Cursor := R.AsUInt32;
     R.Next;
     Visible := (R.ArgType = DBUS_TYPE_BOOLEAN) and R.AsBoolean;
+    LogPreedit(T, Cursor, Visible);
     FPreedit := TPMLIBusSegmenter.Build(T, Integer(Cursor));
     if Visible then
       SetComposition(FPreedit)

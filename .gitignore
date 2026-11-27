@@ -19,6 +19,7 @@ test/test_fcitx_candidates_live
 test/test_ibus_candidates
 test/test_ibus_candidates_live
 test/test_ibus_forward
+test/probe_ibus_engine
 
 # 生成器とテストの実行ファイル
 tools/wlscan-pas
